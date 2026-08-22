@@ -1,0 +1,199 @@
+"use client";
+
+import * as React from "react";
+import { SearchIcon, UsersRoundIcon } from "lucide-react";
+
+import type { StudentDTO } from "@/actions/students";
+import { AddStudentDialog } from "@/components/students/add-student-dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  STUDENT_STATUS_FILTERS,
+  getStudentStatusBadgeClass,
+  getStudentStatusLabel,
+  type StudentStatusFilter,
+} from "@/lib/student-status";
+import { cn } from "@/lib/utils";
+
+// Formatage déterministe (locale + fuseau fixes) pour éviter tout écart d'hydratation.
+const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+const BADGE_BASE_CLASSES =
+  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
+
+export function StudentsView({ students }: { students: StudentDTO[] }) {
+  const [search, setSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] =
+    React.useState<StudentStatusFilter>("ALL");
+
+  const filteredStudents = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return students.filter((student) => {
+      if (statusFilter !== "ALL" && student.status !== statusFilter) {
+        return false;
+      }
+
+      if (!query) return true;
+
+      return (
+        student.firstName.toLowerCase().includes(query) ||
+        student.lastName.toLowerCase().includes(query) ||
+        student.studentCode.toLowerCase().includes(query) ||
+        student.phone.toLowerCase().includes(query) ||
+        (student.email?.toLowerCase().includes(query) ?? false)
+      );
+    });
+  }, [students, search, statusFilter]);
+
+  const hasStudents = students.length > 0;
+  const hasResults = filteredStudents.length > 0;
+
+  return (
+    <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
+      {/* En-tête de page */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">Étudiants</h2>
+          <p className="text-sm text-muted-foreground">
+            Gérez les étudiants de votre centre de formation.
+          </p>
+        </div>
+        <AddStudentDialog />
+      </div>
+
+      {/* Carte : barre d'outils + tableau */}
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
+          {/* Recherche instantanée */}
+          <div className="relative w-full lg:max-w-xs">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Rechercher par nom, code, email..."
+              aria-label="Rechercher un étudiant"
+              className="pl-8"
+            />
+          </div>
+
+          {/* Filtres par statut */}
+          <div
+            role="group"
+            aria-label="Filtrer par statut"
+            className="flex flex-wrap items-center gap-1"
+          >
+            {STUDENT_STATUS_FILTERS.map((filter) => {
+              const isActive = statusFilter === filter.value;
+
+              return (
+                <Button
+                  key={filter.value}
+                  type="button"
+                  variant={isActive ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={isActive}
+                  onClick={() => setStatusFilter(filter.value)}
+                >
+                  {filter.label}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+
+        {hasStudents ? (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Étudiant</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Téléphone</TableHead>
+                  <TableHead>Statut</TableHead>
+                  <TableHead>Ajouté le</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredStudents.map((student) => (
+                  <TableRow key={student.id}>
+                    <TableCell>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-medium">
+                          {student.firstName} {student.lastName}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {student.studentCode}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {student.email ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {student.phone}
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={cn(
+                          BADGE_BASE_CLASSES,
+                          getStudentStatusBadgeClass(student.status)
+                        )}
+                      >
+                        {getStudentStatusLabel(student.status)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {dateFormatter.format(student.createdAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            {!hasResults ? (
+              <div className="flex flex-col items-center justify-center gap-1 px-6 py-12 text-center">
+                <SearchIcon className="size-8 text-muted-foreground/50" />
+                <p className="text-sm font-medium">Aucun résultat trouvé</p>
+                <p className="text-sm text-muted-foreground">
+                  Essayez un autre terme de recherche ou changez de filtre de
+                  statut.
+                </p>
+              </div>
+            ) : (
+              <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+                {filteredStudents.length} étudiant
+                {filteredStudents.length > 1 ? "s" : ""} sur {students.length}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
+            <div className="flex size-12 items-center justify-center rounded-full bg-muted">
+              <UsersRoundIcon className="size-6 text-muted-foreground" />
+            </div>
+            <p className="font-medium">Aucun étudiant pour le moment</p>
+            <p className="max-w-sm text-sm text-muted-foreground">
+              Commencez par ajouter votre premier étudiant avec le bouton
+              « Nouvel étudiant ».
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
