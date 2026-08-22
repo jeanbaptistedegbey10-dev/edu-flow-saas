@@ -53,7 +53,7 @@ const mainMenu = [
   },
   {
     title: "Procédures voyage",
-    url: "/dashboard/travel",
+    url: "/dashboard/travels",
     icon: PlaneTakeoff,
   },
 ]
