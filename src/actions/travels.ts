@@ -4,6 +4,7 @@ import { type TravelStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
+import { getCurrentOrganizationId } from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -70,26 +71,6 @@ const TRAVEL_STATUSES: readonly TravelStatus[] = [
   "DEPARTURE_READY",
   "COMPLETED",
 ];
-
-/**
- * Résout l'identifiant de l'organisation active.
- *
- * Isolation multi-tenant : toutes les requêtes sont filtrées par `organizationId`.
- * TODO: remplacer ce placeholder par la session utilisateur réelle
- * lorsque le module Auth (Supabase Auth / Auth.js) sera implémenté.
- */
-async function getCurrentOrganizationId(): Promise<string> {
-  const organization = await prisma.organization.findFirst({
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
-
-  if (!organization) {
-    throw new Error("Aucune organisation n'a été trouvée.");
-  }
-
-  return organization.id;
-}
 
 type ParsedTravelInput =
   | {

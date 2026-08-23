@@ -4,6 +4,7 @@ import { Prisma, type Role } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
+import { getCurrentOrganizationId } from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -64,26 +65,6 @@ const MAX_DURATION_WEEKS = 520;
  * tirets (ex : « GER-A1 », « DEV-FULL »), sans tiret en début/fin.
  */
 const COURSE_CODE_REGEX = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
-
-/**
- * Résout l'identifiant de l'organisation active.
- *
- * Isolation multi-tenant : toutes les requêtes sont filtrées par `organizationId`.
- * TODO: remplacer ce placeholder par la session utilisateur réelle
- * lorsque le module Auth (Supabase Auth / Auth.js) sera implémenté.
- */
-async function getCurrentOrganizationId(): Promise<string> {
-  const organization = await prisma.organization.findFirst({
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
-
-  if (!organization) {
-    throw new Error("Aucune organisation n'a été trouvée.");
-  }
-
-  return organization.id;
-}
 
 type ParsedCourseInput =
   | {

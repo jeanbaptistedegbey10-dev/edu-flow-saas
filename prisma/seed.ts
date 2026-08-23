@@ -1,6 +1,11 @@
+import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+/** Mot de passe commun à tous les comptes de démonstration. */
+const DEMO_PASSWORD = "password123";
+const demoPasswordHash = bcrypt.hashSync(DEMO_PASSWORD, 10);
 
 async function main() {
   console.log("🌱 Seeding database...");
@@ -47,7 +52,7 @@ async function main() {
     data: {
       organizationId: org1.id,
       email: "admin@excellence-formation.com",
-      passwordHash: "$2b$10$hashed-placeholder",
+      passwordHash: demoPasswordHash,
       firstName: "Jean",
       lastName: "Dupont",
       role: "ADMIN",
@@ -58,7 +63,7 @@ async function main() {
     data: {
       organizationId: org1.id,
       email: "teacher@excellence-formation.com",
-      passwordHash: "$2b$10$hashed-placeholder",
+      passwordHash: demoPasswordHash,
       firstName: "Marie",
       lastName: "Kouassi",
       role: "TEACHER",
@@ -69,7 +74,7 @@ async function main() {
     data: {
       organizationId: org1.id,
       email: "staff@excellence-formation.com",
-      passwordHash: "$2b$10$hashed-placeholder",
+      passwordHash: demoPasswordHash,
       firstName: "Paul",
       lastName: "N'Guessan",
       role: "STAFF",
@@ -80,7 +85,7 @@ async function main() {
     data: {
       organizationId: org2.id,
       email: "admin@horizon-mobilite.com",
-      passwordHash: "$2b$10$hashed-placeholder",
+      passwordHash: demoPasswordHash,
       firstName: "Sophie",
       lastName: "Bamba",
       role: "ADMIN",
@@ -411,6 +416,11 @@ async function main() {
 
   console.log("✅ Seed completed successfully!");
   console.log(`   Organizations: ${org1.name}, ${org2.name}`);
+  console.log(`   🔑 Comptes de démonstration (mot de passe : ${DEMO_PASSWORD}) :`);
+  console.log(`      - ${admin1.email} (ADMIN)`);
+  console.log(`      - ${teacher1.email} (TEACHER)`);
+  console.log(`      - ${staff1.email} (STAFF)`);
+  console.log(`      - ${admin2.email} (ADMIN)`);
   console.log(`   Students: ${student1.studentCode}, ${student2.studentCode}, ${student3.studentCode}, ${student4.studentCode}`);
   console.log(`   Courses: ${course1.code}, ${course2.code}, ${course3.code}, ${course4.code}`);
 }

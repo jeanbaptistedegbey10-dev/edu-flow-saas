@@ -1,0 +1,115 @@
+import bcrypt from "bcryptjs";
+import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+
+import { prisma } from "@/lib/prisma";
+
+// --------------------------------------
+// Configuration NextAuth v5 (Auth.js)
+// --------------------------------------
+//
+// Authentification par identifiants (email + mot de passe hashé avec bcrypt).
+// Stratégie de session : JWT (requis pour le provider Credentials),
+// ce qui permet au middleware/proxy de vérifier l'authentification
+// sans accès à la base de données.
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Stratégie JWT obligatoire avec CredentialsProvider (pas de sessions base de données).
+  session: {
+    strategy: "jwt",
+  },
+
+  // Nécessaire lorsque l'application est déployée derrière un proxy / sur Vercel.
+  trustHost: true,
+
+  pages: {
+    signIn: "/login",
+  },
+
+  providers: [
+    Credentials({
+      name: "credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Mot de passe", type: "password" },
+      },
+
+      /**
+       * Vérifie les identifiants soumis :
+       * 1. Recherche de l'utilisateur par email (normalisé en minuscules).
+       * 2. Vérification que le compte est actif.
+       * 3. Comparaison du mot de passe avec le hash bcrypt stocké.
+       *
+       * Retourne `null` en cas d'échec → NextAuth renvoie une erreur
+       * `CredentialsSignin` côté client (message générique, sans fuite d'information).
+       */
+      async authorize(credentials) {
+        const email =
+          typeof credentials?.email === "string"
+            ? credentials.email.trim().toLowerCase()
+            : null;
+        const password =
+          typeof credentials?.password === "string" ? credentials.password : null;
+
+        if (!email || !password) {
+          return null;
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { email },
+        });
+
+        // Compte inexistant ou désactivé : même réponse générique.
+        if (!user || !user.isActive) {
+          return null;
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+
+        if (!isPasswordValid) {
+          return null;
+        }
+
+        // Les champs `role` et `organizationId` sont propagés dans le token JWT
+        // via le callback `jwt` ci-dessous (voir src/types/next-auth.d.ts).
+        return {
+          id: user.id,
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          image: user.avatarUrl ?? undefined,
+          role: user.role,
+          organizationId: user.organizationId,
+        };
+      },
+    }),
+  ],
+
+  callbacks: {
+    /**
+     * Au moment de la connexion (`user` présent), copie les informations
+     * multi-tenant dans le token JWT. Sur les appels suivants, le token
+     * enrichi est simplement réutilisé.
+     */
+    jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.role = user.role;
+        token.organizationId = user.organizationId;
+      }
+
+      return token;
+    },
+
+    /**
+     * Expose `id`, `role` et `organizationId` sur `session.user`
+     * pour l'ensemble de l'application (Server Components, Server Actions…).
+     */
+    session({ session, token }) {
+      session.user.id = token.id;
+      session.user.role = token.role;
+      session.user.organizationId = token.organizationId;
+
+      return session;
+    },
+  },
+});
