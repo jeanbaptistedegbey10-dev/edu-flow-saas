@@ -1,3 +1,4 @@
+import { auth } from "@/auth";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -7,14 +8,18 @@ import {
 } from "@/components/ui/sidebar";
 import { Bell, Search } from "lucide-react";
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Session NextAuth résolue côté serveur puis transmise au composant
+  // client `AppSidebar` (évite un SessionProvider dédié côté client).
+  const session = await auth();
+
   return (
     <SidebarProvider>
-      <AppSidebar />
+      <AppSidebar user={session?.user} />
       <SidebarInset>
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
           <SidebarTrigger className="-ml-1" />

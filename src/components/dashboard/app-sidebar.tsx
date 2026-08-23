@@ -11,7 +11,6 @@ import {
   GraduationCap,
   CalendarDays,
   FileText,
-  ListTodo,
   Building2,
 } from "lucide-react"
 
@@ -28,6 +27,8 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
+
+import { NavUser, type SessionUser } from "@/components/dashboard/nav-user"
 
 // Menu data
 const mainMenu = [
@@ -89,7 +90,15 @@ const organizationMenu = [
   },
 ]
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  /**
+   * Utilisateur connecté (issu de la session NextAuth résolue côté serveur
+   * dans `src/app/dashboard/layout.tsx`).
+   */
+  user?: SessionUser | null
+}
+
+export function AppSidebar({ user }: AppSidebarProps) {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -156,6 +165,10 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        {/* Pied de page : profil de l'utilisateur connecté + déconnexion */}
+        <NavUser user={user} />
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )
