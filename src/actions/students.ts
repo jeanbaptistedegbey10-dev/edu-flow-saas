@@ -31,6 +31,11 @@ export type StudentFormState = {
   fieldErrors?: Partial<Record<StudentFormField, string>>;
 };
 
+/** Résultat des mutations rapides (suppression) côté client. */
+export type StudentMutationResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
 // --------------------------------------
 // Constantes & helpers internes
 // --------------------------------------
@@ -222,4 +227,121 @@ export async function createStudentAction(
     status: "error",
     message: "Une erreur est survenue lors de la création de l'étudiant.",
   };
+}
+
+/**
+ * Met à jour un étudiant existant de l'organisation active.
+ * Conçu pour être utilisé avec `useActionState` : reçoit l'état précédent et un `FormData`
+ * (incluant le champ caché `id`), retourne un état sérialisable.
+ */
+export async function updateStudentAction(
+  _prevState: StudentFormState,
+  formData: FormData
+): Promise<StudentFormState> {
+  const studentId = String(formData.get("id") ?? "").trim();
+
+  if (!studentId) {
+    return {
+      status: "error",
+      message: "Identifiant de l'étudiant manquant.",
+    };
+  }
+
+  const parsed = parseStudentForm(formData);
+
+  if (!parsed.ok) {
+    return {
+      status: "error",
+      message: "Veuillez corriger les champs indiqués.",
+      fieldErrors: parsed.fieldErrors,
+    };
+  }
+
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    // Isolation multi-tenant : l'étudiant doit appartenir à l'organisation active.
+    const existing = await prisma.student.findFirst({
+      where: { id: studentId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        status: "error",
+        message: "Étudiant introuvable dans votre organisation.",
+      };
+    }
+
+    await prisma.student.update({
+      where: { id: studentId },
+      data: {
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName,
+        email: parsed.data.email,
+        phone: parsed.data.phone,
+        status: parsed.data.status,
+      },
+    });
+
+    revalidatePath("/dashboard/students");
+
+    return {
+      status: "success",
+      message: "Étudiant mis à jour avec succès.",
+    };
+  } catch (error) {
+    console.error("[updateStudentAction] Échec de mise à jour :", error);
+
+    return {
+      status: "error",
+      message: "Une erreur est survenue lors de la mise à jour de l'étudiant.",
+    };
+  }
+}
+
+/**
+ * Supprime un étudiant de l'organisation active.
+ * Les inscriptions, paiements et dossiers de voyage liés sont supprimés en
+ * cascade ; les tâches associées sont simplement détachées (`SetNull`).
+ */
+export async function deleteStudentAction(
+  studentId: string
+): Promise<StudentMutationResult> {
+  if (!studentId) {
+    return { ok: false, message: "Identifiant de l'étudiant manquant." };
+  }
+
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    // Isolation multi-tenant : l'étudiant doit appartenir à l'organisation active.
+    const existing = await prisma.student.findFirst({
+      where: { id: studentId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        ok: false,
+        message: "Étudiant introuvable dans votre organisation.",
+      };
+    }
+
+    await prisma.student.delete({ where: { id: studentId } });
+
+    revalidatePath("/dashboard/students");
+    revalidatePath("/dashboard/payments");
+    revalidatePath("/dashboard/travels");
+
+    return { ok: true };
+  } catch (error) {
+    console.error("[deleteStudentAction] Échec de suppression :", error);
+
+    return {
+      ok: false,
+      message:
+        "Une erreur est survenue lors de la suppression de l'étudiant.",
+    };
+  }
 }

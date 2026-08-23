@@ -18,8 +18,11 @@ import type {
   PaymentDTO,
   StudentOptionDTO,
 } from "@/actions/payments";
+import { deletePaymentAction } from "@/actions/payments";
 import { AddPaymentDialog } from "@/components/payments/add-payment-dialog";
+import { EditPaymentDialog } from "@/components/payments/edit-payment-dialog";
 import { PaymentReceiptDialog } from "@/components/payments/payment-receipt-dialog";
+import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -134,14 +137,16 @@ function StatCard({
   value: string;
 }) {
   return (
-    <div className="rounded-lg border bg-card p-4 shadow-sm">
+    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{label}</p>
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
-          <Icon className="size-4 text-muted-foreground" />
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Icon className="size-4.5" />
         </div>
       </div>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 text-2xl font-bold tracking-tight tabular-nums">
+        {value}
+      </p>
     </div>
   );
 }
@@ -165,6 +170,8 @@ export function PaymentsView({
   const [methodFilter, setMethodFilter] = React.useState<MethodFilter>("ALL");
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("ALL");
   const [receiptPayment, setReceiptPayment] =
+    React.useState<PaymentDTO | null>(null);
+  const [editingPayment, setEditingPayment] =
     React.useState<PaymentDTO | null>(null);
 
   /** Recherche instantanée par étudiant (nom, code) ou référence + filtres. */
@@ -247,7 +254,7 @@ export function PaymentsView({
       </div>
 
       {/* Carte : barre d'outils + tableau */}
-      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
         <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
           {/* Recherche instantanée */}
           <div className="relative w-full lg:max-w-xs">
@@ -342,7 +349,9 @@ export function PaymentsView({
                   <TableHead>Statut</TableHead>
                   <TableHead>Référence</TableHead>
                   <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-right">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -382,16 +391,25 @@ export function PaymentsView({
                       {dateFormatter.format(payment.paidAt)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Imprimer / Reçu PDF"
-                        title="Imprimer / Reçu PDF"
-                        onClick={() => setReceiptPayment(payment)}
-                      >
-                        <PrinterIcon />
-                      </Button>
+                      <div className="flex items-center justify-end gap-0.5">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Imprimer / Reçu PDF"
+                          title="Imprimer / Reçu PDF"
+                          onClick={() => setReceiptPayment(payment)}
+                        >
+                          <PrinterIcon />
+                        </Button>
+                        <EntityActionsMenu
+                          entityName={`le paiement de ${
+                            payment.reference ?? formatAmount(payment.amount)
+                          }`}
+                          onEdit={() => setEditingPayment(payment)}
+                          onDelete={() => deletePaymentAction(payment.id)}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -434,6 +452,16 @@ export function PaymentsView({
         open={receiptPayment !== null}
         onOpenChange={(open) => {
           if (!open) setReceiptPayment(null);
+        }}
+      />
+
+      {/* Modale d'édition pré-remplie */}
+      <EditPaymentDialog
+        payment={editingPayment}
+        students={students}
+        open={editingPayment !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingPayment(null);
         }}
       />
     </div>

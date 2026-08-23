@@ -74,6 +74,11 @@ export type PaymentFormState = {
   fieldErrors?: Partial<Record<PaymentFormField, string>>;
 };
 
+/** Résultat des mutations rapides (suppression) côté client. */
+export type PaymentMutationResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
 // --------------------------------------
 // Constantes & helpers internes
 // --------------------------------------
@@ -381,6 +386,148 @@ export async function createPaymentAction(
       status: "error",
       message:
         "Une erreur est survenue lors de l'enregistrement du paiement.",
+    };
+  }
+}
+
+/**
+ * Met à jour un règlement existant de l'organisation active.
+ * Conçu pour être utilisé avec `useActionState` : reçoit l'état précédent et un `FormData`
+ * (incluant le champ caché `id`), retourne un état sérialisable.
+ */
+export async function updatePaymentAction(
+  _prevState: PaymentFormState,
+  formData: FormData
+): Promise<PaymentFormState> {
+  const paymentId = String(formData.get("id") ?? "").trim();
+
+  if (!paymentId) {
+    return {
+      status: "error",
+      message: "Identifiant du paiement manquant.",
+    };
+  }
+
+  const parsed = parsePaymentForm(formData);
+
+  if (!parsed.ok) {
+    return {
+      status: "error",
+      message: "Veuillez corriger les champs indiqués.",
+      fieldErrors: parsed.fieldErrors,
+    };
+  }
+
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    // Isolation multi-tenant : le règlement doit appartenir à l'organisation active.
+    const existing = await prisma.payment.findFirst({
+      where: { id: paymentId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        status: "error",
+        message: "Paiement introuvable dans votre organisation.",
+      };
+    }
+
+    // Vérifie que l'étudiant ciblé appartient bien à l'organisation active.
+    const student = await prisma.student.findFirst({
+      where: { id: parsed.data.studentId, organizationId },
+      select: { id: true },
+    });
+
+    if (!student) {
+      return {
+        status: "error",
+        message: "Étudiant introuvable dans votre organisation.",
+        fieldErrors: { studentId: "Étudiant introuvable." },
+      };
+    }
+
+    await prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        studentId: parsed.data.studentId,
+        amount: parsed.data.amount,
+        paymentMethod: parsed.data.paymentMethod,
+        status: parsed.data.status,
+        reference: parsed.data.reference,
+        description: parsed.data.description,
+      },
+    });
+
+    revalidatePath("/dashboard/payments");
+
+    return {
+      status: "success",
+      message: "Paiement mis à jour avec succès.",
+    };
+  } catch (error) {
+    // Contrainte unique sur `reference` : numéro de transaction déjà utilisé.
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return {
+        status: "error",
+        message: "Cette référence de paiement est déjà utilisée.",
+        fieldErrors: { reference: "Cette référence est déjà utilisée." },
+      };
+    }
+
+    console.error("[updatePaymentAction] Échec de mise à jour :", error);
+
+    return {
+      status: "error",
+      message:
+        "Une erreur est survenue lors de la mise à jour du paiement.",
+    };
+  }
+}
+
+/**
+ * Supprime un règlement de l'organisation active.
+ */
+export async function deletePaymentAction(
+  paymentId: string
+): Promise<PaymentMutationResult> {
+  if (!paymentId) {
+    return { ok: false, message: "Identifiant du paiement manquant." };
+  }
+
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    // Isolation multi-tenant : le règlement doit appartenir à l'organisation active.
+    const existing = await prisma.payment.findFirst({
+      where: { id: paymentId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        ok: false,
+        message: "Paiement introuvable dans votre organisation.",
+      };
+    }
+
+    await prisma.payment.delete({ where: { id: paymentId } });
+
+    revalidatePath("/dashboard/payments");
+    revalidatePath("/dashboard");
+
+    return { ok: true };
+  } catch (error) {
+    console.error("[deletePaymentAction] Échec de suppression :", error);
+
+    return {
+      ok: false,
+      message:
+        "Une erreur est survenue lors de la suppression du paiement.",
     };
   }
 }

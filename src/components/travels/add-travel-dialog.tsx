@@ -35,7 +35,7 @@ import {
 } from "@/lib/travel-status";
 
 /** Destinations courantes proposées dans le formulaire. */
-const DESTINATION_OPTIONS = [
+export const DESTINATION_OPTIONS = [
   "Allemagne",
   "Autriche",
   "Belgique",

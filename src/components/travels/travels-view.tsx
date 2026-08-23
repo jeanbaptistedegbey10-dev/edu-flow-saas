@@ -22,7 +22,10 @@ import {
   type TravelProcedureDTO,
   type UpdateTravelStatusResult,
 } from "@/actions/travels";
+import { deleteTravelProcedureAction } from "@/actions/travels";
 import { AddTravelDialog } from "@/components/travels/add-travel-dialog";
+import { EditTravelDialog } from "@/components/travels/edit-travel-dialog";
+import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -81,14 +84,16 @@ function StatCard({
   value: number;
 }) {
   return (
-    <div className="rounded-lg border bg-card p-4 shadow-sm">
+    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{label}</p>
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
-          <Icon className="size-4 text-muted-foreground" />
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Icon className="size-4.5" />
         </div>
       </div>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 text-2xl font-bold tracking-tight tabular-nums">
+        {value}
+      </p>
     </div>
   );
 }
@@ -150,19 +155,31 @@ function TravelStatusSelect({
 function TravelCard({
   procedure,
   onStatusResult,
+  onEdit,
 }: {
   procedure: TravelProcedureDTO;
   onStatusResult: (result: UpdateTravelStatusResult) => void;
+  onEdit: (procedure: TravelProcedureDTO) => void;
 }) {
   return (
-    <article className="rounded-lg border bg-card p-3 shadow-sm">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium leading-tight">
-          {procedure.student.firstName} {procedure.student.lastName}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {procedure.student.studentCode}
-        </span>
+    <article className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-3 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm font-medium leading-tight">
+            {procedure.student.firstName} {procedure.student.lastName}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {procedure.student.studentCode}
+          </span>
+        </div>
+
+        <EntityActionsMenu
+          entityName={`le dossier de ${procedure.student.firstName} ${
+            procedure.student.lastName
+          } (${procedure.destination})`}
+          onEdit={() => onEdit(procedure)}
+          onDelete={() => deleteTravelProcedureAction(procedure.id)}
+        />
       </div>
 
       <div className="mt-2 space-y-1 text-xs text-muted-foreground">
@@ -201,10 +218,12 @@ function KanbanColumn({
   status,
   procedures,
   onStatusResult,
+  onEdit,
 }: {
   status: TravelStatus;
   procedures: TravelProcedureDTO[];
   onStatusResult: (result: UpdateTravelStatusResult) => void;
+  onEdit: (procedure: TravelProcedureDTO) => void;
 }) {
   return (
     <section
@@ -230,6 +249,7 @@ function KanbanColumn({
               key={procedure.id}
               procedure={procedure}
               onStatusResult={onStatusResult}
+              onEdit={onEdit}
             />
           ))
         )}
@@ -253,6 +273,8 @@ export function TravelsView({
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("ALL");
   const [viewMode, setViewMode] = React.useState<ViewMode>("kanban");
   const [statusError, setStatusError] = React.useState<string | null>(null);
+  const [editingProcedure, setEditingProcedure] =
+    React.useState<TravelProcedureDTO | null>(null);
 
   const handleStatusResult = React.useCallback(
     (result: UpdateTravelStatusResult) => {
@@ -364,7 +386,7 @@ export function TravelsView({
       </div>
 
       {/* Carte principale : barre d'outils + vue Kanban / Liste */}
-      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
         <div className="flex flex-col gap-3 border-b p-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
           {/* Recherche instantanée */}
           <div className="relative w-full 2xl:max-w-xs">
@@ -463,6 +485,7 @@ export function TravelsView({
                       status={status}
                       procedures={groupedByStatus.get(status) ?? []}
                       onStatusResult={handleStatusResult}
+                      onEdit={setEditingProcedure}
                     />
                   ))}
                 </div>
@@ -489,6 +512,9 @@ export function TravelsView({
                     <TableHead>Statut</TableHead>
                     <TableHead>Conseiller</TableHead>
                     <TableHead>Ouvert le</TableHead>
+                    <TableHead className="text-right">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -526,6 +552,19 @@ export function TravelsView({
                       <TableCell className="text-muted-foreground">
                         {dateFormatter.format(procedure.createdAt)}
                       </TableCell>
+                      <TableCell className="text-right">
+                        <EntityActionsMenu
+                          entityName={`le dossier de ${
+                            procedure.student.firstName
+                          } ${procedure.student.lastName} (${
+                            procedure.destination
+                          })`}
+                          onEdit={() => setEditingProcedure(procedure)}
+                          onDelete={() =>
+                            deleteTravelProcedureAction(procedure.id)
+                          }
+                        />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -560,6 +599,16 @@ export function TravelsView({
           </div>
         )}
       </div>
+
+      {/* Modale d'édition pré-remplie */}
+      <EditTravelDialog
+        procedure={editingProcedure}
+        students={students}
+        open={editingProcedure !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingProcedure(null);
+        }}
+      />
     </div>
   );
 }

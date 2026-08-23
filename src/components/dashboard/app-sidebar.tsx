@@ -102,12 +102,12 @@ export function AppSidebar({ user }: AppSidebarProps) {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <div className="flex items-center gap-2.5 px-2 py-1.5">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm transition-all duration-200">
             <GraduationCap className="size-5" />
           </div>
           <div className="flex flex-col leading-tight group-data-[collapsible=icon]:hidden">
-            <span className="text-sm font-semibold">EduFlow</span>
+            <span className="text-sm font-bold tracking-tight">EduFlow</span>
             <span className="text-xs text-muted-foreground">Centre de Formation</span>
           </div>
         </div>

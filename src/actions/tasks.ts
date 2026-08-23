@@ -68,6 +68,11 @@ export type UpdateTaskStatusState = {
   message?: string;
 };
 
+/** Résultat des mutations rapides (suppression) côté client. */
+export type TaskMutationResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
 // --------------------------------------
 // Constantes & helpers internes
 // --------------------------------------
@@ -392,6 +397,153 @@ export async function updateTaskStatusAction(
       status: "error",
       message:
         "Une erreur est survenue lors de la mise à jour du statut.",
+    };
+  }
+}
+
+/**
+ * Met à jour une tâche existante de l'organisation active.
+ * Conçue pour être utilisée avec `useActionState` : reçoit l'état précédent
+ * et un `FormData` (incluant le champ caché `id`), retourne un état sérialisable.
+ */
+export async function updateTaskAction(
+  _prevState: TaskFormState,
+  formData: FormData
+): Promise<TaskFormState> {
+  const taskId = String(formData.get("id") ?? "").trim();
+
+  if (!taskId) {
+    return {
+      status: "error",
+      message: "Identifiant de la tâche manquant.",
+    };
+  }
+
+  const parsed = parseTaskForm(formData);
+
+  if (!parsed.ok) {
+    return {
+      status: "error",
+      message: "Veuillez corriger les champs indiqués.",
+      fieldErrors: parsed.fieldErrors,
+    };
+  }
+
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    // Isolation multi-tenant : la tâche doit appartenir à l'organisation active.
+    const existing = await prisma.task.findFirst({
+      where: { id: taskId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        status: "error",
+        message: "Tâche introuvable dans votre organisation.",
+      };
+    }
+
+    // Vérifie que l'assigné appartient bien à l'organisation active.
+    if (parsed.data.assigneeId) {
+      const assignee = await prisma.user.findFirst({
+        where: { id: parsed.data.assigneeId, organizationId },
+        select: { id: true },
+      });
+
+      if (!assignee) {
+        return {
+          status: "error",
+          message: "Membre introuvable dans votre organisation.",
+          fieldErrors: { assigneeId: "Membre introuvable." },
+        };
+      }
+    }
+
+    // Vérifie que l'étudiant associé appartient bien à l'organisation active.
+    if (parsed.data.studentId) {
+      const student = await prisma.student.findFirst({
+        where: { id: parsed.data.studentId, organizationId },
+        select: { id: true },
+      });
+
+      if (!student) {
+        return {
+          status: "error",
+          message: "Étudiant introuvable dans votre organisation.",
+          fieldErrors: { studentId: "Étudiant introuvable." },
+        };
+      }
+    }
+
+    await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        title: parsed.data.title,
+        description: parsed.data.description,
+        priority: parsed.data.priority,
+        status: parsed.data.status,
+        dueDate: parsed.data.dueDate,
+        assigneeId: parsed.data.assigneeId,
+        studentId: parsed.data.studentId,
+      },
+    });
+
+    revalidatePath("/dashboard/tasks");
+
+    return {
+      status: "success",
+      message: "Tâche mise à jour avec succès.",
+    };
+  } catch (error) {
+    console.error("[updateTaskAction] Échec de mise à jour :", error);
+
+    return {
+      status: "error",
+      message: "Une erreur est survenue lors de la mise à jour de la tâche.",
+    };
+  }
+}
+
+/**
+ * Supprime une tâche de l'organisation active.
+ */
+export async function deleteTaskAction(
+  taskId: string
+): Promise<TaskMutationResult> {
+  if (!taskId) {
+    return { ok: false, message: "Identifiant de la tâche manquant." };
+  }
+
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    // Isolation multi-tenant : la tâche doit appartenir à l'organisation active.
+    const existing = await prisma.task.findFirst({
+      where: { id: taskId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        ok: false,
+        message: "Tâche introuvable dans votre organisation.",
+      };
+    }
+
+    await prisma.task.delete({ where: { id: taskId } });
+
+    revalidatePath("/dashboard/tasks");
+
+    return { ok: true };
+  } catch (error) {
+    console.error("[deleteTaskAction] Échec de suppression :", error);
+
+    return {
+      ok: false,
+      message:
+        "Une erreur est survenue lors de la suppression de la tâche.",
     };
   }
 }

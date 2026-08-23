@@ -56,6 +56,11 @@ export type UpdateTravelStatusResult =
   | { ok: true }
   | { ok: false; message: string };
 
+/** Résultat des mutations rapides (suppression) côté client. */
+export type TravelMutationResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
 // --------------------------------------
 // Constantes & helpers internes
 // --------------------------------------
@@ -299,6 +304,134 @@ export async function updateTravelStatusAction(
       ok: false,
       message:
         "Une erreur est survenue lors de la mise à jour du statut du dossier.",
+    };
+  }
+}
+
+/**
+ * Met à jour un dossier de voyage existant de l'organisation active.
+ * Conçu pour être utilisé avec `useActionState` : reçoit l'état précédent et un `FormData`
+ * (incluant le champ caché `id`), retourne un état sérialisable.
+ */
+export async function updateTravelProcedureAction(
+  _prevState: TravelFormState,
+  formData: FormData
+): Promise<TravelFormState> {
+  const procedureId = String(formData.get("id") ?? "").trim();
+
+  if (!procedureId) {
+    return {
+      status: "error",
+      message: "Identifiant du dossier manquant.",
+    };
+  }
+
+  const parsed = parseTravelForm(formData);
+
+  if (!parsed.ok) {
+    return {
+      status: "error",
+      message: "Veuillez corriger les champs indiqués.",
+      fieldErrors: parsed.fieldErrors,
+    };
+  }
+
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    // Isolation multi-tenant : le dossier doit appartenir à l'organisation active.
+    const existing = await prisma.travelProcedure.findFirst({
+      where: { id: procedureId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        status: "error",
+        message: "Dossier de voyage introuvable dans votre organisation.",
+      };
+    }
+
+    // Vérifie que l'étudiant ciblé appartient bien à l'organisation active.
+    const student = await prisma.student.findFirst({
+      where: { id: parsed.data.studentId, organizationId },
+      select: { id: true },
+    });
+
+    if (!student) {
+      return {
+        status: "error",
+        message: "Étudiant introuvable dans votre organisation.",
+        fieldErrors: { studentId: "Étudiant introuvable." },
+      };
+    }
+
+    await prisma.travelProcedure.update({
+      where: { id: procedureId },
+      data: {
+        studentId: parsed.data.studentId,
+        destination: parsed.data.destination,
+        targetProgram: parsed.data.targetProgram,
+        status: parsed.data.status,
+        notes: parsed.data.notes,
+      },
+    });
+
+    revalidatePath("/dashboard/travels");
+
+    return {
+      status: "success",
+      message: "Dossier de voyage mis à jour avec succès.",
+    };
+  } catch (error) {
+    console.error("[updateTravelProcedureAction] Échec de mise à jour :", error);
+
+    return {
+      status: "error",
+      message:
+        "Une erreur est survenue lors de la mise à jour du dossier de voyage.",
+    };
+  }
+}
+
+/**
+ * Supprime un dossier de voyage de l'organisation active.
+ */
+export async function deleteTravelProcedureAction(
+  procedureId: string
+): Promise<TravelMutationResult> {
+  if (!procedureId) {
+    return { ok: false, message: "Identifiant du dossier manquant." };
+  }
+
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    // Isolation multi-tenant : le dossier doit appartenir à l'organisation active.
+    const existing = await prisma.travelProcedure.findFirst({
+      where: { id: procedureId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        ok: false,
+        message: "Dossier de voyage introuvable dans votre organisation.",
+      };
+    }
+
+    await prisma.travelProcedure.delete({ where: { id: procedureId } });
+
+    revalidatePath("/dashboard/travels");
+
+    return { ok: true };
+  } catch (error) {
+    console.error("[deleteTravelProcedureAction] Échec de suppression :", error);
+
+    return {
+      ok: false,
+      message:
+        "Une erreur est survenue lors de la suppression du dossier de voyage.",
     };
   }
 }

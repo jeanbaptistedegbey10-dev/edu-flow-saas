@@ -18,7 +18,10 @@ import {
   type StaffMemberDTO,
   type TaskDTO,
 } from "@/actions/tasks";
+import { deleteTaskAction } from "@/actions/tasks";
 import { AddTaskDialog } from "@/components/tasks/add-task-dialog";
+import { EditTaskDialog } from "@/components/tasks/edit-task-dialog";
+import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -155,17 +158,26 @@ function TaskStatusMenu({
 function TaskCard({
   task,
   onStatusChange,
+  onEdit,
 }: {
   task: TaskDTO;
   onStatusChange: (taskId: string, status: string) => void;
+  onEdit: (task: TaskDTO) => void;
 }) {
   const overdue = isOverdue(task);
 
   return (
-    <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
       <div className="flex items-start justify-between gap-2 p-3 pb-2">
         <p className="text-sm font-medium leading-snug">{task.title}</p>
-        <TaskStatusMenu task={task} onStatusChange={onStatusChange} />
+        <div className="flex shrink-0 items-center gap-0.5">
+          <TaskStatusMenu task={task} onStatusChange={onStatusChange} />
+          <EntityActionsMenu
+            entityName={`la tâche « ${task.title} »`}
+            onEdit={() => onEdit(task)}
+            onDelete={() => deleteTaskAction(task.id)}
+          />
+        </div>
       </div>
 
       {task.description ? (
@@ -187,7 +199,7 @@ function TaskCard({
           <span
             className={cn(
               BADGE_BASE_CLASSES,
-              "bg-red-500/15 text-red-700 dark:text-red-400"
+              "border border-red-200/60 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400"
             )}
           >
             <TriangleAlertIcon className="mr-1 size-3" aria-hidden="true" />
@@ -251,9 +263,11 @@ function TaskCard({
 function KanbanView({
   tasks,
   onStatusChange,
+  onEdit,
 }: {
   tasks: TaskDTO[];
   onStatusChange: (taskId: string, status: string) => void;
+  onEdit: (task: TaskDTO) => void;
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -290,6 +304,7 @@ function KanbanView({
                   key={task.id}
                   task={task}
                   onStatusChange={onStatusChange}
+                  onEdit={onEdit}
                 />
               ))
             )}
@@ -307,9 +322,11 @@ function KanbanView({
 function ListView({
   tasks,
   onStatusChange,
+  onEdit,
 }: {
   tasks: TaskDTO[];
   onStatusChange: (taskId: string, status: string) => void;
+  onEdit: (task: TaskDTO) => void;
 }) {
   return (
     <Table>
@@ -321,6 +338,9 @@ function ListView({
           <TableHead>Étudiant</TableHead>
           <TableHead>Échéance</TableHead>
           <TableHead>Statut</TableHead>
+          <TableHead className="text-right">
+            <span className="sr-only">Actions</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -394,6 +414,13 @@ function ListView({
                   <TaskStatusMenu task={task} onStatusChange={onStatusChange} />
                 </div>
               </TableCell>
+              <TableCell className="text-right">
+                <EntityActionsMenu
+                  entityName={`la tâche « ${task.title} »`}
+                  onEdit={() => onEdit(task)}
+                  onDelete={() => deleteTaskAction(task.id)}
+                />
+              </TableCell>
             </TableRow>
           );
         })}
@@ -421,6 +448,7 @@ export function TasksView({
     React.useState<PriorityFilter>("ALL");
   const [assigneeFilter, setAssigneeFilter] =
     React.useState<AssigneeFilter>("ALL");
+  const [editingTask, setEditingTask] = React.useState<TaskDTO | null>(null);
   const [, startTransition] = React.useTransition();
 
   const filteredTasks = React.useMemo(() => {
@@ -490,7 +518,7 @@ export function TasksView({
       </div>
 
       {/* Carte : barre d'outils + contenu */}
-      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
         <div className="flex flex-col gap-3 border-b p-4 xl:flex-row xl:items-center xl:justify-between">
           {/* Recherche instantanée */}
           <div className="relative w-full xl:max-w-xs">
@@ -596,12 +624,14 @@ export function TasksView({
                 <KanbanView
                   tasks={filteredTasks}
                   onStatusChange={handleStatusChange}
+                  onEdit={setEditingTask}
                 />
               </div>
             ) : (
               <ListView
                 tasks={filteredTasks}
                 onStatusChange={handleStatusChange}
+                onEdit={setEditingTask}
               />
             )
           ) : (
@@ -633,6 +663,17 @@ export function TasksView({
           </div>
         ) : null}
       </div>
+
+      {/* Modale d'édition pré-remplie */}
+      <EditTaskDialog
+        task={editingTask}
+        staffMembers={staffMembers}
+        students={students}
+        open={editingTask !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingTask(null);
+        }}
+      />
     </div>
   );
 }

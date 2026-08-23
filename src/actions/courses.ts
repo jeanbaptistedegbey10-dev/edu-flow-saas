@@ -50,6 +50,11 @@ export type CourseFormState = {
   fieldErrors?: Partial<Record<CourseFormField, string>>;
 };
 
+/** Résultat des mutations rapides (suppression) côté client. */
+export type CourseMutationResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
 // --------------------------------------
 // Constantes & helpers internes
 // --------------------------------------
@@ -305,6 +310,172 @@ export async function createCourseAction(
     return {
       status: "error",
       message: "Une erreur est survenue lors de la création du cours.",
+    };
+  }
+}
+
+/**
+ * Met à jour un cours existant du catalogue de l'organisation active.
+ * Conçu pour être utilisé avec `useActionState` : reçoit l'état précédent et un `FormData`
+ * (incluant le champ caché `id`), retourne un état sérialisable.
+ */
+export async function updateCourseAction(
+  _prevState: CourseFormState,
+  formData: FormData
+): Promise<CourseFormState> {
+  const courseId = String(formData.get("id") ?? "").trim();
+
+  if (!courseId) {
+    return {
+      status: "error",
+      message: "Identifiant du cours manquant.",
+    };
+  }
+
+  const parsed = parseCourseForm(formData);
+
+  if (!parsed.ok) {
+    return {
+      status: "error",
+      message: "Veuillez corriger les champs indiqués.",
+      fieldErrors: parsed.fieldErrors,
+    };
+  }
+
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    // Isolation multi-tenant : le cours doit appartenir à l'organisation active.
+    const existing = await prisma.course.findFirst({
+      where: { id: courseId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        status: "error",
+        message: "Cours introuvable dans votre organisation.",
+      };
+    }
+
+    // Unicité du code au sein de l'organisation, en excluant le cours courant.
+    const duplicate = await prisma.course.findFirst({
+      where: {
+        organizationId,
+        code: parsed.data.code,
+        id: { not: courseId },
+      },
+      select: { id: true },
+    });
+
+    if (duplicate) {
+      return {
+        status: "error",
+        message: "Ce code de cours est déjà utilisé.",
+        fieldErrors: { code: "Ce code est déjà utilisé par un autre cours." },
+      };
+    }
+
+    // Vérifie que l'enseignant appartient bien à l'organisation active
+    // avec un rôle autorisé (isolation multi-tenant).
+    if (parsed.data.teacherId) {
+      const teacher = await prisma.user.findFirst({
+        where: {
+          id: parsed.data.teacherId,
+          organizationId,
+          role: { in: ["TEACHER", "ADMIN"] },
+        },
+        select: { id: true },
+      });
+
+      if (!teacher) {
+        return {
+          status: "error",
+          message: "Enseignant introuvable dans votre organisation.",
+          fieldErrors: { teacherId: "Enseignant invalide." },
+        };
+      }
+    }
+
+    await prisma.course.update({
+      where: { id: courseId },
+      data: {
+        title: parsed.data.title,
+        code: parsed.data.code,
+        description: parsed.data.description,
+        price: parsed.data.price,
+        durationWeeks: parsed.data.durationWeeks,
+        teacherId: parsed.data.teacherId,
+      },
+    });
+
+    revalidatePath("/dashboard/courses");
+
+    return {
+      status: "success",
+      message: `Cours mis à jour avec succès (${parsed.data.code}).`,
+    };
+  } catch (error) {
+    // Filet de sécurité : violation de contrainte unique éventuelle.
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return {
+        status: "error",
+        message: "Ce code de cours est déjà utilisé.",
+        fieldErrors: { code: "Ce code est déjà utilisé par un autre cours." },
+      };
+    }
+
+    console.error("[updateCourseAction] Échec de mise à jour :", error);
+
+    return {
+      status: "error",
+      message: "Une erreur est survenue lors de la mise à jour du cours.",
+    };
+  }
+}
+
+/**
+ * Supprime un cours de l'organisation active.
+ * Les inscriptions liées sont supprimées en cascade.
+ */
+export async function deleteCourseAction(
+  courseId: string
+): Promise<CourseMutationResult> {
+  if (!courseId) {
+    return { ok: false, message: "Identifiant du cours manquant." };
+  }
+
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    // Isolation multi-tenant : le cours doit appartenir à l'organisation active.
+    const existing = await prisma.course.findFirst({
+      where: { id: courseId, organizationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return {
+        ok: false,
+        message: "Cours introuvable dans votre organisation.",
+      };
+    }
+
+    await prisma.course.delete({ where: { id: courseId } });
+
+    revalidatePath("/dashboard/courses");
+
+    return { ok: true };
+  } catch (error) {
+    console.error("[deleteCourseAction] Échec de suppression :", error);
+
+    return {
+      ok: false,
+      message:
+        "Une erreur est survenue lors de la suppression du cours.",
     };
   }
 }

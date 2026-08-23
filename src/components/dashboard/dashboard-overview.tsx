@@ -46,6 +46,10 @@ function formatAmount(amount: number): string {
 const BADGE_BASE_CLASSES =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
 
+/** Style moderne des badges ponctuels du tableau de bord. */
+const TINTED_BADGE_CLASSES =
+  "border border-emerald-200/60 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400";
+
 /** Initiales affichées dans l'avatar rond des listes « Récents ». */
 function getInitials(firstName: string, lastName: string): string {
   return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
@@ -66,22 +70,26 @@ type KpiCardProps = {
 
 function KpiCard({ label, value, icon, iconClasses, badge, hint }: KpiCardProps) {
   return (
-    <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
       <div className="flex items-start justify-between gap-3 p-5 pb-3">
-        <span className="text-sm font-medium text-muted-foreground">{label}</span>
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            {label}
+          </p>
+          <p className="mt-2 text-2xl font-bold tracking-tight md:text-[1.75rem] md:leading-8">
+            {value}
+          </p>
+        </div>
         <div
           className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4.5",
+            "flex size-11 shrink-0 items-center justify-center rounded-xl shadow-sm [&_svg]:size-5",
             iconClasses
           )}
         >
           {icon}
         </div>
       </div>
-      <div className="px-5">
-        <p className="text-2xl font-bold tracking-tight md:text-3xl">{value}</p>
-      </div>
-      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-5 py-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-5 py-3">
         {badge}
         <span className="text-xs text-muted-foreground">{hint}</span>
       </div>
@@ -246,11 +254,9 @@ export function DashboardOverview({ stats }: { stats: DashboardStatsDTO }) {
           label="Total Étudiants"
           value={numberFormatter.format(totalStudents)}
           icon={<UsersRoundIcon />}
-          iconClasses="bg-sky-500/15 text-sky-700 dark:text-sky-400"
+          iconClasses="bg-sky-500/10 text-sky-700 ring-1 ring-sky-500/20 ring-inset dark:text-sky-400"
           badge={
-            <span
-              className={cn(BADGE_BASE_CLASSES, "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400")}
-            >
+            <span className={cn(BADGE_BASE_CLASSES, TINTED_BADGE_CLASSES)}>
               {conversionRate}% inscrits
             </span>
           }
@@ -261,11 +267,9 @@ export function DashboardOverview({ stats }: { stats: DashboardStatsDTO }) {
           label="Chiffre d'Affaires"
           value={formatAmount(stats.totalRevenue)}
           icon={<BanknoteIcon />}
-          iconClasses="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+          iconClasses="bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20 ring-inset dark:text-emerald-400"
           badge={
-            <span
-              className={cn(BADGE_BASE_CLASSES, "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400")}
-            >
+            <span className={cn(BADGE_BASE_CLASSES, TINTED_BADGE_CLASSES)}>
               Encaissé
             </span>
           }
@@ -276,14 +280,14 @@ export function DashboardOverview({ stats }: { stats: DashboardStatsDTO }) {
           label="Dossiers Visa en cours"
           value={numberFormatter.format(stats.activeTravelFiles)}
           icon={<PlaneIcon />}
-          iconClasses="bg-amber-500/15 text-amber-700 dark:text-amber-400"
+          iconClasses="bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/20 ring-inset dark:text-amber-400"
           badge={
             <span
               className={cn(
                 BADGE_BASE_CLASSES,
                 stats.activeTravelFiles > 0
-                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-                  : "bg-slate-500/15 text-slate-700 dark:text-slate-400"
+                  ? "border border-amber-200/60 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400"
+                  : "border border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400"
               )}
             >
               {stats.activeTravelFiles > 0 ? "En traitement" : "Aucun actif"}
@@ -296,10 +300,13 @@ export function DashboardOverview({ stats }: { stats: DashboardStatsDTO }) {
           label="Formations actives"
           value={numberFormatter.format(stats.activeCourses)}
           icon={<BookOpenIcon />}
-          iconClasses="bg-violet-500/15 text-violet-700 dark:text-violet-400"
+          iconClasses="bg-violet-500/10 text-violet-700 ring-1 ring-violet-500/20 ring-inset dark:text-violet-400"
           badge={
             <span
-              className={cn(BADGE_BASE_CLASSES, "bg-violet-500/15 text-violet-700 dark:text-violet-400")}
+              className={cn(
+                BADGE_BASE_CLASSES,
+                "border border-violet-200/60 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-400"
+              )}
             >
               Au catalogue
             </span>
@@ -310,7 +317,7 @@ export function DashboardOverview({ stats }: { stats: DashboardStatsDTO }) {
 
       {/* Section Récents : derniers étudiants & fil des règlements */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">Derniers étudiants</h3>
@@ -328,7 +335,7 @@ export function DashboardOverview({ stats }: { stats: DashboardStatsDTO }) {
           <RecentStudentsList students={stats.recentStudents} />
         </div>
 
-        <div className="overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">Derniers règlements</h3>

@@ -10,7 +10,10 @@ import {
 } from "lucide-react";
 
 import type { CourseDTO, TeacherDTO } from "@/actions/courses";
+import { deleteCourseAction } from "@/actions/courses";
 import { AddCourseDialog } from "@/components/courses/add-course-dialog";
+import { EditCourseDialog } from "@/components/courses/edit-course-dialog";
+import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -27,20 +30,36 @@ function formatPrice(value: number): string {
 // Sous-composants internes
 // --------------------------------------
 
-function CourseCard({ course }: { course: CourseDTO }) {
+function CourseCard({
+  course,
+  onEdit,
+  onDelete,
+}: {
+  course: CourseDTO;
+  onEdit: (course: CourseDTO) => void;
+  onDelete: (course: CourseDTO) => Promise<{ ok: boolean; message?: string }>;
+}) {
   const enrollmentCount = course._count.enrollments;
 
   return (
-    <div className="flex flex-col rounded-lg border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md">
+    <div className="flex flex-col rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
       <div className="flex flex-col gap-2 p-4">
-        {/* Code + prix */}
+        {/* Code + prix + actions */}
         <div className="flex items-center justify-between gap-2">
           <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-xs font-medium tracking-wide">
             {course.code}
           </span>
-          <span className="text-sm font-semibold tabular-nums">
-            {formatPrice(course.price)}
-          </span>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold tabular-nums">
+              {formatPrice(course.price)}
+            </span>
+            <EntityActionsMenu
+              entityName={`le cours « ${course.title} »`}
+              onEdit={() => onEdit(course)}
+              onDelete={() => onDelete(course)}
+            />
+          </div>
         </div>
 
         {/* Intitulé */}
@@ -96,6 +115,9 @@ export function CoursesView({
   teachers: TeacherDTO[];
 }) {
   const [search, setSearch] = React.useState("");
+  const [editingCourse, setEditingCourse] = React.useState<CourseDTO | null>(
+    null
+  );
 
   /** Recherche instantanée par intitulé, code ou nom de l'enseignant. */
   const filteredCourses = React.useMemo(() => {
@@ -113,6 +135,10 @@ export function CoursesView({
       );
     });
   }, [courses, search]);
+
+  /** Suppression d'un cours via le menu d'actions de la carte. */
+  const handleDeleteCourse = (course: CourseDTO) =>
+    deleteCourseAction(course.id);
 
   const hasCourses = courses.length > 0;
   const hasResults = filteredCourses.length > 0;
@@ -149,7 +175,12 @@ export function CoursesView({
             {/* Grille de cartes de cours */}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {filteredCourses.map((course) => (
-                <CourseCard key={course.id} course={course} />
+                <CourseCard
+                  key={course.id}
+                  course={course}
+                  onEdit={setEditingCourse}
+                  onDelete={handleDeleteCourse}
+                />
               ))}
             </div>
 
@@ -158,7 +189,7 @@ export function CoursesView({
             </p>
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-6 py-12 text-center">
+          <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-6 py-12 text-center">
             <SearchIcon className="size-8 text-muted-foreground/50" />
             <p className="text-sm font-medium">Aucun résultat trouvé</p>
             <p className="text-sm text-muted-foreground">
@@ -167,7 +198,7 @@ export function CoursesView({
           </div>
         )
       ) : (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-16 text-center">
           <div className="flex size-12 items-center justify-center rounded-full bg-muted">
             <BookOpenIcon className="size-6 text-muted-foreground" />
           </div>
@@ -178,6 +209,16 @@ export function CoursesView({
           </p>
         </div>
       )}
+
+      {/* Modale d'édition pré-remplie */}
+      <EditCourseDialog
+        course={editingCourse}
+        teachers={teachers}
+        open={editingCourse !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingCourse(null);
+        }}
+      />
     </div>
   );
 }

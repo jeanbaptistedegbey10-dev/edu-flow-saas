@@ -4,7 +4,12 @@ import * as React from "react";
 import { DownloadIcon, SearchIcon, UsersRoundIcon } from "lucide-react";
 
 import type { StudentDTO } from "@/actions/students";
+import { deleteStudentAction } from "@/actions/students";
 import { AddStudentDialog } from "@/components/students/add-student-dialog";
+import { EditStudentDialog } from "@/components/students/edit-student-dialog";
+import {
+  EntityActionsMenu,
+} from "@/components/shared/entity-actions-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -64,6 +69,9 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] =
     React.useState<StudentStatusFilter>("ALL");
+  const [editingStudent, setEditingStudent] = React.useState<StudentDTO | null>(
+    null
+  );
 
   const filteredStudents = React.useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -112,7 +120,7 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
       </div>
 
       {/* Carte : barre d'outils + tableau */}
-      <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
         <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
           {/* Recherche instantanée */}
           <div className="relative w-full lg:max-w-xs">
@@ -175,6 +183,9 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
                   <TableHead>Téléphone</TableHead>
                   <TableHead>Statut</TableHead>
                   <TableHead>Ajouté le</TableHead>
+                  <TableHead className="text-right">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -208,6 +219,13 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {dateFormatter.format(student.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <EntityActionsMenu
+                        entityName={`${student.firstName} ${student.lastName}`}
+                        onEdit={() => setEditingStudent(student)}
+                        onDelete={() => deleteStudentAction(student.id)}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -243,6 +261,15 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
           </div>
         )}
       </div>
+
+      {/* Modale d'édition pré-remplie */}
+      <EditStudentDialog
+        student={editingStudent}
+        open={editingStudent !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingStudent(null);
+        }}
+      />
     </div>
   );
 }
