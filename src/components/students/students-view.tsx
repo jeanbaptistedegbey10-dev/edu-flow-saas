@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { SearchIcon, UsersRoundIcon } from "lucide-react";
+import { DownloadIcon, SearchIcon, UsersRoundIcon } from "lucide-react";
 
 import type { StudentDTO } from "@/actions/students";
 import { AddStudentDialog } from "@/components/students/add-student-dialog";
@@ -21,6 +21,7 @@ import {
   getStudentStatusLabel,
   type StudentStatusFilter,
 } from "@/lib/student-status";
+import { exportToCsv, type CsvColumn } from "@/lib/export";
 import { cn } from "@/lib/utils";
 
 // Formatage déterministe (locale + fuseau fixes) pour éviter tout écart d'hydratation.
@@ -33,6 +34,31 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 
 const BADGE_BASE_CLASSES =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
+
+// Formatage « court » (jj/mm/aaaa) dédié aux fichiers CSV exportés.
+const csvDateFormatter = new Intl.DateTimeFormat("fr-FR", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/** Colonnes du fichier CSV d'export des étudiants. */
+const STUDENT_CSV_COLUMNS: readonly CsvColumn<StudentDTO>[] = [
+  { header: "Code étudiant", value: (student) => student.studentCode },
+  { header: "Prénom", value: (student) => student.firstName },
+  { header: "Nom", value: (student) => student.lastName },
+  { header: "Email", value: (student) => student.email ?? "" },
+  { header: "Téléphone", value: (student) => student.phone },
+  {
+    header: "Statut",
+    value: (student) => getStudentStatusLabel(student.status),
+  },
+  {
+    header: "Ajouté le",
+    value: (student) => csvDateFormatter.format(student.createdAt),
+  },
+];
 
 export function StudentsView({ students }: { students: StudentDTO[] }) {
   const [search, setSearch] = React.useState("");
@@ -58,6 +84,16 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
       );
     });
   }, [students, search, statusFilter]);
+
+  /**
+   * Exporte les étudiants actuellement filtrés à l'écran (recherche +
+   * filtre de statut actifs) vers un fichier CSV compatible Excel.
+   */
+  const handleExportCsv = () => {
+    const today = csvDateFormatter.format(new Date()).replace(/\//g, "-");
+
+    exportToCsv(`etudiants-${today}`, filteredStudents, STUDENT_CSV_COLUMNS);
+  };
 
   const hasStudents = students.length > 0;
   const hasResults = filteredStudents.length > 0;
@@ -91,28 +127,41 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
             />
           </div>
 
-          {/* Filtres par statut */}
-          <div
-            role="group"
-            aria-label="Filtrer par statut"
-            className="flex flex-wrap items-center gap-1"
-          >
-            {STUDENT_STATUS_FILTERS.map((filter) => {
-              const isActive = statusFilter === filter.value;
+          {/* Filtres par statut + export CSV */}
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div
+              role="group"
+              aria-label="Filtrer par statut"
+              className="flex flex-wrap items-center gap-1"
+            >
+              {STUDENT_STATUS_FILTERS.map((filter) => {
+                const isActive = statusFilter === filter.value;
 
-              return (
-                <Button
-                  key={filter.value}
-                  type="button"
-                  variant={isActive ? "secondary" : "ghost"}
-                  size="sm"
-                  aria-pressed={isActive}
-                  onClick={() => setStatusFilter(filter.value)}
-                >
-                  {filter.label}
-                </Button>
-              );
-            })}
+                return (
+                  <Button
+                    key={filter.value}
+                    type="button"
+                    variant={isActive ? "secondary" : "ghost"}
+                    size="sm"
+                    aria-pressed={isActive}
+                    onClick={() => setStatusFilter(filter.value)}
+                  >
+                    {filter.label}
+                  </Button>
+                );
+              })}
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleExportCsv}
+              disabled={!hasResults}
+            >
+              <DownloadIcon data-icon="inline-start" />
+              Exporter (CSV)
+            </Button>
           </div>
         </div>
 

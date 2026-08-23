@@ -50,6 +50,14 @@ export type StudentOptionDTO = {
   lastName: string;
 };
 
+export type OrganizationProfileDTO = {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+};
+
 export type PaymentFormField =
   | "studentId"
   | "amount"
@@ -252,6 +260,25 @@ export async function getStudentOptions(): Promise<StudentOptionDTO[]> {
       studentCode: true,
       firstName: true,
       lastName: true,
+    },
+  });
+}
+
+/**
+ * Récupère le profil de l'organisation active (nom et coordonnées).
+ * Alimente notamment l'en-tête des reçus de paiement imprimables.
+ */
+export async function getCurrentOrganizationProfile(): Promise<OrganizationProfileDTO> {
+  const organizationId = await getCurrentOrganizationId();
+
+  return prisma.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      address: true,
     },
   });
 }

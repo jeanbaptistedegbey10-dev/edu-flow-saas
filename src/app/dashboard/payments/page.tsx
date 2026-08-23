@@ -1,4 +1,5 @@
 import {
+  getCurrentOrganizationProfile,
   getFinancialStats,
   getPayments,
   getStudentOptions,
@@ -12,11 +13,19 @@ export const metadata = {
 };
 
 export default async function PaymentsPage() {
-  const [payments, stats, students] = await Promise.all([
+  const [payments, stats, students, organization] = await Promise.all([
     getPayments(),
     getFinancialStats(),
     getStudentOptions(),
+    getCurrentOrganizationProfile(),
   ]);
 
-  return <PaymentsView payments={payments} stats={stats} students={students} />;
+  return (
+    <PaymentsView
+      payments={payments}
+      stats={stats}
+      students={students}
+      organization={organization}
+    />
+  );
 }
