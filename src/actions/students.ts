@@ -2,7 +2,9 @@
 
 import { Prisma, type StudentStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
+import { sendWelcomeEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId } from "@/lib/session";
 
@@ -184,6 +186,21 @@ export async function createStudentAction(
       });
 
       revalidatePath("/dashboard/students");
+
+      // E-mail de bienvenue en arrière-plan (après la réponse) si l'étudiant
+      // a une adresse e-mail valide. L'échec d'envoi ne bloque jamais la création.
+      if (parsed.data.email) {
+        const recipientEmail = parsed.data.email;
+        const recipientName = `${parsed.data.firstName} ${parsed.data.lastName}`;
+
+        after(async () => {
+          await sendWelcomeEmail({
+            studentEmail: recipientEmail,
+            studentName: recipientName,
+            studentCode,
+          });
+        });
+      }
 
       return {
         status: "success",

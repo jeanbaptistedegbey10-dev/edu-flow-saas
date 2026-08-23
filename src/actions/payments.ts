@@ -6,7 +6,9 @@ import {
   type PaymentStatus,
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
+import { sendPaymentConfirmationEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId } from "@/lib/session";
 
@@ -306,9 +308,10 @@ export async function createPaymentAction(
 
   try {
     // Vérifie que l'étudiant appartient bien à l'organisation active (isolation multi-tenant).
+    // Les coordonnées sont récupérées pour l'envoi du reçu par e-mail.
     const student = await prisma.student.findFirst({
       where: { id: parsed.data.studentId, organizationId },
-      select: { id: true },
+      select: { id: true, email: true, firstName: true, lastName: true },
     });
 
     if (!student) {
@@ -319,6 +322,8 @@ export async function createPaymentAction(
       };
     }
 
+    const paidAt = new Date();
+
     await prisma.payment.create({
       data: {
         organizationId,
@@ -328,10 +333,30 @@ export async function createPaymentAction(
         status: parsed.data.status,
         reference: parsed.data.reference,
         description: parsed.data.description,
+        paidAt,
       },
     });
 
     revalidatePath("/dashboard/payments");
+
+    // Reçu de règlement envoyé en arrière-plan (après la réponse) si l'étudiant
+    // a une adresse e-mail valide. L'échec d'envoi ne bloque jamais la création.
+    if (student.email) {
+      const recipientEmail = student.email;
+      const recipientName = `${student.firstName} ${student.lastName}`;
+      const amount = parsed.data.amount;
+      const reference = parsed.data.reference;
+
+      after(async () => {
+        await sendPaymentConfirmationEmail({
+          studentEmail: recipientEmail,
+          studentName: recipientName,
+          amount,
+          reference,
+          paidAt,
+        });
+      });
+    }
 
     return {
       status: "success",
