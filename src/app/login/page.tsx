@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
-import { GraduationCapIcon } from "lucide-react";
+import { CheckCircle2Icon, GraduationCapIcon } from "lucide-react";
 
 import { LoginForm } from "@/components/auth/login-form";
 import { Separator } from "@/components/ui/separator";
@@ -22,7 +23,11 @@ function LoginFormFallback() {
   );
 }
 
-export default function LoginPage() {
+export default function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ registered?: string }>;
+}) {
   return (
     <main className="flex min-h-svh flex-1 items-center justify-center bg-muted/40 p-4">
       <div className="w-full max-w-sm rounded-xl border bg-background p-6 shadow-sm sm:p-8">
@@ -41,11 +46,48 @@ export default function LoginPage() {
 
         <Separator className="mb-6" />
 
+        {/* Message de succès après inscription */}
+        <Suspense fallback={null}>
+          <RegisteredSuccessMessage searchParams={searchParams} />
+        </Suspense>
+
         {/* Formulaire (Suspense requis : useSearchParams dans le composant client) */}
         <Suspense fallback={<LoginFormFallback />}>
           <LoginForm />
         </Suspense>
+
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Pas encore de compte ?{" "}
+          <Link
+            href="/register"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Créer un compte
+          </Link>
+        </p>
       </div>
     </main>
+  );
+}
+
+async function RegisteredSuccessMessage({
+  searchParams,
+}: {
+  searchParams: Promise<{ registered?: string }>;
+}) {
+  const params = await searchParams;
+
+  if (params.registered !== "1") {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 flex items-start gap-2 rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
+      <CheckCircle2Icon className="mt-0.5 size-4 shrink-0" />
+      <p>
+        Votre compte a été créé avec succès. Vous pouvez maintenant vous
+        connecter.
+      </p>
+    </div>
   );
 }
