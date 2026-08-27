@@ -6,20 +6,24 @@ import { getToken } from "next-auth/jwt";
 // Protection des routes (ex-middleware, renommé « proxy » en Next.js 16)
 // --------------------------------------
 //
-// - /dashboard/* : redirige vers /login si l'utilisateur n'est pas authentifié.
-// - /login       : n'émet AUCUNE redirection vers /dashboard. Un JWT décodable
-//   ne garantit pas que l'utilisateur ou son organisation existent toujours en
-//   base ; décider ici provoquerait une boucle 307 avec les pages protégées
-//   (dashboard → /login → dashboard → …). La redirection « déjà connecté » est
-//   donc déléguée à la page /login elle-même, qui valide la session contre la
-//   base de données avant de rediriger (voir src/app/login/page.tsx).
-// - Cookies invalides : un cookie de session présent mais illisible (corrompu,
-//   expiré, signature invalide) est détruit sur la réponse afin que le navigateur
-//   cesse de le renvoyer — le formulaire de connexion s'affiche simplement.
+// Matcher : toutes les routes SAUF /api, /_next, /favicon.ico et /login.
+// Cela garantit que :
+//   - Le proxy ne s'exécute JAMAIS sur /login → aucune interférence avec
+//     la logique de redirection de la page (auth() vs getToken() mismatch →
+//     boucle /login ↔ /dashboard).
+//   - Les endpoints NextAuth (/api/auth/*) et les assets statiques ne sont
+//     jamais interceptés.
+//
+// Logique de redirection :
+//   - /dashboard/* : si !token → redirect /login (avec callbackUrl) + nettoyage
+//     cookie invalide (cas qui brise la boucle de redirection).
+//   - /login       : exclue du matcher ; la page gère token → redirect /dashboard
+//     via auth() validée en base de données (voir src/app/login/page.tsx).
+//   - Cookies invalides : nettoyés uniquement lors de la redirection vers /login.
+//
 // - Rôle STUDENT : aucun accès au tableau de bord (aucun compte étudiant prévu).
 // - Rôle TEACHER : accès restreint aux modules pédagogiques ; toutes les
 //   données financières (paiements, voyages, dépenses, POS) sont masquées.
-//
 // La vérification s'appuie sur le token JWT de session (stratégie JWT),
 // sans accès base de données : le fichier reste léger et rapide.
 
@@ -108,16 +112,27 @@ export async function proxy(request: NextRequest) {
       );
     }
 
-    // Routes publiques (/login, /register) : aucune redirection. Le cookie
-    // invalide éventuel est détruit et le formulaire est servi normalement.
-    return clearInvalidSessionCookies(NextResponse.next(), request);
+    // Routes publiques : aucune redirection, aucun nettoyage de cookie.
+    // Le cookie invalide n'est détruit QUE lors de la redirection vers /login
+    // (cas dashboard ci-dessus) — cela brise la boucle sans déconnecter
+    // brutalement un utilisateur dont le cookie est temporairement illisible.
+    return NextResponse.next();
   }
 
   // --------------------------------------
   // Session JWT valide : contrôle d'accès par rôle sur /dashboard
+  // et redirection /login → /dashboard
   // --------------------------------------
-  // NB : volontairement AUCUNE redirection automatique /login → /dashboard ici.
-  // La page /login décide elle-même, après validation en base de données.
+  // /login est exclue du matcher (voir config ci-dessous) : cette vérification
+  // agit comme filet de sécurité au cas où le matcher serait modifié pour
+  // inclure /login. La redirection « déjà connecté » est PRINCIPALEMENT gérée
+  // par la page /login elle-même, qui valide la session en base de données
+  // (voir src/app/login/page.tsx).
+  if (pathname === LOGIN_PATH || pathname.startsWith(`${LOGIN_PATH}/`)) {
+    return NextResponse.redirect(new URL(DASHBOARD_PATH, request.url));
+  }
+
+  // Contrôle d'accès par rôle sur /dashboard
   if (pathname.startsWith(DASHBOARD_PATH)) {
     const role = typeof token.role === "string" ? token.role : null;
 
@@ -146,5 +161,15 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/login", "/register"],
+  // Le proxy s'exécute sur TOUTES les routes SAUF :
+  // - /api/*            : endpoints NextAuth (signin, signout, session, callback…)
+  // - /_next/static/*   : assets statiques générés
+  // - /_next/image/*    : optimisation d'images
+  // - /favicon.ico      : favicon
+  // - /login            : exclue pour éviter toute interférence avec la page
+  //   /login, qui gère elle-même la redirection authentifiée → /dashboard
+  //   via auth() (validée en base). Sans cette exclusion, un mismatch entre
+  //   getToken() (proxy) et auth() (page) pouvait créer une boucle infinie
+  //   sur Vercel : /dashboard → /login → /dashboard → … (ERR_TOO_MANY_REDIRECTS).
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|login).*)"],
 };

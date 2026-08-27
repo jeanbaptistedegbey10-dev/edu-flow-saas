@@ -14,6 +14,14 @@ import { prisma } from "@/lib/prisma";
 // sans accès à la base de données.
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Secret partagé pour la signature des JWT de session.
+  // Garantit que getToken() dans src/proxy.ts et auth() utilisent exactement
+  // le même secret — un mismatch fait échouer la vérification JWT côté proxy
+  // tandis que auth() réussit, créant une boucle /login ↔ /dashboard sur Vercel.
+  // En production, ce secret doit être défini dans les variables d'environnement
+  // Vercel (AUTH_SECRET ou NEXTAUTH_SECRET).
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+
   // Stratégie JWT obligatoire avec CredentialsProvider (pas de sessions base de données).
   session: {
     strategy: "jwt",
