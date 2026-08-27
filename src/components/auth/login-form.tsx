@@ -69,10 +69,12 @@ export function LoginForm() {
 
       // --- Redirection après succès ---
       // `result?.ok` est `true` lorsque la connexion a réussi.
-      // On utilise `window.location.href` (au lieu de `router.push`) pour
-      // forcer un rechargement complet du navigateur : cela garantit que
+      // On utilise `window.location.replace(...)` (au lieu de `router.push`)
+      // pour forcer un rechargement complet du navigateur : cela garantit que
       // le nouveau cookie de session est bien chargé avant l'affichage
       // du tableau de bord, évitant les boucles /login ↔ /dashboard.
+      // `replace` (vs `href`) retire la page actuelle de l'historique : le
+      // bouton retour ne repasse jamais par `/login` en boucle.
       if (result?.ok) {
         const callbackUrl = searchParams.get("callbackUrl");
         const destination =
@@ -80,7 +82,7 @@ export function LoginForm() {
             ? callbackUrl
             : "/dashboard";
 
-        window.location.href = destination;
+        window.location.replace(destination);
         return;
       }
 

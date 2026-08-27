@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import { auth } from "@/auth";
 import { getCurrentOrganizationBranding } from "@/actions/organization";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
@@ -17,6 +19,17 @@ export default async function DashboardLayout({
   // Session NextAuth résolue côté serveur puis transmise au composant
   // client `AppSidebar` (évite un SessionProvider dédié côté client).
   const session = await auth();
+
+  // Journal de diagnostic : observable dans les logs Vercel pour vérifier si la
+  // session est présente ou null lors de l'accès au tableau de bord.
+  console.log("[DASHBOARD AUTH CHECK]", session);
+
+  // Protection serveur du tableau de bord : si la session est confirmée comme
+  // absente (null), redirection vers /login. Seconde ligne de défense derrière
+  // le proxy (src/proxy.ts) qui protège déjà /dashboard/*.
+  if (!session?.user) {
+    redirect("/login");
+  }
 
   // Identité visuelle de l'organisation (logo + nom) affichée dans l'en-tête.
   // Dégradation gracieuse : monogramme par défaut si indisponible.
