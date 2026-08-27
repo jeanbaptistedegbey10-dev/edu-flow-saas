@@ -95,8 +95,8 @@ export function CalendarView({ events }: { events: CalendarTaskDTO[] }) {
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Calendrier</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold tracking-tight">Calendrier</h2>
+          <p className="text-base text-muted-foreground">
             Regroupez les échéances des tâches et événements de votre équipe.
           </p>
         </div>

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId } from "@/lib/session";
+import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
 import { TASK_PRIORITY_RANK } from "@/lib/task-priority";
 
 // --------------------------------------
@@ -201,36 +201,45 @@ function sortTasks(tasks: TaskDTO[]): TaskDTO[] {
 export async function getTasks(): Promise<TaskDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
-  const tasks = await prisma.task.findMany({
-    where: { organizationId },
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      status: true,
-      priority: true,
-      dueDate: true,
-      createdAt: true,
-      assignee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          role: true,
+  try {
+    const tasks = await prisma.task.findMany({
+      where: { organizationId },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        status: true,
+        priority: true,
+        dueDate: true,
+        createdAt: true,
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+          },
+        },
+        student: {
+          select: {
+            id: true,
+            studentCode: true,
+            firstName: true,
+            lastName: true,
+          },
         },
       },
-      student: {
-        select: {
-          id: true,
-          studentCode: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-  });
+    });
 
-  return sortTasks(tasks);
+    return sortTasks(tasks);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getTasks] Échec de lecture :", error);
+
+    // Dégradation gracieuse : liste vide plutôt que crash serveur.
+    return [];
+  }
 }
 
 /**
@@ -240,16 +249,25 @@ export async function getTasks(): Promise<TaskDTO[]> {
 export async function getStaffMembers(): Promise<StaffMemberDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
-  return prisma.user.findMany({
-    where: { organizationId, isActive: true },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      role: true,
-    },
-  });
+  try {
+    return await prisma.user.findMany({
+      where: { organizationId, isActive: true },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+      },
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getStaffMembers] Échec de lecture :", error);
+
+    // Dégradation gracieuse : liste vide plutôt que crash serveur.
+    return [];
+  }
 }
 
 /**
@@ -271,20 +289,20 @@ export async function createTaskAction(
     };
   }
 
-  const organizationId = await getCurrentOrganizationId();
-
-  // L'auteur de la tâche est l'utilisateur connecté.
-  const session = await auth();
-  const createdById = session?.user?.id;
-
-  if (!createdById) {
-    return {
-      status: "error",
-      message: "Session invalide : impossible d'identifier l'auteur.",
-    };
-  }
-
   try {
+    const organizationId = await getCurrentOrganizationId();
+
+    // L'auteur de la tâche est l'utilisateur connecté.
+    const session = await auth();
+    const createdById = session?.user?.id;
+
+    if (!organizationId || !createdById) {
+      return {
+        status: "error",
+        message: "Session invalide : impossible d'identifier l'auteur.",
+      };
+    }
+
     // Vérifie que l'assigné appartient bien à l'organisation active
     // (isolation multi-tenant).
     if (parsed.data.assigneeId) {
@@ -339,6 +357,8 @@ export async function createTaskAction(
       message: "Tâche créée avec succès.",
     };
   } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
     console.error("[createTaskAction] Échec de création :", error);
 
     return {
@@ -391,6 +411,8 @@ export async function updateTaskStatusAction(
       message: "Statut mis à jour.",
     };
   } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
     console.error("[updateTaskStatusAction] Échec de mise à jour :", error);
 
     return {
@@ -429,9 +451,9 @@ export async function updateTaskAction(
     };
   }
 
-  const organizationId = await getCurrentOrganizationId();
-
   try {
+    const organizationId = await getCurrentOrganizationId();
+
     // Isolation multi-tenant : la tâche doit appartenir à l'organisation active.
     const existing = await prisma.task.findFirst({
       where: { id: taskId, organizationId },
@@ -497,6 +519,8 @@ export async function updateTaskAction(
       message: "Tâche mise à jour avec succès.",
     };
   } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
     console.error("[updateTaskAction] Échec de mise à jour :", error);
 
     return {
@@ -538,6 +562,8 @@ export async function deleteTaskAction(
 
     return { ok: true };
   } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
     console.error("[deleteTaskAction] Échec de suppression :", error);
 
     return {

@@ -5,11 +5,15 @@ import { useActionState } from "react";
 import {
   Building2Icon,
   CalendarIcon,
+  GlobeIcon,
+  ImagePlusIcon,
+  LandmarkIcon,
   Loader2Icon,
   MailIcon,
   MapPinIcon,
   PhoneIcon,
   SaveIcon,
+  Trash2Icon,
   UsersRoundIcon,
 } from "lucide-react";
 
@@ -53,6 +57,215 @@ function getInitials(firstName: string, lastName: string): string {
   return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
 }
 
+// --------------------------------------
+// Logo de l'organisation
+// --------------------------------------
+
+/** Taille maximale (px) du logo après redimensionnement côté client. */
+const LOGO_MAX_SIZE_PX = 256;
+/** Taille maximale du fichier source accepté à l'upload (octets). */
+const LOGO_MAX_INPUT_BYTES = 4 * 1024 * 1024;
+/**
+ * Taille maximale de la valeur stockée en base (longueur de la data URL /
+ * de l'URL) — alignée sur la validation serveur.
+ */
+const LOGO_MAX_VALUE_LENGTH = 500_000;
+
+/**
+ * Convertit un fichier image sélectionné en data URL exploitable partout
+ * (aperçu, header, reçus imprimables) :
+ * - l'image est redimensionnée côté client (canvas) pour rester légère ;
+ * - la transparence est préservée via PNG sauf pour les JPEG (compression).
+ *
+ * Lève une erreur si le fichier n'est pas une image exploitable.
+ */
+async function fileToLogoDataUrl(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Le fichier sélectionné n'est pas une image.");
+  }
+
+  if (file.size > LOGO_MAX_INPUT_BYTES) {
+    throw new Error("L'image dépasse 4 Mo. Choisissez un fichier plus léger.");
+  }
+
+  // Les SVG ne passent pas par canvas : conservation directe en data URL.
+  if (file.type === "image/svg+xml") {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Lecture du fichier impossible."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(
+    1,
+    LOGO_MAX_SIZE_PX / Math.max(bitmap.width, bitmap.height)
+  );
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    bitmap.close();
+    throw new Error("Traitement de l'image impossible sur ce navigateur.");
+  }
+
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  const mimeType = file.type === "image/jpeg" ? "image/jpeg" : "image/png";
+  return canvas.toDataURL(mimeType, 0.9);
+}
+
+/**
+ * Champ « Logo » du formulaire : aperçu instantané, saisie d'URL externe ou
+ * import d'un fichier local (redimensionné puis encodé en data URL avant
+ * envoi). La valeur finale transite par le champ caché `logoUrl`.
+ */
+function LogoField({
+  defaultValue,
+  error,
+}: {
+  defaultValue: string | null;
+  error?: string;
+}) {
+  const [value, setValue] = React.useState(defaultValue ?? "");
+  const [isProcessing, setIsProcessing] = React.useState(false);
+  const [localError, setLocalError] = React.useState<string | null>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  /** Import d'un fichier local : compression puis conversion en data URL. */
+  const handleFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    setLocalError(null);
+    setIsProcessing(true);
+
+    try {
+      const dataUrl = await fileToLogoDataUrl(file);
+
+      if (dataUrl.length > LOGO_MAX_VALUE_LENGTH) {
+        setLocalError(
+          "L'image reste trop volumineuse après compression. Essayez un visuel plus simple."
+        );
+        return;
+      }
+
+      setValue(dataUrl);
+    } catch (cause) {
+      setLocalError(
+        cause instanceof Error
+          ? cause.message
+          : "Import du logo impossible."
+      );
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor="organization-logo-url">Logo de l’entreprise</Label>
+
+      <input type="hidden" name="logoUrl" value={value} />
+
+      <div className="flex flex-wrap items-start gap-4">
+        {/* Aperçu */}
+        <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/40">
+          {value ? (
+            // eslint-disable-next-line @next/next/no-img-element -- URL arbitraire (data: ou http(s)) non couverte par next/image sans config dédiée.
+            <img
+              src={value}
+              alt="Aperçu du logo"
+              className="size-full object-contain"
+            />
+          ) : (
+            <Building2Icon className="size-8 text-muted-foreground/50" />
+          )}
+        </div>
+
+        <div className="grid min-w-0 flex-1 gap-2">
+          <Input
+            id="organization-logo-url"
+            type="url"
+            placeholder="https://exemple.com/logo.png"
+            value={
+              value.startsWith("data:") ? "" : value
+            }
+            onChange={(event) => {
+              setLocalError(null);
+              setValue(event.target.value.trim());
+            }}
+            aria-invalid={Boolean(error || localError)}
+            disabled={isProcessing}
+          />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isProcessing}
+              onClick={() => inputRef.current?.click()}
+            >
+              {isProcessing ? (
+                <Loader2Icon data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <ImagePlusIcon data-icon="inline-start" />
+              )}
+              {isProcessing ? "Traitement..." : "Importer un fichier"}
+            </Button>
+
+            {value ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => {
+                  setLocalError(null);
+                  setValue("");
+                }}
+              >
+                <Trash2Icon data-icon="inline-start" />
+                Retirer
+              </Button>
+            ) : null}
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Collez une URL d’image ou importez un fichier (PNG, JPEG, WebP ou
+            SVG — redimensionné automatiquement en 256×256). Ce logo s’affiche
+            dans l’en-tête du tableau de bord et sur tous les reçus et
+            factures imprimables.
+          </p>
+        </div>
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      <FieldError message={error ?? localError ?? undefined} />
+    </div>
+  );
+}
+
 function OrganizationEditForm({ organization }: { organization: OrganizationInfoDTO }) {
   const [state, formAction, pending] = useActionState(
     updateOrganizationAction,
@@ -76,6 +289,14 @@ function OrganizationEditForm({ organization }: { organization: OrganizationInfo
           {state.message}
         </p>
       ) : null}
+
+      {/* Identité visuelle : logo affiché dans le header et les reçus */}
+      <div className="rounded-lg border bg-muted/20 p-4">
+        <LogoField
+          defaultValue={organization.logoUrl}
+          error={fieldErrors.logoUrl}
+        />
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-2 sm:col-span-2">
@@ -122,12 +343,96 @@ function OrganizationEditForm({ organization }: { organization: OrganizationInfo
             id="address"
             name="address"
             defaultValue={organization.address ?? ""}
-            placeholder="Ville, quartier, rue..."
+            placeholder="Quartier, rue..."
             aria-invalid={Boolean(fieldErrors.address)}
           />
           <FieldError message={fieldErrors.address} />
         </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="city">Ville</Label>
+          <Input
+            id="city"
+            name="city"
+            defaultValue={organization.city ?? ""}
+            placeholder="Cotonou"
+            aria-invalid={Boolean(fieldErrors.city)}
+          />
+          <FieldError message={fieldErrors.city} />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="website">Site web</Label>
+          <Input
+            id="website"
+            name="website"
+            defaultValue={organization.website ?? ""}
+            placeholder="https://www.exemple.com"
+            aria-invalid={Boolean(fieldErrors.website)}
+          />
+          <FieldError message={fieldErrors.website} />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="rccm">N° RCCM</Label>
+          <Input
+            id="rccm"
+            name="rccm"
+            defaultValue={organization.rccm ?? ""}
+            placeholder="RB/COT/24 A 12345"
+            aria-invalid={Boolean(fieldErrors.rccm)}
+          />
+          <FieldError message={fieldErrors.rccm} />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="ifu">N° IFU / NIF</Label>
+          <Input
+            id="ifu"
+            name="ifu"
+            defaultValue={organization.ifu ?? ""}
+            placeholder="3102412345678"
+            aria-invalid={Boolean(fieldErrors.ifu)}
+          />
+          <FieldError message={fieldErrors.ifu} />
+        </div>
       </div>
+
+      {/* Paramétrage financier : frais d'inscription uniques */}
+      <fieldset className="rounded-lg border p-4">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Paramètres financiers
+        </legend>
+
+        <div className="grid gap-2 sm:max-w-xs">
+          <Label htmlFor="defaultRegistrationFee">
+            Frais d’inscription par défaut (FCFA)
+          </Label>
+          <Input
+            id="defaultRegistrationFee"
+            name="defaultRegistrationFee"
+            type="number"
+            min="0"
+            step="any"
+            inputMode="decimal"
+            defaultValue={organization.defaultRegistrationFee}
+            placeholder="Ex : 15000"
+            aria-invalid={Boolean(fieldErrors.defaultRegistrationFee)}
+          />
+          <FieldError message={fieldErrors.defaultRegistrationFee} />
+          <p className="text-xs text-muted-foreground">
+            Montant facturé une seule fois lors de l’inscription d’un nouvel
+            étudiant (une réinscription au sein du centre ne le facture pas à
+            nouveau). Une recette correspondante est générée automatiquement.
+          </p>
+        </div>
+      </fieldset>
+
+      <p className="text-xs text-muted-foreground">
+        Le logo, les mentions légales (RCCM, IFU / NIF), l’adresse et le site
+        web sont repris automatiquement sur les reçus imprimables et leurs
+        exports PDF.
+      </p>
 
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>
@@ -155,8 +460,8 @@ export function OrganizationView({
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Organisation</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold tracking-tight">Organisation</h2>
+          <p className="text-base text-muted-foreground">
             Consultez et gérez les informations de votre organisation et de
             ses membres.
           </p>
@@ -166,8 +471,17 @@ export function OrganizationView({
       {/* Carte d'identité de l'organisation */}
       <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
         <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
-          <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">
-            <Building2Icon className="size-7" />
+          <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">
+            {organization.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- URL arbitraire (data: ou http(s)) non couverte par next/image sans config dédiée.
+              <img
+                src={organization.logoUrl}
+                alt={`Logo ${organization.name}`}
+                className="size-full object-contain"
+              />
+            ) : (
+              <Building2Icon className="size-7" />
+            )}
           </div>
 
           <div className="min-w-0 flex-1">
@@ -194,10 +508,30 @@ export function OrganizationView({
                 {organization.phone}
               </span>
             ) : null}
-            {organization.address ? (
+            {organization.address || organization.city ? (
               <span className="inline-flex items-center gap-1.5 sm:justify-end">
                 <MapPinIcon className="size-4 shrink-0" aria-hidden="true" />
-                {organization.address}
+                {[organization.address, organization.city]
+                  .filter(Boolean)
+                  .join(", ")}
+              </span>
+            ) : null}
+            {organization.website ? (
+              <span className="inline-flex items-center gap-1.5 sm:justify-end">
+                <GlobeIcon className="size-4 shrink-0" aria-hidden="true" />
+                {organization.website}
+              </span>
+            ) : null}
+            {organization.rccm ? (
+              <span className="inline-flex items-center gap-1.5 sm:justify-end">
+                <LandmarkIcon className="size-4 shrink-0" aria-hidden="true" />
+                RCCM : {organization.rccm}
+              </span>
+            ) : null}
+            {organization.ifu ? (
+              <span className="inline-flex items-center gap-1.5 sm:justify-end">
+                <LandmarkIcon className="size-4 shrink-0" aria-hidden="true" />
+                IFU / NIF : {organization.ifu}
               </span>
             ) : null}
           </div>

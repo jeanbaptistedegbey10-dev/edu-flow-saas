@@ -88,8 +88,8 @@ export function ExpensesView({ expenses }: { expenses: ExpenseDTO[] }) {
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Dépenses</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold tracking-tight">Dépenses</h2>
+          <p className="text-base text-muted-foreground">
             Suivez et gérez les dépenses de votre organisation.
           </p>
         </div>

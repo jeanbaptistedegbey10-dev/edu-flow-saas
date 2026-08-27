@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { getCurrentOrganizationBranding } from "@/actions/organization";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -6,7 +7,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { Bell, Search } from "lucide-react";
+import { Bell, Building2, Search } from "lucide-react";
 
 export default async function DashboardLayout({
   children,
@@ -17,18 +18,43 @@ export default async function DashboardLayout({
   // client `AppSidebar` (évite un SessionProvider dédié côté client).
   const session = await auth();
 
+  // Identité visuelle de l'organisation (logo + nom) affichée dans l'en-tête.
+  // Dégradation gracieuse : monogramme par défaut si indisponible.
+  const branding = await getCurrentOrganizationBranding();
+
   return (
     <SidebarProvider>
       <AppSidebar user={session?.user} />
       <SidebarInset>
-        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <SidebarTrigger className="-ml-1" />
           <Separator
             orientation="vertical"
             className="mr-2 data-[orientation=vertical]:h-4"
           />
           <div className="flex flex-1 items-center gap-2">
-            <h1 className="text-lg font-semibold">Tableau de bord</h1>
+            <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary/10 text-primary">
+              {branding?.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- URL arbitraire (data: ou http(s)) non couverte par next/image sans config dédiée.
+                <img
+                  src={branding.logoUrl}
+                  alt={`Logo ${branding.name}`}
+                  className="size-full object-contain"
+                />
+              ) : (
+                <Building2 className="size-4" />
+              )}
+            </div>
+            <div className="min-w-0 leading-tight">
+              <h1 className="text-xl font-semibold tracking-tight">
+                Tableau de bord
+              </h1>
+              {branding?.name ? (
+                <p className="truncate text-xs text-muted-foreground">
+                  {branding.name}
+                </p>
+              ) : null}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -47,7 +73,12 @@ export default async function DashboardLayout({
             </button>
           </div>
         </header>
-        <main className="flex flex-1 flex-col">{children}</main>
+        <main className="flex flex-1 flex-col">
+          {/* Conteneur élargi : occupe pleinement les écrans 1080p (Full HD) */}
+          <div className="mx-auto w-full max-w-[1800px] flex-1 px-4 py-6 sm:px-6 lg:px-8">
+            {children}
+          </div>
+        </main>
       </SidebarInset>
     </SidebarProvider>
   );

@@ -3,7 +3,7 @@
 import type { TaskPriority, TaskStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId } from "@/lib/session";
+import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -36,30 +36,39 @@ export type CalendarTaskDTO = {
 export async function getCalendarEvents(): Promise<CalendarTaskDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
-  const tasks = await prisma.task.findMany({
-    where: {
-      organizationId,
-      dueDate: { not: null },
-    },
-    orderBy: [{ dueDate: "asc" }],
-    select: {
-      id: true,
-      title: true,
-      status: true,
-      priority: true,
-      dueDate: true,
-      assignee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
+  try {
+    const tasks = await prisma.task.findMany({
+      where: {
+        organizationId,
+        dueDate: { not: null },
+      },
+      orderBy: [{ dueDate: "asc" }],
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        priority: true,
+        dueDate: true,
+        assignee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  return tasks.map((task) => ({
-    ...task,
-    dueDate: task.dueDate,
-  }));
+    return tasks.map((task) => ({
+      ...task,
+      dueDate: task.dueDate,
+    }));
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getCalendarEvents] Échec de lecture :", error);
+
+    // Dégradation gracieuse : agenda vide plutôt que crash serveur.
+    return [];
+  }
 }

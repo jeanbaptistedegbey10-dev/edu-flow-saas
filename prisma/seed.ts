@@ -11,6 +11,13 @@ async function main() {
   console.log("🌱 Seeding database...");
 
   // Clean existing data (in dependency order)
+  await prisma.saleItem.deleteMany();
+  await prisma.sale.deleteMany();
+  await prisma.productService.deleteMany();
+  await prisma.attendance.deleteMany();
+  await prisma.courseLog.deleteMany();
+  await prisma.workflowStage.deleteMany();
+  await prisma.workflow.deleteMany();
   await prisma.task.deleteMany();
   await prisma.payroll.deleteMany();
   await prisma.expense.deleteMany();
@@ -103,6 +110,10 @@ async function main() {
       lastName: "Traoré",
       email: "awa.traore@example.com",
       phone: "+225 05 00 00 00 01",
+      clientType: "LANGUAGE_AND_TRAVEL",
+      totalCost: 400000,
+      discount: 25000,
+      netAmount: 375000,
       dateOfBirth: new Date("2000-03-15"),
       address: "Abidjan, Yopougon",
       status: "ENROLLED",
@@ -117,6 +128,10 @@ async function main() {
       lastName: "Konan",
       email: "koffi.konan@example.com",
       phone: "+225 05 00 00 00 02",
+      clientType: "LANGUAGE_ONLY",
+      totalCost: 150000,
+      discount: 0,
+      netAmount: 150000,
       dateOfBirth: new Date("1998-07-22"),
       address: "Abidjan, Treichville",
       status: "IN_PROGRESS",
@@ -131,6 +146,7 @@ async function main() {
       lastName: "Diallo",
       email: "fatou.diallo@example.com",
       phone: "+225 05 00 00 00 03",
+      clientType: "TRAVEL_ONLY",
       dateOfBirth: new Date("2000-11-05"),
       address: "Abidjan, Marcory",
       status: "PROSPECT",
@@ -145,6 +161,10 @@ async function main() {
       lastName: "Aka",
       email: "yao.aka@example.com",
       phone: "+225 05 00 00 00 04",
+      clientType: "TRAVEL_ONLY",
+      totalCost: 200000,
+      discount: 0,
+      netAmount: 200000,
       dateOfBirth: new Date("1999-01-30"),
       address: "Abidjan, Abobo",
       status: "ENROLLED",
@@ -237,12 +257,216 @@ async function main() {
   });
 
   // --------------------------------------
+  // Workflows (Procédures par défaut : Allemagne, Canada, France)
+  // --------------------------------------
+  const workflowGermany = await prisma.workflow.create({
+    data: {
+      organizationId: org1.id,
+      country: "Allemagne",
+      title: "Procédure Allemagne — Ausbildung",
+      description: "Accompagnement complet pour Ausbildung et études en Allemagne",
+      isDefault: true,
+      baseCost: 850000,
+      stages: {
+        create: [
+          {
+            organizationId: org1.id,
+            title: "Évaluation du dossier",
+            order: 0,
+            requiredDocuments: [
+              "Pièce d'identité",
+              "Diplômes",
+              "Relevés de notes",
+            ],
+          },
+          {
+            organizationId: org1.id,
+            title: "Test de langue (B1/B2)",
+            order: 1,
+            requiredDocuments: ["Certificat de langue B1 ou B2"],
+          },
+          {
+            organizationId: org1.id,
+            title: "Candidature aux établissements",
+            order: 2,
+            requiredDocuments: [
+              "CV",
+              "Lettre de motivation",
+              "Certificat de langue",
+              "Diplômes traduits",
+            ],
+          },
+          {
+            organizationId: org1.id,
+            title: "Admission obtenue",
+            order: 3,
+            requiredDocuments: ["Lettre d'admission", "Contrat de formation"],
+          },
+          {
+            organizationId: org1.id,
+            title: "Demande de visa",
+            order: 4,
+            requiredDocuments: [
+              "Passeport",
+              "Lettre d'admission",
+              "Preuves de financement",
+              "Assurance santé",
+            ],
+          },
+          {
+            organizationId: org1.id,
+            title: "Visa approuvé",
+            order: 5,
+            requiredDocuments: ["Visa", "Billet d'avion"],
+          },
+          {
+            organizationId: org1.id,
+            title: "Départ & installation",
+            order: 6,
+            requiredDocuments: ["Contrat de logement", "Assurance"],
+          },
+        ],
+      },
+    },
+  });
+
+  const workflowCanada = await prisma.workflow.create({
+    data: {
+      organizationId: org1.id,
+      country: "Canada",
+      title: "Procédure Canada — Études supérieures",
+      description: "Accompagnement pour étudier au Canada",
+      isDefault: true,
+      baseCost: 950000,
+      stages: {
+        create: [
+          {
+            organizationId: org1.id,
+            order: 0,
+            title: "Évaluation du projet",
+            requiredDocuments: ["Pièce d'identité", "Diplômes"],
+          },
+          {
+            organizationId: org1.id,
+            order: 1,
+            title: "Tests de langue (IELTS/TEF)",
+            requiredDocuments: ["Certificat IELTS/TEF"],
+          },
+          {
+            organizationId: org1.id,
+            order: 2,
+            title: "Candidature universitaire",
+            requiredDocuments: ["CV", "Lettre de motivation", "Relevés de notes"],
+          },
+          {
+            organizationId: org1.id,
+            order: 3,
+            title: "CAQ & Permis d'études",
+            requiredDocuments: ["Lettre d'admission", "Preuves financières"],
+          },
+          {
+            organizationId: org1.id,
+            order: 4,
+            title: "Visa & départ",
+            requiredDocuments: ["Passeport", "Visa", "Billet d'avion"],
+          },
+        ],
+      },
+    },
+  });
+
+  const workflowFrance = await prisma.workflow.create({
+    data: {
+      organizationId: org1.id,
+      country: "France",
+      title: "Procédure France — Visa étudiant",
+      description: "Accompagnement pour les études en France",
+      isDefault: true,
+      baseCost: 750000,
+      stages: {
+        create: [
+          {
+            organizationId: org1.id,
+            order: 0,
+            title: "Préparation du dossier",
+            requiredDocuments: ["Pièce d'identité", "Diplômes", "CV"],
+          },
+          {
+            organizationId: org1.id,
+            order: 1,
+            title: "Inscription Campus France",
+            requiredDocuments: ["Dossier Campus France", "Certificats de langue"],
+          },
+          {
+            organizationId: org1.id,
+            order: 2,
+            title: "Entretien Campus France",
+            requiredDocuments: ["Convocation à l'entretien"],
+          },
+          {
+            organizationId: org1.id,
+            order: 3,
+            title: "Demande de visa",
+            requiredDocuments: [
+              "Passeport",
+              "Attestation Campus France",
+              "Preuves de financement",
+            ],
+          },
+          {
+            organizationId: org1.id,
+            order: 4,
+            title: "Visa & départ",
+            requiredDocuments: ["Visa", "Billet d'avion", "Assurance"],
+          },
+        ],
+      },
+    },
+  });
+
+  // --------------------------------------
+  // Travel Procedures
+  // --------------------------------------
+  const travel1 = await prisma.travelProcedure.create({
+    data: {
+      organizationId: org1.id,
+      studentId: student1.id,
+      advisorId: staff1.id,
+      workflowId: workflowGermany.id,
+      destination: "Allemagne",
+      targetProgram: "Ausbildung - Soins infirmiers",
+      status: "LANGUAGE_TEST",
+      totalCost: 850000,
+      discount: 50000,
+      netAmount: 800000,
+      currentStageOrder: 1,
+      notes: "Étudiant motivé, bon niveau B1 en allemand",
+    },
+  });
+
+  await prisma.travelProcedure.create({
+    data: {
+      organizationId: org2.id,
+      studentId: student4.id,
+      destination: "Canada",
+      targetProgram: "Études supérieures - Informatique",
+      status: "ADMISSION_APPLIED",
+      totalCost: 950000,
+      discount: 50000,
+      netAmount: 900000,
+      currentStageOrder: 2,
+      notes: "Dossier complet envoyé à l'université",
+    },
+  });
+
+  // --------------------------------------
   // Payments
   // --------------------------------------
   await prisma.payment.create({
     data: {
       organizationId: org1.id,
       studentId: student1.id,
+      travelProcedureId: travel1.id,
       amount: 75000,
       currency: "XOF",
       paymentMethod: "MOBILE_MONEY",
@@ -256,6 +480,7 @@ async function main() {
     data: {
       organizationId: org1.id,
       studentId: student1.id,
+      travelProcedureId: travel1.id,
       amount: 75000,
       currency: "XOF",
       paymentMethod: "CASH",
@@ -280,6 +505,20 @@ async function main() {
 
   await prisma.payment.create({
     data: {
+      organizationId: org1.id,
+      studentId: student1.id,
+      travelProcedureId: travel1.id,
+      amount: 200000,
+      currency: "XOF",
+      paymentMethod: "MOBILE_MONEY",
+      status: "COMPLETED",
+      reference: "PAY-2026-0005",
+      description: "Échelonnement 1 - Procédure Allemagne",
+    },
+  });
+
+  await prisma.payment.create({
+    data: {
       organizationId: org2.id,
       studentId: student4.id,
       amount: 100000,
@@ -292,28 +531,184 @@ async function main() {
   });
 
   // --------------------------------------
-  // Travel Procedures
+  // Product Services (POS)
   // --------------------------------------
-  await prisma.travelProcedure.create({
+  await prisma.productService.create({
     data: {
       organizationId: org1.id,
-      studentId: student1.id,
-      advisorId: staff1.id,
-      destination: "Allemagne",
-      targetProgram: "Ausbildung - Soins infirmiers",
-      status: "LANGUAGE_TEST",
-      notes: "Étudiant motivé, bon niveau B1 en allemand",
+      name: "Manuel Anglais B1",
+      category: "BOOK",
+      unitPrice: 15000,
+      description: "Manuel d'anglais professionnel niveau B1",
     },
   });
 
-  await prisma.travelProcedure.create({
+  await prisma.productService.create({
     data: {
-      organizationId: org2.id,
-      studentId: student4.id,
-      destination: "Canada",
-      targetProgram: "Études supérieures - Informatique",
-      status: "ADMISSION_APPLIED",
-      notes: "Dossier complet envoyé à l'université",
+      organizationId: org1.id,
+      name: "Livre Allemand B1",
+      category: "BOOK",
+      unitPrice: 18000,
+      description: "Méthode d'allemand niveau B1",
+    },
+  });
+
+  await prisma.productService.create({
+    data: {
+      organizationId: org1.id,
+      name: "Traduction de documents",
+      category: "TRANSLATION",
+      unitPrice: 5000,
+      description: "Tarif par page traduite (FR/DE/EN)",
+    },
+  });
+
+  await prisma.productService.create({
+    data: {
+      organizationId: org1.id,
+      name: "Photocopies (page)",
+      category: "COPY_SERVICE",
+      unitPrice: 100,
+      description: "Photocopie noir & blanc par page",
+    },
+  });
+
+  await prisma.productService.create({
+    data: {
+      organizationId: org1.id,
+      name: "Certificat de langue",
+      category: "TRANSLATION",
+      unitPrice: 20000,
+      description: "Délivrance de certificat de langue",
+    },
+  });
+
+  // --------------------------------------
+  // Sales (POS / Caisse)
+  // --------------------------------------
+  const sale1 = await prisma.sale.create({
+    data: {
+      organizationId: org1.id,
+      studentId: student1.id,
+      createdById: admin1.id,
+      totalAmount: 30000,
+      discount: 2000,
+      netAmount: 28000,
+      status: "COMPLETED",
+    },
+  });
+
+  const bookProduct = await prisma.productService.findFirstOrThrow({
+    where: { organizationId: org1.id, name: "Manuel Anglais B1" },
+  });
+
+  const copyProduct = await prisma.productService.findFirstOrThrow({
+    where: { organizationId: org1.id, name: "Photocopies (page)" },
+  });
+
+  await prisma.saleItem.create({
+    data: {
+      saleId: sale1.id,
+      productServiceId: bookProduct.id,
+      quantity: 2,
+      unitPrice: 15000,
+      subtotal: 30000,
+    },
+  });
+
+  await prisma.saleItem.create({
+    data: {
+      saleId: sale1.id,
+      productServiceId: copyProduct.id,
+      quantity: 10,
+      unitPrice: 100,
+      subtotal: 1000,
+    },
+  });
+
+  // --------------------------------------
+  // Attendance & CourseLogs (Cahier de texte)
+  // --------------------------------------
+  await prisma.attendance.createMany({
+    data: [
+      {
+        organizationId: org1.id,
+        courseId: course1.id,
+        studentId: student1.id,
+        status: "PRESENT",
+        date: new Date("2026-08-18T09:00:00.000Z"),
+      },
+      {
+        organizationId: org1.id,
+        courseId: course1.id,
+        studentId: student2.id,
+        status: "PRESENT",
+        date: new Date("2026-08-18T09:00:00.000Z"),
+      },
+      {
+        organizationId: org1.id,
+        courseId: course1.id,
+        studentId: student1.id,
+        status: "PRESENT",
+        date: new Date("2026-08-20T09:00:00.000Z"),
+      },
+      {
+        organizationId: org1.id,
+        courseId: course1.id,
+        studentId: student2.id,
+        status: "ABSENT",
+        date: new Date("2026-08-20T09:00:00.000Z"),
+        notes: "Absence non justifiée",
+      },
+      {
+        organizationId: org1.id,
+        courseId: course2.id,
+        studentId: student1.id,
+        status: "EXCUSED",
+        date: new Date("2026-08-19T14:00:00.000Z"),
+        notes: "Certificat médical fourni",
+      },
+    ],
+  });
+
+  await prisma.courseLog.create({
+    data: {
+      organizationId: org1.id,
+      courseId: course1.id,
+      teacherId: teacher1.id,
+      date: new Date("2026-08-18T09:00:00.000Z"),
+      chapterTitle: "Chapitre 2 : Le present perfect",
+      content:
+        "Révision du present simple puis introduction du present perfect. Comparaison des deux temps à travers des exercices oraux et écrits.",
+      homework: "Exercices pages 32-34 du manuel.",
+      notes: "Bonne participation générale.",
+    },
+  });
+
+  await prisma.courseLog.create({
+    data: {
+      organizationId: org1.id,
+      courseId: course1.id,
+      teacherId: teacher1.id,
+      date: new Date("2026-08-20T09:00:00.000Z"),
+      chapterTitle: "Chapitre 3 : Le conditionnel passé",
+      content:
+        "Introduction au conditionnel passé : formation, emplois (regret, reproche, hypothèse) et mise en pratique à l'oral.",
+      homework: "Exercices pages 45-47 du manuel.",
+      notes: "Revoir la prononciation des verbes irréguliers.",
+    },
+  });
+
+  await prisma.courseLog.create({
+    data: {
+      organizationId: org1.id,
+      courseId: course2.id,
+      teacherId: teacher1.id,
+      date: new Date("2026-08-19T14:00:00.000Z"),
+      chapterTitle: "Unité 4 : Au contact des patients",
+      content:
+        "Vocabulaire du lexique médical et des interactions avec les patients. Jeux de rôle en binômes.",
+      homework: "Apprendre la liste de vocabulaire, préparer un dialogue.",
     },
   });
 
@@ -414,6 +809,64 @@ async function main() {
     },
   });
 
+  // --------------------------------------
+  // Verify — les identifiants doivent réellement fonctionner en base
+  // --------------------------------------
+  const demoAccounts = [
+    { email: "admin@excellence-formation.com", role: "ADMIN", organizationId: org1.id },
+    { email: "teacher@excellence-formation.com", role: "TEACHER", organizationId: org1.id },
+    { email: "staff@excellence-formation.com", role: "STAFF", organizationId: org1.id },
+    { email: "admin@horizon-mobilite.com", role: "ADMIN", organizationId: org2.id },
+  ];
+
+  for (const account of demoAccounts) {
+    const user = await prisma.user.findUnique({
+      where: { email: account.email },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        isActive: true,
+        organizationId: true,
+        passwordHash: true,
+        organization: { select: { name: true } },
+      },
+    });
+
+    if (!user) {
+      throw new Error(
+        `Vérification seed : le compte ${account.email} est introuvable en base.`
+      );
+    }
+
+    if (!user.isActive) {
+      throw new Error(
+        `Vérification seed : le compte ${account.email} n'est pas actif.`
+      );
+    }
+
+    if (user.organizationId !== account.organizationId) {
+      throw new Error(
+        `Vérification seed : le compte ${account.email} n'est pas rattaché à la bonne organisation.`
+      );
+    }
+
+    const passwordOk = await bcrypt.compare(DEMO_PASSWORD, user.passwordHash);
+
+    if (!passwordOk) {
+      throw new Error(
+        `Vérification seed : le mot de passe du compte ${account.email} ne correspond pas au hash stocké.`
+      );
+    }
+
+    console.log(
+      `   ✔ ${user.email} (${user.role}) → organisation « ${user.organization.name} » : connexion vérifiée.`
+    );
+  }
+
+  // --------------------------------------
+  // Summary
+  // --------------------------------------
   console.log("✅ Seed completed successfully!");
   console.log(`   Organizations: ${org1.name}, ${org2.name}`);
   console.log(`   🔑 Comptes de démonstration (mot de passe : ${DEMO_PASSWORD}) :`);
@@ -422,6 +875,7 @@ async function main() {
   console.log(`      - ${staff1.email} (STAFF)`);
   console.log(`      - ${admin2.email} (ADMIN)`);
   console.log(`   Students: ${student1.studentCode}, ${student2.studentCode}, ${student3.studentCode}, ${student4.studentCode}`);
+  console.log(`   Workflows: ${workflowGermany.country}, ${workflowCanada.country}, ${workflowFrance.country}`);
   console.log(`   Courses: ${course1.code}, ${course2.code}, ${course3.code}, ${course4.code}`);
 }
 

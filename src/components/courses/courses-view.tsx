@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   BookOpenIcon,
+  ClipboardListIcon,
   ClockIcon,
   GraduationCapIcon,
   SearchIcon,
@@ -32,10 +34,13 @@ function formatPrice(value: number): string {
 
 function CourseCard({
   course,
+  isTeacher,
   onEdit,
   onDelete,
 }: {
   course: CourseDTO;
+  /** Un enseignant ne voit ni prix ni actions d'administration. */
+  isTeacher?: boolean;
   onEdit: (course: CourseDTO) => void;
   onDelete: (course: CourseDTO) => Promise<{ ok: boolean; message?: string }>;
 }) {
@@ -51,19 +56,29 @@ function CourseCard({
           </span>
 
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold tabular-nums">
-              {formatPrice(course.price)}
-            </span>
-            <EntityActionsMenu
-              entityName={`le cours « ${course.title} »`}
-              onEdit={() => onEdit(course)}
-              onDelete={() => onDelete(course)}
-            />
+            {/* Donnée financière masquée aux enseignants */}
+            {!isTeacher ? (
+              <span className="text-sm font-semibold tabular-nums">
+                {formatPrice(course.price)}
+              </span>
+            ) : null}
+            {!isTeacher ? (
+              <EntityActionsMenu
+                entityName={`le cours « ${course.title} »`}
+                onEdit={() => onEdit(course)}
+                onDelete={() => onDelete(course)}
+              />
+            ) : null}
           </div>
         </div>
 
-        {/* Intitulé */}
-        <h3 className="font-semibold leading-snug">{course.title}</h3>
+        {/* Intitulé (lien vers la fiche détaillée / cahier de texte) */}
+        <Link
+          href={`/dashboard/courses/${course.id}`}
+          className="font-semibold leading-snug hover:underline"
+        >
+          {course.title}
+        </Link>
 
         {/* Description (tronquée) */}
         {course.description ? (
@@ -98,6 +113,15 @@ function CourseCard({
             {enrollmentCount > 1 ? "s" : ""}
           </span>
         </div>
+
+        {/* Accès direct au cahier de texte du cours */}
+        <Link
+          href={`/dashboard/courses/${course.id}`}
+          className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+        >
+          <ClipboardListIcon className="size-3.5" />
+          Présences & cahier de texte
+        </Link>
       </div>
     </div>
   );
@@ -110,9 +134,12 @@ function CourseCard({
 export function CoursesView({
   courses,
   teachers,
+  isTeacher = false,
 }: {
   courses: CourseDTO[];
   teachers: TeacherDTO[];
+  /** Masque les données financières et les actions d'administration. */
+  isTeacher?: boolean;
 }) {
   const [search, setSearch] = React.useState("");
   const [editingCourse, setEditingCourse] = React.useState<CourseDTO | null>(
@@ -148,12 +175,15 @@ export function CoursesView({
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Cours</h2>
-          <p className="text-sm text-muted-foreground">
-            Gérez le catalogue des formations proposées par votre centre.
+          <h2 className="text-2xl font-semibold tracking-tight">Cours</h2>
+          <p className="text-base text-muted-foreground">
+            {isTeacher
+              ? "Les cours qui vous sont assignés."
+              : "Gérez le catalogue des formations proposées par votre centre."}
           </p>
         </div>
-        <AddCourseDialog teachers={teachers} />
+        {/* La création de cours est réservée à l'administration */}
+        {!isTeacher ? <AddCourseDialog teachers={teachers} /> : null}
       </div>
 
       {/* Recherche instantanée */}
@@ -178,6 +208,7 @@ export function CoursesView({
                 <CourseCard
                   key={course.id}
                   course={course}
+                  isTeacher={isTeacher}
                   onEdit={setEditingCourse}
                   onDelete={handleDeleteCourse}
                 />

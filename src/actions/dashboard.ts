@@ -7,7 +7,11 @@ import type {
 } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId } from "@/lib/session";
+import {
+  getCurrentOrganizationId,
+  getCurrentSessionUser,
+  isNextRedirectError,
+} from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants serveur/clients)
@@ -61,6 +65,245 @@ export type DashboardStatsDTO = {
 };
 
 // --------------------------------------
+// Types & Server Action — Espace enseignant
+// --------------------------------------
+
+/** Cours enseigné par l'utilisateur connecté (aperçu tableau de bord). */
+export type TeacherCourseSummaryDTO = {
+  id: string;
+  title: string;
+  code: string;
+  enrollmentCount: number;
+};
+
+/** Dernière entrée de cahier de texte de l'enseignant. */
+export type TeacherRecentLogDTO = {
+  id: string;
+  date: Date;
+  chapterTitle: string;
+  courseTitle: string;
+};
+
+export type TeacherDashboardStatsDTO = {
+  /** Nombre de cours assignés à l'enseignant connecté. */
+  myCoursesCount: number;
+  /** Nombre total d'étudiants inscrits à ses cours (inscriptions cumulées). */
+  myStudentsCount: number;
+  /** Nombre d'entrées de cahier de texte saisies par l'enseignant. */
+  courseLogsCount: number;
+  /**
+   * Taux de présence du mois courant sur ses cours (PRESENT + LATE / total,
+   * 0–100). `null` si aucun émargement n'a été saisi ce mois-ci.
+   */
+  monthlyAttendanceRate: number | null;
+  /** Nombre d'émargements saisis sur le mois courant dans son périmètre. */
+  attendanceEntriesThisMonth: number;
+  /** Nombre de sessions d'évaluation rattachées à ses classes. */
+  evaluationsCount: number;
+  /**
+   * Moyenne générale normalisée sur 100 des notes saisies pour ses évaluations
+   * (pondérée par les barèmes). `null` si aucune note n'existe.
+   */
+  averageScore: number | null;
+  /** Ses cours avec effectif, triés par titre. */
+  courses: TeacherCourseSummaryDTO[];
+  /** Les 5 dernières entrées de son cahier de texte. */
+  recentLogs: TeacherRecentLogDTO[];
+};
+
+/**
+ * Agrège les indicateurs pédagogiques de l'enseignant connecté.
+ * AUCUNE donnée financière n'est exposée ici : un enseignant ne voit que
+ * ses cours, ses étudiants et son cahier de texte.
+ */
+export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsDTO> {
+  const user = await getCurrentSessionUser();
+
+  if (user.role === "STUDENT") {
+    throw new Error(
+      "Accès refusé : les étudiants n'ont pas accès au tableau de bord."
+    );
+  }
+
+  try {
+    // Un enseignant ne voit que ses cours ; les autres rôles staff voient
+    // l'ensemble du catalogue (aucune donnée financière incluse).
+    const courseWhere =
+      user.role === "TEACHER"
+        ? { organizationId: user.organizationId, teacherId: user.id }
+        : { organizationId: user.organizationId };
+
+    const [courses, logs] = await Promise.all([
+      prisma.course.findMany({
+        where: courseWhere,
+        orderBy: [{ title: "asc" }],
+        select: {
+          id: true,
+          title: true,
+          code: true,
+          _count: { select: { enrollments: true } },
+        },
+      }),
+      prisma.courseLog.findMany({
+        where:
+          user.role === "TEACHER"
+            ? {
+                organizationId: user.organizationId,
+                teacherId: user.id,
+              }
+            : { organizationId: user.organizationId },
+        orderBy: { date: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          date: true,
+          chapterTitle: true,
+          course: { select: { title: true } },
+        },
+      }),
+    ]);
+
+    // ----- Assiduité & évaluations (strictement pédagogique) -----
+    // Périmètre enseignant : ses cours (via le cours OU la classe assignée).
+    // Les autres rôles staff voient l'ensemble de l'organisation.
+    const isTeacherRole = user.role === "TEACHER";
+
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+
+    const [monthStatusCounts, evaluationRows] = await Promise.all([
+      prisma.attendance.groupBy({
+        by: ["status"],
+        where: {
+          organizationId: user.organizationId,
+          date: { gte: monthStart, lt: monthEnd },
+          ...(isTeacherRole
+            ? {
+                OR: [
+                  { course: { teacherId: user.id } },
+                  { class: { teacherId: user.id } },
+                ],
+              }
+            : {}),
+        },
+        _count: { _all: true },
+      }),
+      prisma.evaluation.findMany({
+        where: {
+          organizationId: user.organizationId,
+          ...(isTeacherRole
+            ? {
+                class: {
+                  OR: [
+                    { teacherId: user.id },
+                    { course: { teacherId: user.id } },
+                  ],
+                },
+              }
+            : {}),
+        },
+        select: {
+          id: true,
+          modules: {
+            select: {
+              maxScore: true,
+              grades: { select: { score: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    // Taux de présence mensuel : les retardataires ont assisté au cours.
+    const presentishCount = monthStatusCounts
+      .filter((row) => row.status === "PRESENT" || row.status === "LATE")
+      .reduce((total, row) => total + row._count._all, 0);
+    const attendanceEntriesThisMonth = monthStatusCounts.reduce(
+      (total, row) => total + row._count._all,
+      0
+    );
+
+    // Moyenne pondérée par les barèmes, normalisée sur 100.
+    let weightedScoreSum = 0;
+    let weightedMaxSum = 0;
+    for (const evaluation of evaluationRows) {
+      for (const evaluationModule of evaluation.modules) {
+        if (!(evaluationModule.maxScore > 0)) continue;
+
+        for (const grade of evaluationModule.grades) {
+          weightedScoreSum += grade.score;
+          weightedMaxSum += evaluationModule.maxScore;
+        }
+      }
+    }
+
+    return {
+      myCoursesCount: courses.length,
+      myStudentsCount: courses.reduce(
+        (total, course) => total + course._count.enrollments,
+        0
+      ),
+      courseLogsCount: await prisma.courseLog.count({
+        where:
+          user.role === "TEACHER"
+            ? { organizationId: user.organizationId, teacherId: user.id }
+            : { organizationId: user.organizationId },
+      }),
+      monthlyAttendanceRate:
+        attendanceEntriesThisMonth > 0
+          ? Math.min(
+              100,
+              Math.max(
+                0,
+                Math.round((presentishCount / attendanceEntriesThisMonth) * 1000) /
+                  10
+              )
+            )
+          : null,
+      attendanceEntriesThisMonth,
+      evaluationsCount: evaluationRows.length,
+      averageScore:
+        weightedMaxSum > 0
+          ? Math.round((weightedScoreSum / weightedMaxSum) * 1000) / 10
+          : null,
+      courses: courses.map((course) => ({
+        id: course.id,
+        title: course.title,
+        code: course.code,
+        enrollmentCount: course._count.enrollments,
+      })),
+      recentLogs: logs.map((log) => ({
+        id: log.id,
+        date: log.date,
+        chapterTitle: log.chapterTitle,
+        courseTitle: log.course.title,
+      })),
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error(
+      "[getTeacherDashboardStats] Échec de calcul des indicateurs :",
+      error
+    );
+
+    // Dégradation gracieuse : indicateurs vides plutôt que crash serveur.
+    return {
+      myCoursesCount: 0,
+      myStudentsCount: 0,
+      courseLogsCount: 0,
+      monthlyAttendanceRate: null,
+      attendanceEntriesThisMonth: 0,
+      evaluationsCount: 0,
+      averageScore: null,
+      courses: [],
+      recentLogs: [],
+    };
+  }
+}
+
+// --------------------------------------
 // Server Actions
 // --------------------------------------
 
@@ -74,93 +317,122 @@ export type DashboardStatsDTO = {
 export async function getDashboardStats(): Promise<DashboardStatsDTO> {
   const organizationId = await getCurrentOrganizationId();
 
-  const [
-    totalStudents,
-    enrolledStudents,
-    prospects,
-    revenueAggregate,
-    activeTravelFiles,
-    activeCourses,
-    recentStudents,
-    recentPayments,
-  ] = await Promise.all([
-    // Total des étudiants (tous statuts).
-    prisma.student.count({ where: { organizationId } }),
+  try {
+    const [
+      totalStudents,
+      enrolledStudents,
+      prospects,
+      revenueAggregate,
+      activeTravelFiles,
+      activeCourses,
+      recentStudents,
+      recentPayments,
+    ] = await Promise.all([
+      // Total des étudiants (tous statuts).
+      prisma.student.count({ where: { organizationId } }),
 
-    // Étudiants officiellement inscrits à une formation.
-    prisma.student.count({
-      where: { organizationId, status: "ENROLLED" },
-    }),
+      // Étudiants officiellement inscrits à une formation.
+      prisma.student.count({
+        where: { organizationId, status: "ENROLLED" },
+      }),
 
-    // Prospects (contacts à convertir).
-    prisma.student.count({
-      where: { organizationId, status: "PROSPECT" },
-    }),
+      // Prospects (contacts à convertir).
+      prisma.student.count({
+        where: { organizationId, status: "PROSPECT" },
+      }),
 
-    // Chiffre d'affaires : somme des paiements réglés (COMPLETED).
-    prisma.payment.aggregate({
-      where: { organizationId, status: "COMPLETED" },
-      _sum: { amount: true },
-    }),
+      // Chiffre d'affaires : somme des paiements réglés (COMPLETED).
+      prisma.payment.aggregate({
+        where: { organizationId, status: "COMPLETED" },
+        _sum: { amount: true },
+      }),
 
-    // Dossiers de voyage/visa en cours de traitement.
-    prisma.travelProcedure.count({
-      where: {
-        organizationId,
-        status: { in: ["ADMISSION_APPLIED", "VISA_APPLIED"] },
-      },
-    }),
+      // Dossiers de voyage/visa en cours de traitement.
+      prisma.travelProcedure.count({
+        where: {
+          organizationId,
+          status: { in: ["ADMISSION_APPLIED", "VISA_APPLIED"] },
+        },
+      }),
 
-    // Formations actives du catalogue.
-    prisma.course.count({ where: { organizationId } }),
+      // Formations actives du catalogue.
+      prisma.course.count({ where: { organizationId } }),
 
-    // Les 5 derniers étudiants inscrits.
-    prisma.student.findMany({
-      where: { organizationId },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-      select: {
-        id: true,
-        studentCode: true,
-        firstName: true,
-        lastName: true,
-        status: true,
-        createdAt: true,
-      },
-    }),
+      // Les 5 derniers étudiants inscrits.
+      prisma.student.findMany({
+        where: { organizationId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          studentCode: true,
+          firstName: true,
+          lastName: true,
+          status: true,
+          createdAt: true,
+        },
+      }),
 
-    // Les 5 derniers règlements enregistrés.
-    prisma.payment.findMany({
-      where: { organizationId },
-      orderBy: { paidAt: "desc" },
-      take: 5,
-      select: {
-        id: true,
-        amount: true,
-        currency: true,
-        paymentMethod: true,
-        status: true,
-        paidAt: true,
-        student: {
+      // Les 5 derniers règlements enregistrés rattachés à un étudiant.
+      // (`studentId` étant nullable au schéma, on écarte ici les lignes sans
+      // étudiant afin de respecter le contrat `RecentPaymentDTO`.)
+      prisma.payment
+        .findMany({
+          where: { organizationId },
+          orderBy: { paidAt: "desc" },
+          take: 5,
           select: {
             id: true,
-            studentCode: true,
-            firstName: true,
-            lastName: true,
+            amount: true,
+            currency: true,
+            paymentMethod: true,
+            status: true,
+            paidAt: true,
+            student: {
+              select: {
+                id: true,
+                studentCode: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
-        },
-      },
-    }),
-  ]);
+        })
+        .then((rows) =>
+          rows.flatMap((row) =>
+            row.student ? [{ ...row, student: row.student }] : []
+          )
+        ),
+    ]);
 
-  return {
-    totalStudents,
-    enrolledStudents,
-    prospects,
-    totalRevenue: revenueAggregate._sum.amount ?? 0,
-    activeTravelFiles,
-    activeCourses,
-    recentStudents,
-    recentPayments,
-  };
+    return {
+      totalStudents,
+      enrolledStudents,
+      prospects,
+      totalRevenue: revenueAggregate._sum.amount ?? 0,
+      activeTravelFiles,
+      activeCourses,
+      recentStudents,
+      recentPayments,
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error(
+      "[getDashboardStats] Échec de calcul des indicateurs :",
+      error
+    );
+
+    // Dégradation gracieuse : tableau de bord vide plutôt que crash serveur.
+    return {
+      totalStudents: 0,
+      enrolledStudents: 0,
+      prospects: 0,
+      totalRevenue: 0,
+      activeTravelFiles: 0,
+      activeCourses: 0,
+      recentStudents: [],
+      recentPayments: [],
+    };
+  }
 }

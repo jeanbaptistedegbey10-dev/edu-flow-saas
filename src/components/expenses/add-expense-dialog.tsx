@@ -5,10 +5,10 @@ import { useActionState } from "react";
 import { Loader2Icon, PlusIcon, ReceiptTextIcon } from "lucide-react";
 
 import {
-  EXPENSE_CATEGORIES,
   createExpenseAction,
   type ExpenseFormState,
 } from "@/actions/expenses";
+import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
 import {
   Select,
   SelectContent,

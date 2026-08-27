@@ -5,7 +5,6 @@ import {
   CalendarIcon,
   CircleUserRoundIcon,
   ClipboardListIcon,
-  EllipsisIcon,
   LayoutGridIcon,
   ListIcon,
   SearchIcon,
@@ -23,14 +22,6 @@ import { AddTaskDialog } from "@/components/tasks/add-task-dialog";
 import { EditTaskDialog } from "@/components/tasks/edit-task-dialog";
 import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -53,6 +44,7 @@ import {
   getTaskPriorityLabel,
 } from "@/lib/task-priority";
 import {
+  TASK_STATUS_LABELS,
   TASK_STATUS_ORDER,
   getTaskStatusBadgeClass,
   getTaskStatusLabel,
@@ -106,11 +98,11 @@ function isOverdue(task: TaskDTO): boolean {
   return task.dueDate.getTime() < todayUtc;
 }
 
-// --------------------------------------
-// Menu de changement rapide de statut
-// --------------------------------------
-
-function TaskStatusMenu({
+/**
+ * Contrôle explicite de changement de statut : le statut courant est
+ * directement visible et modifiable sans menu contextuel caché.
+ */
+function TaskStatusControl({
   task,
   onStatusChange,
 }: {
@@ -118,36 +110,45 @@ function TaskStatusMenu({
   onStatusChange: (taskId: string, status: string) => void;
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Changer le statut de « ${task.title} »`}
+    <Select
+      value={task.status}
+      onValueChange={(value) => {
+        if (value !== task.status) {
+          onStatusChange(task.id, value);
+        }
+      }}
+    >
+      <SelectTrigger
+        id={`task-status-${task.id}`}
+        size="sm"
+        aria-label={`Changer le statut de « ${task.title} »`}
+        className={cn(
+          "h-auto w-auto gap-1 border-none bg-transparent px-1.5 py-0.5 shadow-none",
+          "data-[size=sm]:text-xs"
+        )}
+      >
+        <span
+          className={cn(
+            BADGE_BASE_CLASSES,
+            getTaskStatusBadgeClass(task.status)
+          )}
         >
-          <EllipsisIcon />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel>Changer le statut</DropdownMenuLabel>
-        <DropdownMenuSeparator />
+          {getTaskStatusLabel(task.status)}
+        </span>
+      </SelectTrigger>
+      <SelectContent>
         {TASK_STATUS_ORDER.map((status) => (
-          <DropdownMenuItem
-            key={status}
-            disabled={status === task.status}
-            onSelect={() => onStatusChange(task.id, status)}
-          >
-            {getTaskStatusLabel(status)}
+          <SelectItem key={status} value={status}>
+            {TASK_STATUS_LABELS[status]}
             {status === task.status ? (
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="ml-2 text-xs text-muted-foreground">
                 Actuel
               </span>
             ) : null}
-          </DropdownMenuItem>
+          </SelectItem>
         ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -170,14 +171,6 @@ function TaskCard({
     <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
       <div className="flex items-start justify-between gap-2 p-3 pb-2">
         <p className="text-sm font-medium leading-snug">{task.title}</p>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <TaskStatusMenu task={task} onStatusChange={onStatusChange} />
-          <EntityActionsMenu
-            entityName={`la tâche « ${task.title} »`}
-            onEdit={() => onEdit(task)}
-            onDelete={() => deleteTaskAction(task.id)}
-          />
-        </div>
       </div>
 
       {task.description ? (
@@ -206,6 +199,11 @@ function TaskCard({
             En retard
           </span>
         ) : null}
+      </div>
+
+      {/* Changement de statut explicite + actions CRUD visibles */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-2">
+        <TaskStatusControl task={task} onStatusChange={onStatusChange} />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
@@ -252,6 +250,16 @@ function TaskCard({
           </span>
         </div>
       ) : null}
+
+      {/* Actions CRUD visibles côte à côte */}
+      <div className="border-t px-3 py-2">
+        <EntityActionsMenu
+          entityName={`la tâche « ${task.title} »`}
+          onEdit={() => onEdit(task)}
+          onDelete={() => deleteTaskAction(task.id)}
+          size="xs"
+        />
+      </div>
     </div>
   );
 }
@@ -281,7 +289,7 @@ function KanbanView({
             className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3"
           >
             <div className="flex items-center justify-between px-1">
-              <h3 className="text-sm font-semibold">
+              <h3 className="text-base font-semibold">
                 {getTaskStatusLabel(status)}
               </h3>
               <span
@@ -295,7 +303,7 @@ function KanbanView({
             </div>
 
             {columnTasks.length === 0 ? (
-              <p className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+              <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
                 Aucune tâche
               </p>
             ) : (
@@ -338,9 +346,7 @@ function ListView({
           <TableHead>Étudiant</TableHead>
           <TableHead>Échéance</TableHead>
           <TableHead>Statut</TableHead>
-          <TableHead className="text-right">
-            <span className="sr-only">Actions</span>
-          </TableHead>
+          <TableHead className="text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -402,17 +408,7 @@ function ListView({
                 )}
               </TableCell>
               <TableCell>
-                <div className="flex items-center gap-1">
-                  <span
-                    className={cn(
-                      BADGE_BASE_CLASSES,
-                      getTaskStatusBadgeClass(task.status)
-                    )}
-                  >
-                    {getTaskStatusLabel(task.status)}
-                  </span>
-                  <TaskStatusMenu task={task} onStatusChange={onStatusChange} />
-                </div>
+                <TaskStatusControl task={task} onStatusChange={onStatusChange} />
               </TableCell>
               <TableCell className="text-right">
                 <EntityActionsMenu
@@ -504,12 +500,12 @@ export function TasksView({
   );
 
   return (
-    <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
+    <div className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Tâches</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold tracking-tight">Tâches</h2>
+          <p className="text-base text-muted-foreground">
             Organisez le travail de votre équipe et suivez l’avancement des
             dossiers.
           </p>
@@ -637,8 +633,8 @@ export function TasksView({
           ) : (
             <div className="flex flex-col items-center justify-center gap-1 px-6 py-12 text-center">
               <SearchIcon className="size-8 text-muted-foreground/50" />
-              <p className="text-sm font-medium">Aucun résultat trouvé</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-base font-medium">Aucun résultat trouvé</p>
+              <p className="text-base text-muted-foreground">
                 Essayez un autre terme de recherche ou modifiez les filtres.
               </p>
             </div>
@@ -648,8 +644,8 @@ export function TasksView({
             <div className="flex size-12 items-center justify-center rounded-full bg-muted">
               <ClipboardListIcon className="size-6 text-muted-foreground" />
             </div>
-            <p className="font-medium">Aucune tâche pour le moment</p>
-            <p className="max-w-sm text-sm text-muted-foreground">
+            <p className="text-base font-medium">Aucune tâche pour le moment</p>
+            <p className="max-w-sm text-base text-muted-foreground">
               Créez votre première tâche avec le bouton « Nouvelle tâche »
               pour organiser le travail de votre équipe.
             </p>
@@ -657,7 +653,7 @@ export function TasksView({
         )}
 
         {hasTasks && hasResults ? (
-          <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+          <div className="border-t px-4 py-3 text-sm text-muted-foreground">
             {filteredTasks.length} tâche{filteredTasks.length > 1 ? "s" : ""}{" "}
             sur {tasks.length}
           </div>

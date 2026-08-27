@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { DownloadIcon, SearchIcon, UsersRoundIcon } from "lucide-react";
 
+import type { ClassOptionDTO } from "@/actions/classes";
 import type { StudentDTO } from "@/actions/students";
 import { deleteStudentAction } from "@/actions/students";
 import { AddStudentDialog } from "@/components/students/add-student-dialog";
@@ -56,6 +58,14 @@ const STUDENT_CSV_COLUMNS: readonly CsvColumn<StudentDTO>[] = [
   { header: "Email", value: (student) => student.email ?? "" },
   { header: "Téléphone", value: (student) => student.phone },
   {
+    header: "Classe",
+    value: (student) => student.currentClassName ?? "",
+  },
+  {
+    header: "Frais d'inscription réglés",
+    value: (student) => (student.hasPaidRegistrationFee ? "Oui" : "Non"),
+  },
+  {
     header: "Statut",
     value: (student) => getStudentStatusLabel(student.status),
   },
@@ -65,7 +75,17 @@ const STUDENT_CSV_COLUMNS: readonly CsvColumn<StudentDTO>[] = [
   },
 ];
 
-export function StudentsView({ students }: { students: StudentDTO[] }) {
+export function StudentsView({
+  students,
+  classes,
+  registrationFee,
+}: {
+  students: StudentDTO[];
+  /** Classes / cohortes disponibles pour l'affectation. */
+  classes: ClassOptionDTO[];
+  /** Frais d'inscription par défaut de l'organisation (FCFA). */
+  registrationFee: number;
+}) {
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] =
     React.useState<StudentStatusFilter>("ALL");
@@ -111,12 +131,12 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Étudiants</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold tracking-tight">Étudiants</h2>
+          <p className="text-base text-muted-foreground">
             Gérez les étudiants de votre centre de formation.
           </p>
         </div>
-        <AddStudentDialog />
+        <AddStudentDialog classes={classes} registrationFee={registrationFee} />
       </div>
 
       {/* Carte : barre d'outils + tableau */}
@@ -181,6 +201,7 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
                   <TableHead>Étudiant</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Téléphone</TableHead>
+                  <TableHead>Classe</TableHead>
                   <TableHead>Statut</TableHead>
                   <TableHead>Ajouté le</TableHead>
                   <TableHead className="text-right">
@@ -193,9 +214,12 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
                   <TableRow key={student.id}>
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
-                        <span className="font-medium">
+                        <Link
+                          href={`/dashboard/students/${student.id}`}
+                          className="font-medium hover:underline"
+                        >
                           {student.firstName} {student.lastName}
-                        </span>
+                        </Link>
                         <span className="text-xs text-muted-foreground">
                           {student.studentCode}
                         </span>
@@ -206,6 +230,11 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {student.phone}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {student.currentClassName ?? (
+                        <span className="italic opacity-60">Non affecté</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <span
@@ -265,6 +294,8 @@ export function StudentsView({ students }: { students: StudentDTO[] }) {
       {/* Modale d'édition pré-remplie */}
       <EditStudentDialog
         student={editingStudent}
+        classes={classes}
+        registrationFee={registrationFee}
         open={editingStudent !== null}
         onOpenChange={(open) => {
           if (!open) setEditingStudent(null);

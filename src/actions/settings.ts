@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isNextRedirectError } from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -56,17 +57,37 @@ export async function getUserProfile(): Promise<UserProfileDTO> {
     );
   }
 
-  return prisma.user.findUniqueOrThrow({
-    where: { id: userId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      avatarUrl: true,
-      createdAt: true,
-    },
-  });
+  try {
+    // `findUnique` sécurisé : le compte peut avoir été supprimé alors que
+    // le JWT de session subsiste encore.
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        avatarUrl: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new Error(
+        "Profil introuvable : votre compte n'existe plus dans la base de données."
+      );
+    }
+
+    return user;
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getUserProfile] Échec de lecture :", error);
+
+    throw new Error(
+      "Impossible de charger votre profil pour le moment."
+    );
+  }
 }
 
 /**

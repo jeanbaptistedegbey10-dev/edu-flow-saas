@@ -74,8 +74,8 @@ export function SettingsView({
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Paramètres</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold tracking-tight">Paramètres</h2>
+          <p className="text-base text-muted-foreground">
             Gérez votre profil utilisateur et vos préférences.
           </p>
         </div>

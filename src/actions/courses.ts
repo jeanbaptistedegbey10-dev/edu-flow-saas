@@ -4,7 +4,11 @@ import { Prisma, type Role } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId } from "@/lib/session";
+import {
+  getCurrentOrganizationId,
+  getCurrentSessionUser,
+  isNextRedirectError,
+} from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -159,36 +163,57 @@ function parseCourseForm(formData: FormData): ParsedCourseInput {
 // --------------------------------------
 
 /**
- * Récupère le catalogue des cours de l'organisation active,
+ * Récupère le catalogue des cours accessibles à l'utilisateur connecté,
  * avec la relation `teacher` et le nombre d'étudiants inscrits
  * (`_count.enrollments`).
+ *
+ * Isolation par rôle : un enseignant (TEACHER) ne voit que les cours qui
+ * lui sont assignés ; les autres rôles staff voient tout le catalogue.
  */
 export async function getCourses(): Promise<CourseDTO[]> {
-  const organizationId = await getCurrentOrganizationId();
+  const user = await getCurrentSessionUser();
 
-  return prisma.course.findMany({
-    where: { organizationId },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      title: true,
-      code: true,
-      description: true,
-      price: true,
-      durationWeeks: true,
-      createdAt: true,
-      teacher: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
+  if (user.role === "STUDENT") {
+    throw new Error(
+      "Accès refusé : les étudiants n'ont pas accès au tableau de bord."
+    );
+  }
+
+  try {
+    return await prisma.course.findMany({
+      where:
+        user.role === "TEACHER"
+          ? { organizationId: user.organizationId, teacherId: user.id }
+          : { organizationId: user.organizationId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        code: true,
+        description: true,
+        price: true,
+        durationWeeks: true,
+        createdAt: true,
+        teacher: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        _count: {
+          select: { enrollments: true },
         },
       },
-      _count: {
-        select: { enrollments: true },
-      },
-    },
-  });
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getCourses] Échec de lecture :", error);
+
+    // Dégradation gracieuse : liste vide plutôt que crash serveur.
+    return [];
+  }
 }
 
 /**
@@ -199,21 +224,30 @@ export async function getCourses(): Promise<CourseDTO[]> {
 export async function getTeachers(): Promise<TeacherDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
-  return prisma.user.findMany({
-    where: {
-      organizationId,
-      role: { in: ["TEACHER", "ADMIN"] },
-      isActive: true,
-    },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      role: true,
-    },
-  });
+  try {
+    return await prisma.user.findMany({
+      where: {
+        organizationId,
+        role: { in: ["TEACHER", "ADMIN"] },
+        isActive: true,
+      },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        role: true,
+      },
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getTeachers] Échec de lecture :", error);
+
+    // Dégradation gracieuse : liste vide plutôt que crash serveur.
+    return [];
+  }
 }
 
 /**
@@ -470,6 +504,8 @@ export async function deleteCourseAction(
 
     return { ok: true };
   } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
     console.error("[deleteCourseAction] Échec de suppression :", error);
 
     return {

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId } from "@/lib/session";
+import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -47,19 +47,6 @@ export type ExpenseMutationResult =
 // --------------------------------------
 // Constantes & helpers internes
 // --------------------------------------
-
-/** Catégories de dépenses proposées par défaut. */
-export const EXPENSE_CATEGORIES = [
-  "Loyer",
-  "Salaires",
-  "Électricité",
-  "Internet",
-  "Fournitures",
-  "Marketing",
-  "Transport",
-  "Équipement",
-  "Autre",
-] as const;
 
 /** Plafond de sécurité pour un montant saisi (FCFA). */
 const MAX_AMOUNT = 1_000_000_000;
@@ -154,27 +141,36 @@ function parseExpenseForm(formData: FormData): ParsedExpenseInput {
 export async function getExpenses(): Promise<ExpenseDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
-  return prisma.expense.findMany({
-    where: { organizationId },
-    orderBy: [{ expenseDate: "desc" }, { createdAt: "desc" }],
-    select: {
-      id: true,
-      title: true,
-      category: true,
-      amount: true,
-      currency: true,
-      expenseDate: true,
-      notes: true,
-      createdAt: true,
-      createdBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
+  try {
+    return await prisma.expense.findMany({
+      where: { organizationId },
+      orderBy: [{ expenseDate: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        amount: true,
+        currency: true,
+        expenseDate: true,
+        notes: true,
+        createdAt: true,
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
         },
       },
-    },
-  });
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getExpenses] Échec de lecture :", error);
+
+    // Dégradation gracieuse : liste vide plutôt que crash serveur.
+    return [];
+  }
 }
 
 /**
@@ -344,6 +340,8 @@ export async function deleteExpenseAction(
 
     return { ok: true };
   } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
     console.error("[deleteExpenseAction] Échec de suppression :", error);
 
     return {

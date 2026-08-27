@@ -1,20 +1,28 @@
 import {
   getStudentOptions,
   getTravelProcedures,
+  getWorkflows,
 } from "@/actions/travels";
 import { TravelsView } from "@/components/travels/travels-view";
 
 export const metadata = {
-  title: "Procédures voyage | EduFlow",
+  title: "Module Voyage | EduFlow",
   description:
-    "Suivi des dossiers de mobilité internationale : admissions, visas et départs.",
+    "Suivi visuel des dossiers candidats, échelonnement financier et workflows de procédures par pays.",
 };
 
 export default async function TravelsPage() {
-  const [procedures, students] = await Promise.all([
+  const [procedures, students, workflows] = await Promise.all([
     getTravelProcedures(),
     getStudentOptions(),
+    getWorkflows(),
   ]);
 
-  return <TravelsView procedures={procedures} students={students} />;
+  return (
+    <TravelsView
+      procedures={procedures}
+      students={students}
+      workflows={workflows}
+    />
+  );
 }

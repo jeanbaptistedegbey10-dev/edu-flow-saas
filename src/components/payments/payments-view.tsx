@@ -220,8 +220,8 @@ export function PaymentsView({
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Paiements</h2>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold tracking-tight">Paiements</h2>
+          <p className="text-base text-muted-foreground">
             Suivez les encaissements et les règlements en attente de vos
             étudiants.
           </p>

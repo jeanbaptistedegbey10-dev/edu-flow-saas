@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   UsersRound,
   BookOpen,
+  Layers,
   Wallet,
   PlaneTakeoff,
   ClipboardList,
@@ -12,6 +13,9 @@ import {
   CalendarDays,
   FileText,
   Building2,
+  ShoppingCart,
+  UserCheck,
+  ClipboardCheck,
 } from "lucide-react"
 
 import {
@@ -48,6 +52,16 @@ const mainMenu = [
     icon: BookOpen,
   },
   {
+    title: "Classes",
+    url: "/dashboard/classes",
+    icon: Layers,
+  },
+  {
+    title: "Évaluations & Examens",
+    url: "/dashboard/evaluations",
+    icon: ClipboardCheck,
+  },
+  {
     title: "Paiements",
     url: "/dashboard/payments",
     icon: Wallet,
@@ -56,6 +70,29 @@ const mainMenu = [
     title: "Procédures voyage",
     url: "/dashboard/travels",
     icon: PlaneTakeoff,
+  },
+  {
+    title: "Caisse / POS",
+    url: "/dashboard/pos",
+    icon: ShoppingCart,
+  },
+]
+
+const teacherMenu = [
+  {
+    title: "Mes cours",
+    url: "/dashboard/courses",
+    icon: BookOpen,
+  },
+  {
+    title: "Présences & Cahier de texte",
+    url: "/dashboard/attendance",
+    icon: UserCheck,
+  },
+  {
+    title: "Évaluations & Examens",
+    url: "/dashboard/evaluations",
+    icon: ClipboardCheck,
   },
 ]
 
@@ -99,11 +136,13 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ user }: AppSidebarProps) {
+  const isTeacher = user?.role === "TEACHER";
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2.5 px-2 py-1.5">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm transition-all duration-200">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-400 text-white shadow-sm transition-all duration-200">
             <GraduationCap className="size-5" />
           </div>
           <div className="flex flex-col leading-tight group-data-[collapsible=icon]:hidden">
@@ -113,57 +152,98 @@ export function AppSidebar({ user }: AppSidebarProps) {
         </div>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Principal</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {mainMenu.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild tooltip={item.title}>
-                    <a href={item.url}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Gestion</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {managementMenu.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild tooltip={item.title}>
-                    <a href={item.url}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Organisation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {organizationMenu.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild tooltip={item.title}>
-                    <a href={item.url}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {isTeacher ? (
+          <>
+            <SidebarGroup>
+              <SidebarGroupLabel>Espace enseignant</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {teacherMenu.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild tooltip={item.title}>
+                        <a href={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </a>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            <SidebarGroup>
+              <SidebarGroupLabel>Gestion</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {managementMenu.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild tooltip={item.title}>
+                        <a href={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </a>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        ) : (
+          <>
+            <SidebarGroup>
+              <SidebarGroupLabel>Principal</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {mainMenu.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild tooltip={item.title}>
+                        <a href={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </a>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            <SidebarGroup>
+              <SidebarGroupLabel>Gestion</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {managementMenu.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild tooltip={item.title}>
+                        <a href={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </a>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            <SidebarGroup>
+              <SidebarGroupLabel>Organisation</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {organizationMenu.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild tooltip={item.title}>
+                        <a href={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </a>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
       </SidebarContent>
       <SidebarFooter>
         {/* Pied de page : profil de l'utilisateur connecté + déconnexion */}

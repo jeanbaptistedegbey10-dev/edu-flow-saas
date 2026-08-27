@@ -1,12 +1,7 @@
 "use client";
 
 import * as React from "react";
-import {
-  EllipsisVerticalIcon,
-  Loader2Icon,
-  PencilIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { Loader2Icon, PencilIcon, Trash2Icon } from "lucide-react";
 
 import {
   AlertDialog,
@@ -19,23 +14,18 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 /** Contrat minimal du résultat renvoyé par une action serveur de suppression. */
 export type DeleteActionResult = { ok: boolean; message?: string };
 
 /**
- * Menu d'actions réutilisable (tableaux & cartes Kanban) :
- * - « Modifier » ouvre une modale d'édition pré-remplie via `onEdit` ;
- * - « Supprimer » demande une confirmation via `AlertDialog` avant d'appeler
- *   l'action serveur `onDelete`.
+ * Actions réutilisables (tableaux & cartes Kanban) affichées directement
+ * côte à côte — aucun menu contextuel caché :
+ * - « ✏️ Modifier » (variante outline) ouvre une modale d'édition pré-remplie
+ *   via `onEdit` ;
+ * - « 🗑️ Supprimer » (variante destructive rouge) demande une confirmation via
+ *   `AlertDialog` avant d'appeler l'action serveur `onDelete`.
  *
  * Le composant est autonome : il gère l'état de confirmation, le pending et
  * l'affichage des erreurs retournées par l'action serveur.
@@ -44,6 +34,7 @@ export function EntityActionsMenu({
   entityName,
   onEdit,
   onDelete,
+  size = "sm",
 }: {
   /** Nom lisible de l'entité (utilisé dans les libellés et la confirmation). */
   entityName: string;
@@ -51,6 +42,8 @@ export function EntityActionsMenu({
   onEdit: () => void;
   /** Action serveur de suppression (vérification multi-tenant incluse). */
   onDelete: () => Promise<DeleteActionResult>;
+  /** Taille des boutons (« xs » pour les cartes compactes, « sm » par défaut). */
+  size?: "xs" | "sm";
 }) {
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
@@ -76,42 +69,38 @@ export function EntityActionsMenu({
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Actions pour ${entityName}`}
-            title="Actions"
-          >
-            <EllipsisVerticalIcon />
-          </Button>
-        </DropdownMenuTrigger>
+      <div
+        role="group"
+        aria-label={`Actions pour ${entityName}`}
+        className="flex items-center justify-end gap-1.5"
+      >
+        <Button
+          type="button"
+          variant="outline"
+          size={size}
+          onClick={onEdit}
+          title="Modifier"
+        >
+          <PencilIcon data-icon="inline-start" />
+          Modifier
+        </Button>
 
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem onSelect={onEdit}>
-            <PencilIcon />
-            Modifier
-          </DropdownMenuItem>
+        <Button
+          type="button"
+          variant="destructive"
+          size={size}
+          onClick={() => {
+            setErrorMessage(null);
+            setConfirmOpen(true);
+          }}
+          title="Supprimer"
+        >
+          <Trash2Icon data-icon="inline-start" />
+          Supprimer
+        </Button>
+      </div>
 
-          <DropdownMenuSeparator />
-
-          <DropdownMenuItem
-            variant="destructive"
-            onSelect={() => {
-              setErrorMessage(null);
-              setConfirmOpen(true);
-            }}
-          >
-            <Trash2Icon />
-            Supprimer
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* Confirmation de suppression (rendu hors du menu pour éviter tout
-          conflit de focus entre Radix DropdownMenu et AlertDialog). */}
+      {/* Confirmation de suppression */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

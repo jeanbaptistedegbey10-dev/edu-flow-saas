@@ -2,8 +2,14 @@
 
 import * as React from "react";
 import { useActionState } from "react";
-import { Loader2Icon, SaveIcon } from "lucide-react";
+import {
+  BadgeCheckIcon,
+  CheckCircle2Icon,
+  Loader2Icon,
+  SaveIcon,
+} from "lucide-react";
 
+import type { ClassOptionDTO } from "@/actions/classes";
 import {
   updateStudentAction,
   type StudentDTO,
@@ -29,6 +35,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+/** Valeur sentinelle pour les champs Select optionnels (Radix interdit ""). */
+const NONE_VALUE = "__none__";
+
 const STATUS_OPTIONS = [
   { value: "PROSPECT", label: "Prospect" },
   { value: "ENROLLED", label: "Inscrit" },
@@ -52,16 +61,55 @@ function FieldError({ message }: { message?: string }) {
 /**
  * Formulaire d'édition isolé par entité (`key={student.id}` côté parent)
  * afin de réinitialiser l'état du formulaire à chaque ouverture.
+ *
+ * Sert également de formulaire de réinscription : l'affectation à une
+ * nouvelle classe / cohorte (ex : passage A1 → A2) crée une nouvelle ligne
+ * d'historique sans facturer à nouveau les frais d'inscription.
  */
 function EditStudentForm({
   student,
+  classes,
+  registrationFee,
   onSuccess,
 }: {
   student: StudentDTO;
+  /** Classes / cohortes disponibles pour l'affectation. */
+  classes: ClassOptionDTO[];
+  /** Frais d'inscription par défaut de l'organisation (FCFA). */
+  registrationFee: number;
   onSuccess: () => void;
 }) {
+  // Champs financiers contrôlés : le Net à Payer est recalculé en direct
+  // (netAmount = totalCost − discount), sans jamais être saisissable.
+  const [totalCost, setTotalCost] = React.useState(
+    student.totalCost !== null ? String(student.totalCost) : ""
+  );
+  const [discount, setDiscount] = React.useState(
+    student.discount !== null ? String(student.discount) : ""
+  );
+
+  const netAmount = React.useMemo(() => {
+    const cost = Number(totalCost.replace(",", "."));
+    const reduction = discount ? Number(discount.replace(",", ".")) : 0;
+
+    if (!totalCost || Number.isNaN(cost)) return null;
+
+    return Math.max(0, cost - (Number.isNaN(reduction) ? 0 : reduction));
+  }, [totalCost, discount]);
+
   const [state, formAction, pending] = useActionState(
-    async (_prevState: StudentFormState, formData: FormData) => {
+    async (_prevState: StudentFormState, rawFormData: FormData) => {
+      // Clone les entrées puis convertit la sentinelle « aucune classe »
+      // en chaîne vide attendue par l'action serveur.
+      const formData = new FormData();
+      for (const [key, value] of rawFormData.entries()) {
+        formData.append(key, value);
+      }
+
+      if (String(formData.get("classId") ?? "") === NONE_VALUE) {
+        formData.set("classId", "");
+      }
+
       const result = await updateStudentAction(_prevState, formData);
 
       if (result.status === "success") {
@@ -172,6 +220,112 @@ function EditStudentForm({
           </div>
         </div>
 
+        {/* Classe / cohorte active + réinscription */}
+        <fieldset className="rounded-lg border p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Classe / Cohorte
+          </legend>
+
+          <div className="grid gap-2">
+            <Label htmlFor="edit-classId">Classe active</Label>
+            <Select
+              name="classId"
+              defaultValue={student.currentClassId ?? NONE_VALUE}
+              key={student.currentClassId ?? NONE_VALUE}
+            >
+              <SelectTrigger id="edit-classId" className="w-full">
+                <SelectValue placeholder="Aucune classe" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_VALUE}>— Aucune classe —</SelectItem>
+                {classes.map((klass) => (
+                  <SelectItem key={klass.id} value={klass.id}>
+                    {klass.name} · {klass.schedule} ({klass.courseCode})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldError message={fieldErrors.classId} />
+
+            {/* Statut des frais d'inscription */}
+            {student.hasPaidRegistrationFee ? (
+              <p className="flex items-start gap-1.5 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400">
+                <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0" />
+                Frais d&rsquo;inscription déjà réglés : une réinscription dans
+                une nouvelle classe est gratuite (0 FCFA facturé).
+              </p>
+            ) : registrationFee > 0 ? (
+              <p className="flex items-start gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+                <BadgeCheckIcon className="mt-0.5 size-3.5 shrink-0" />
+                Frais d&rsquo;inscription uniques ({registrationFee.toLocaleString("fr-FR")}{" "}
+                FCFA) seront ajoutés au coût total et encaissés à
+                l&rsquo;enregistrement.
+              </p>
+            ) : null}
+
+            {classes.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Aucune classe disponible : créez-en une depuis la page
+                « Classes ».
+              </p>
+            ) : null}
+          </div>
+        </fieldset>
+
+        {/* Récapitulatif financier */}
+        <fieldset className="rounded-lg border p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Financement de la formation
+          </legend>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-totalCost">Coût total (FCFA)</Label>
+              <Input
+                id="edit-totalCost"
+                name="totalCost"
+                type="number"
+                min="0"
+                step="any"
+                inputMode="decimal"
+                placeholder="Ex : 400000"
+                value={totalCost}
+                onChange={(event) => setTotalCost(event.target.value)}
+                aria-invalid={Boolean(fieldErrors.totalCost)}
+              />
+              <FieldError message={fieldErrors.totalCost} />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="edit-discount">Réduction (FCFA)</Label>
+              <Input
+                id="edit-discount"
+                name="discount"
+                type="number"
+                min="0"
+                step="any"
+                inputMode="decimal"
+                placeholder="Ex : 25000"
+                value={discount}
+                onChange={(event) => setDiscount(event.target.value)}
+                aria-invalid={Boolean(fieldErrors.discount)}
+              />
+              <FieldError message={fieldErrors.discount} />
+            </div>
+          </div>
+
+          {/* Net à payer calculé automatiquement (lecture seule) */}
+          <div className="mt-3 flex items-center justify-between rounded-md bg-muted/60 px-3 py-2">
+            <span className="text-sm font-medium">Net à payer</span>
+            <span className="text-sm font-bold tabular-nums">
+              {netAmount !== null
+                ? `${netAmount.toLocaleString("fr-FR")} FCFA`
+                : "—"}
+            </span>
+          </div>
+          <input type="hidden" name="netAmount" value={netAmount ?? ""} />
+        </fieldset>
+
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline" disabled={pending}>
@@ -199,10 +353,16 @@ function EditStudentForm({
  */
 export function EditStudentDialog({
   student,
+  classes,
+  registrationFee,
   open,
   onOpenChange,
 }: {
   student: StudentDTO | null;
+  /** Classes / cohortes disponibles pour l'affectation. */
+  classes: ClassOptionDTO[];
+  /** Frais d'inscription par défaut de l'organisation (FCFA). */
+  registrationFee: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -213,6 +373,8 @@ export function EditStudentDialog({
           <EditStudentForm
             key={student.id}
             student={student}
+            classes={classes}
+            registrationFee={registrationFee}
             onSuccess={() => onOpenChange(false)}
           />
         ) : null}

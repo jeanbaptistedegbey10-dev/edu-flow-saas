@@ -1,5 +1,6 @@
 /**
- * Génération du reçu de paiement imprimable.
+ * Génération des reçus imprimables : règlement étudiant, tranche de procédure
+ * voyage (échelonnement) et facturette de caisse (POS).
  *
  * Approche retenue : modèle HTML autonome et stylisé + impression via
  * `window.print()` dans un iframe caché. Ce choix évite d'intégrer une
@@ -7,6 +8,13 @@
  * tout en permettant l'enregistrement en PDF nativement depuis la boîte de
  * dialogue d'impression du navigateur (« Destination : Enregistrer au
  * format PDF »).
+ *
+ * Les trois documents partagent :
+ * - un en-tête d'entreprise détaillé : logo à gauche, nom, adresse et ville,
+ *   coordonnées (téléphone, e-mail, site web) alignées à droite ;
+ * - un pied de page légal discret mais lisible : N° RCCM, N° IFU / NIF,
+ *   adresse complète, téléphone et site web ;
+ * - une mise en page calibrée pour le format A4 / enregistrement PDF.
  *
  * Le même document sert à l'aperçu à l'écran (iframe de la modale) et à
  * l'impression : l'aperçu est strictement identique au reçu final.
@@ -74,42 +82,16 @@ function escapeHtml(value: string): string {
     .replace(new RegExp(SINGLE_QUOTE, "g"), `${AMPERSAND}#39;`);
 }
 
+// --------------------------------------
+// Blocs partagés : styles, en-tête entreprise et pied de page légal
+// --------------------------------------
+
 /**
- * Construit le document HTML complet et autonome du reçu de paiement.
- * Toutes les valeurs dynamiques sont échappées avant injection.
+ * Feuille de style commune aux trois documents : feuille A4, en-tête
+ * d'entreprise détaillé, tableaux de détails, blocs de montants, signatures
+ * et pied de page légal.
  */
-export function buildPaymentReceiptDocument(
-  payment: PaymentDTO,
-  organization: OrganizationProfileDTO
-): string {
-  const studentName = `${payment.student.firstName} ${payment.student.lastName}`;
-
-  // Numéro de reçu affiché : référence transaction si présente, sinon un
-  // numéro dérivé de l'identifiant du règlement (toute ligne est imprimable).
-  const receiptNumber =
-    payment.reference ?? `REC-${payment.id.slice(-8).toUpperCase()}`;
-
-  const badge = STATUS_BADGE_STYLES[payment.status];
-
-  const orgContactLine = [organization.phone, organization.email]
-    .filter(Boolean)
-    .map((value) => escapeHtml(String(value)))
-    .join(" · ");
-
-  const descriptionRow = payment.description
-    ? `<tr>
-            <th scope="row">Description</th>
-            <td>${escapeHtml(payment.description)}</td>
-          </tr>`
-    : "";
-
-  return `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Reçu de paiement ${escapeHtml(receiptNumber)}</title>
-<style>
+const BASE_STYLES = `
   *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
@@ -127,43 +109,90 @@ export function buildPaymentReceiptDocument(
     border: 1px solid #e5e7eb;
     border-radius: 10px;
   }
+  .sheet.narrow { max-width: 560px; }
+  @page { size: A4; margin: 12mm; }
   @media print {
     body { background: #ffffff; }
-    .sheet { margin: 0 auto; border: none; border-radius: 0; max-width: none; padding: 24px 12px; }
+    .sheet { margin: 0 auto; border: none; border-radius: 0; max-width: none; padding: 0; }
   }
+
+  /* ---- En-tête entreprise : logo à gauche, coordonnées alignées à droite ---- */
   .receipt-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 24px;
-    padding-bottom: 20px;
+    padding-bottom: 18px;
     border-bottom: 2px solid #111827;
   }
-  .organization h1 {
-    margin: 0 0 6px;
-    font-size: 20px;
+  .org-block {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
+  .logo-box {
+    width: 64px;
+    height: 64px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #f9fafb;
+  }
+  .logo-box .logo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .logo-box .logo-fallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    font-weight: 700;
+    color: #3730a3;
+    background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+  }
+  .org-info h1 {
+    margin: 0 0 4px;
+    font-size: 19px;
     line-height: 1.25;
     letter-spacing: -0.01em;
   }
-  .organization p {
-    margin: 2px 0;
+  .org-info p {
+    margin: 1px 0;
     font-size: 12px;
     color: #6b7280;
   }
   .doc-title { text-align: right; white-space: nowrap; }
+  .doc-title .contact-line {
+    margin: 1px 0;
+    font-size: 11.5px;
+    color: #374151;
+  }
   .doc-kind {
-    margin: 0;
+    margin: 8px 0 0;
+    padding-top: 8px;
+    border-top: 1px solid #e5e7eb;
     font-size: 13px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.14em;
   }
   .doc-number {
-    margin: 6px 0 0;
+    margin: 4px 0 0;
     font-size: 12px;
     color: #6b7280;
     font-variant-numeric: tabular-nums;
   }
+
+  /* ---- Tableaux de détails (identité, règlement courant) ---- */
   .details {
     width: 100%;
     margin-top: 22px;
@@ -194,6 +223,76 @@ export function buildPaymentReceiptDocument(
     font-size: 11px;
     font-weight: 600;
   }
+
+  /* ---- Tableau historique des versements (échelonnement) ---- */
+  .section-title {
+    margin: 26px 0 0;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #374151;
+  }
+  table.history {
+    width: 100%;
+    margin-top: 10px;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  table.history th {
+    text-align: left;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b7280;
+    background: #f9fafb;
+    border-bottom: 1px solid #111827;
+    padding: 7px 8px;
+  }
+  table.history td {
+    padding: 8px;
+    border-bottom: 1px solid #f3f4f6;
+    vertical-align: top;
+  }
+  table.history td.num,
+  table.history th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  table.history td.nowrap { white-space: nowrap; }
+  table.history td.empty {
+    text-align: center;
+    color: #9ca3af;
+    padding: 16px 8px;
+  }
+  .history-caption {
+    margin: 6px 0 0;
+    font-size: 10.5px;
+    color: #9ca3af;
+  }
+
+  /* ---- Synthèse financière (totaux du contrat) ---- */
+  .summary { width: 100%; margin-top: 20px; border-collapse: collapse; }
+  .summary td {
+    padding: 9px 0;
+    font-size: 13.5px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .summary td:last-child {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .summary tr.strong td { font-weight: 700; font-size: 14.5px; }
+  .summary td small {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 400;
+    color: #9ca3af;
+  }
+
+  /* ---- Bloc montant mis en avant ---- */
   .amount-block {
     display: flex;
     align-items: center;
@@ -213,11 +312,9 @@ export function buildPaymentReceiptDocument(
     color: #6b7280;
   }
   .amount-value { font-size: 24px; font-variant-numeric: tabular-nums; }
-  .signatures {
-    display: flex;
-    gap: 20px;
-    margin-top: 34px;
-  }
+
+  /* ---- Signatures ---- */
+  .signatures { display: flex; gap: 20px; margin-top: 34px; }
   .signature-box {
     position: relative;
     flex: 1;
@@ -232,31 +329,187 @@ export function buildPaymentReceiptDocument(
     font-size: 11px;
     color: #6b7280;
   }
-  .receipt-footer {
-    margin-top: 28px;
-    padding-top: 14px;
-    border-top: 1px solid #e5e7eb;
+
+  /* ---- Pied de page légal (mentions officielles) ---- */
+  .legal-footer {
+    margin-top: 30px;
+    padding-top: 10px;
+    border-top: 1px solid #d1d5db;
+    text-align: center;
   }
-  .receipt-footer p {
+  .legal-footer p {
     margin: 2px 0;
-    font-size: 11px;
+    font-size: 10px;
     color: #9ca3af;
   }
-</style>
+  .legal-footer p.legal-line {
+    font-size: 10.5px;
+    color: #6b7280;
+  }
+
+  /* ---- Spécifique facturette POS ---- */
+  .meta { width: 100%; margin-top: 16px; border-collapse: collapse; font-size: 12px; }
+  .meta th { text-align: left; font-weight: 500; color: #6b7280; padding: 4px 0; width: 130px; }
+  .meta td { text-align: left; padding: 4px 0; font-weight: 600; }
+  .meta td.mono {
+    font-family: Consolas, "Courier New", monospace;
+    letter-spacing: 0.02em;
+  }
+  table.items { width: 100%; margin-top: 18px; border-collapse: collapse; font-size: 13px; }
+  table.items th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b7280;
+    border-bottom: 1px solid #111827;
+    padding: 6px 4px;
+  }
+  table.items td { padding: 8px 4px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  table.items td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.items td.strong { font-weight: 600; }
+  table.totals { width: 100%; margin-top: 14px; border-collapse: collapse; font-size: 13px; }
+  table.totals td { padding: 6px 4px; }
+  table.totals td:last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.totals tr.grand td {
+    font-weight: 700;
+    font-size: 16px;
+    border-top: 2px solid #111827;
+    padding-top: 10px;
+  }
+  .thanks { margin-top: 22px; text-align: center; font-size: 12px; color: #6b7280; }
+`;
+
+/**
+ * Construit l'en-tête d'entreprise détaillé commun à tous les reçus :
+ * logo (ou monogramme de secours) à gauche avec nom, adresse et ville ;
+ * coordonnées (téléphone, e-mail, site web) alignées à droite au-dessus du
+ * titre du document et de son numéro.
+ */
+function buildOrganizationHeader(
+  organization: OrganizationProfileDTO,
+  docKind: string,
+  docNumber: string
+): string {
+  const fallbackInitial =
+    organization.name.trim().charAt(0).toUpperCase() || "-";
+
+  const logoMarkup = organization.logoUrl
+    ? `<img class="logo-img" src="${escapeHtml(organization.logoUrl)}" alt="" />`
+    : `<span class="logo-fallback">${escapeHtml(fallbackInitial)}</span>`;
+
+  const locationLine = [
+    organization.address ? escapeHtml(organization.address) : null,
+    organization.city ? escapeHtml(organization.city) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const contactLines = [
+    organization.phone
+      ? `Tél. : ${escapeHtml(organization.phone)}`
+      : null,
+    organization.email
+      ? `Email : ${escapeHtml(organization.email)}`
+      : null,
+    organization.website
+      ? `Site web : ${escapeHtml(organization.website)}`
+      : null,
+  ].filter(Boolean);
+
+  return `<header class="receipt-header">
+      <div class="org-block">
+        <div class="logo-box">${logoMarkup}</div>
+        <div class="org-info">
+          <h1>${escapeHtml(organization.name)}</h1>
+          ${locationLine ? `<p>${locationLine}</p>` : ""}
+        </div>
+      </div>
+      <div class="doc-title">
+        ${contactLines
+          .map((line) => `<p class="contact-line">${line}</p>`)
+          .join("\n        ")}
+        <p class="doc-kind">${escapeHtml(docKind)}</p>
+        <p class="doc-number">N° ${escapeHtml(docNumber)}</p>
+      </div>
+    </header>`;
+}
+
+/**
+ * Construit le pied de page légal commun à tous les reçus : mentions RCCM /
+ * IFU-NIF, adresse complète, téléphone et site web. Bloc volontairement
+ * discret (petits caractères, gris neutre) mais parfaitement lisible une
+ * fois imprimé ou exporté en PDF A4.
+ */
+function buildLegalFooter(organization: OrganizationProfileDTO): string {
+  const legalLine = [
+    organization.rccm ? `N° RCCM : ${escapeHtml(organization.rccm)}` : null,
+    organization.ifu
+      ? `N° IFU / NIF : ${escapeHtml(organization.ifu)}`
+      : null,
+    organization.address || organization.city
+      ? [organization.address, organization.city]
+          .filter(Boolean)
+          .map((value) => escapeHtml(String(value)))
+          .join(", ")
+      : null,
+  ].filter(Boolean);
+
+  const contactLine = [
+    organization.phone
+      ? `Tél. : ${escapeHtml(organization.phone)}`
+      : null,
+    organization.email
+      ? `Email : ${escapeHtml(organization.email)}`
+      : null,
+    organization.website
+      ? `Site web : ${escapeHtml(organization.website)}`
+      : null,
+  ].filter(Boolean);
+
+  return `<footer class="legal-footer">
+      ${legalLine.length > 0 ? `<p class="legal-line">${legalLine.join(" · ")}</p>` : ""}
+      ${contactLine.length > 0 ? `<p class="legal-line">${contactLine.join(" · ")}</p>` : ""}
+      <p>Document généré le ${dateTimeFormatter.format(new Date())} — à conserver sans limitation de durée.</p>
+      <p>Ce reçu fait office de document officiel. Merci de votre confiance.</p>
+    </footer>`;
+}
+
+/**
+ * Construit le document HTML complet et autonome du reçu de paiement.
+ * Toutes les valeurs dynamiques sont échappées avant injection.
+ */
+export function buildPaymentReceiptDocument(
+  payment: PaymentDTO,
+  organization: OrganizationProfileDTO
+): string {
+  const studentName = `${payment.student.firstName} ${payment.student.lastName}`;
+
+  // Numéro de reçu affiché : référence transaction si présente, sinon un
+  // numéro dérivé de l'identifiant du règlement (toute ligne est imprimable).
+  const receiptNumber =
+    payment.reference ?? `REC-${payment.id.slice(-8).toUpperCase()}`;
+
+  const badge = STATUS_BADGE_STYLES[payment.status];
+
+  const descriptionRow = payment.description
+    ? `<tr>
+            <th scope="row">Description</th>
+            <td>${escapeHtml(payment.description)}</td>
+          </tr>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reçu de paiement ${escapeHtml(receiptNumber)}</title>
+<style>${BASE_STYLES}</style>
 </head>
 <body>
   <main class="sheet">
-    <header class="receipt-header">
-      <div class="organization">
-        <h1>${escapeHtml(organization.name)}</h1>
-        ${organization.address ? `<p>${escapeHtml(organization.address)}</p>` : ""}
-        ${orgContactLine ? `<p>${orgContactLine}</p>` : ""}
-      </div>
-      <div class="doc-title">
-        <p class="doc-kind">Reçu de paiement</p>
-        <p class="doc-number">N° ${escapeHtml(receiptNumber)}</p>
-      </div>
-    </header>
+    ${buildOrganizationHeader(organization, "Reçu de paiement", receiptNumber)}
 
     <table class="details">
       <tbody>
@@ -273,8 +526,8 @@ export function buildPaymentReceiptDocument(
           <td>${escapeHtml(getPaymentMethodLabel(payment.paymentMethod))}</td>
         </tr>
         <tr>
-          <th scope="row">Date de paiement</th>
-          <td>${dateFormatter.format(payment.paidAt)}</td>
+          <th scope="row">Date et heure du règlement</th>
+          <td class="strong">${dateTimeFormatter.format(payment.paidAt)}</td>
         </tr>
         <tr>
           <th scope="row">Statut</th>
@@ -296,10 +549,271 @@ export function buildPaymentReceiptDocument(
       <div class="signature-box"><span>Signature du responsable</span></div>
     </section>
 
-    <footer class="receipt-footer">
-      <p>Document généré le ${dateTimeFormatter.format(new Date())} — à conserver sans limitation de durée.</p>
-      <p>Merci de votre confiance.</p>
-    </footer>
+    ${buildLegalFooter(organization)}
+  </main>
+</body>
+</html>`;
+}
+
+/** Ligne de l'historique des versements affichée sur un reçu échelonné. */
+export type InstallmentHistoryEntry = {
+  /** Date et heure exactes du versement. */
+  paidAt: Date;
+  paymentMethod: import("@prisma/client").PaymentMethod;
+  /** Référence transaction ou note libre associée au versement. */
+  label: string | null;
+  amount: number;
+};
+
+/** Données nécessaires au reçu d'une tranche de procédure voyage. */
+export type TravelInstallmentReceiptInput = {
+  candidateName: string;
+  /** Code étudiant si candidat inscrit, sinon téléphone saisi. */
+  candidateDetail: string | null;
+  destination: string;
+  workflowTitle: string | null;
+  totalCost: number;
+  discount: number;
+  netAmount: number;
+  /** Cumul encaissé toutes tranches confondues (tranche courante incluse). */
+  paidAmount: number;
+  remainingAmount: number;
+  installment: {
+    amount: number;
+    paymentMethod: import("@prisma/client").PaymentMethod;
+    reference: string | null;
+    paidAt: Date;
+  };
+  /**
+   * Historique chronologique de tous les versements effectués à ce jour
+   * (tranche courante incluse), rendu sous forme de tableau récapitulatif.
+   */
+  history: InstallmentHistoryEntry[];
+};
+
+/**
+ * Construit le reçu détaillé d'un règlement par tranche d'une procédure
+ * voyage : coût total, réduction, net à payer, tableau récapitulatif de tous
+ * les versements effectués à ce jour (date, moyen, référence/note, montant),
+ * puis bloc de synthèse Total du contrat / Cumul encaissé / Reste à payer.
+ */
+export function buildTravelInstallmentReceiptDocument(
+  data: TravelInstallmentReceiptInput,
+  organization: OrganizationProfileDTO
+): string {
+  const receiptNumber = `REC-V-${data.installment.paidAt.getFullYear()}-${data.installment.reference ?? data.installment.amount}`;
+
+  const historyRows =
+    data.history.length > 0
+      ? data.history
+          .map(
+            (entry) => `<tr>
+          <td class="nowrap">${dateTimeFormatter.format(entry.paidAt)}</td>
+          <td>${escapeHtml(getPaymentMethodLabel(entry.paymentMethod))}</td>
+          <td>${entry.label ? escapeHtml(entry.label) : "-"}</td>
+          <td class="num">${amountFormatter.format(entry.amount)} FCFA</td>
+        </tr>`
+          )
+          .join("\n")
+      : `<tr><td class="empty" colspan="4">Aucun versement enregistré à ce jour.</td></tr>`;
+
+  const summaryRows = [
+    { label: "Coût total de la procédure", value: data.totalCost },
+    ...(data.discount > 0
+      ? [{ label: "Réduction accordée", value: -data.discount }]
+      : []),
+    { label: "Total du contrat", value: data.netAmount, strong: true },
+    {
+      label: "Cumul des paiements effectués",
+      note: `Versements listés ci-dessus inclus (au ${dateFormatter.format(data.installment.paidAt)})`,
+      value: data.paidAmount,
+    },
+    { label: "Reste à payer", value: data.remainingAmount, strong: true },
+  ];
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reçu de règlement — ${escapeHtml(data.candidateName)}</title>
+<style>${BASE_STYLES}</style>
+</head>
+<body>
+  <main class="sheet">
+    ${buildOrganizationHeader(organization, "Reçu — Tranche procédure voyage", receiptNumber)}
+
+    <table class="details">
+      <tbody>
+        <tr>
+          <th scope="row">Candidat</th>
+          <td class="strong">${escapeHtml(data.candidateName)}</td>
+        </tr>
+        ${data.candidateDetail ? `<tr><th scope="row">Référence</th><td class="mono">${escapeHtml(data.candidateDetail)}</td></tr>` : ""}
+        <tr>
+          <th scope="row">Procédure</th>
+          <td>${escapeHtml(data.workflowTitle ?? `Destination ${data.destination}`)}</td>
+        </tr>
+        <tr>
+          <th scope="row">Moyen de règlement</th>
+          <td>${escapeHtml(getPaymentMethodLabel(data.installment.paymentMethod))}</td>
+        </tr>
+        <tr>
+          <th scope="row">Date et heure du règlement</th>
+          <td class="strong">${dateTimeFormatter.format(data.installment.paidAt)}</td>
+        </tr>
+        ${data.installment.reference ? `<tr><th scope="row">Transaction</th><td class="mono">${escapeHtml(data.installment.reference)}</td></tr>` : ""}
+      </tbody>
+    </table>
+
+    <h2 class="section-title">Historique des versements</h2>
+    <table class="history">
+      <thead>
+        <tr>
+          <th>Date du paiement</th>
+          <th>Moyen de règlement</th>
+          <th>Référence / Note</th>
+          <th class="num">Montant versé</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${historyRows}
+      </tbody>
+    </table>
+    <p class="history-caption">Cumul établi sur la totalité des versements listés ci-dessus.</p>
+
+    <table class="summary">
+      <tbody>
+        ${summaryRows
+          .map(
+            (row) => `<tr${"strong" in row && row.strong ? ' class="strong"' : ""}>
+          <td>${escapeHtml(row.label)}${"note" in row && row.note ? `<small>${escapeHtml(row.note)}</small>` : ""}</td>
+          <td>${amountFormatter.format(row.value)} FCFA</td>
+        </tr>`
+          )
+          .join("\n        ")}
+      </tbody>
+    </table>
+
+    <section class="amount-block">
+      <span class="amount-label">Montant de cette tranche</span>
+      <strong class="amount-value">${amountFormatter.format(data.installment.amount)} FCFA</strong>
+    </section>
+
+    <section class="signatures">
+      <div class="signature-box"><span>Cachet de l'organisation</span></div>
+      <div class="signature-box"><span>Signature du responsable</span></div>
+    </section>
+
+    ${buildLegalFooter(organization)}
+  </main>
+</body>
+</html>`;
+}
+
+const SALE_CATEGORY_LABELS: Record<string, string> = {
+  BOOK: "Livre",
+  TRANSLATION: "Traduction",
+  COPY_SERVICE: "Photocopie",
+};
+
+/**
+ * Référence lisible d'une vente comptoir (POS), dérivée de son identifiant.
+ * Partagée entre la facturette imprimée et le tableau « Historique des
+ * ventes » du POS pour garantir une référence identique partout.
+ */
+export function formatSaleReference(saleId: string): string {
+  return `TCK-${saleId.slice(-8).toUpperCase()}`;
+}
+
+/** Données nécessaires à la facturette d'une vente comptoir (POS). */
+export type SaleReceiptInput = {
+  id: string;
+  totalAmount: number;
+  discount: number;
+  netAmount: number;
+  paymentMethod: import("@prisma/client").PaymentMethod | null;
+  createdAt: Date;
+  clientName: string;
+  clientDetail: string | null;
+  cashierName: string;
+  items: Array<{
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    subtotal: number;
+  }>;
+};
+
+/**
+ * Construit la facturette / reçu de caisse d'une vente comptoir (POS),
+ * avec le détail des lignes vendues, les totaux, la date et l'heure exactes
+ * de l'encaissement.
+ */
+export function buildSaleReceiptDocument(
+  sale: SaleReceiptInput,
+  organization: OrganizationProfileDTO
+): string {
+  const receiptNumber = formatSaleReference(sale.id);
+
+  const itemRows = sale.items
+    .map(
+      (item) => `<tr>
+        <td>${escapeHtml(item.name)}<br /><small>${escapeHtml(SALE_CATEGORY_LABELS[item.name] ?? "")}</small></td>
+        <td class="num">${item.quantity}</td>
+        <td class="num">${amountFormatter.format(item.unitPrice)}</td>
+        <td class="num strong">${amountFormatter.format(item.subtotal)}</td>
+      </tr>`
+    )
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Facturette ${escapeHtml(receiptNumber)}</title>
+<style>${BASE_STYLES}</style>
+</head>
+<body>
+  <main class="sheet narrow">
+    ${buildOrganizationHeader(organization, "Facturette — Vente comptoir", receiptNumber)}
+
+    <table class="meta">
+      <tbody>
+        <tr><th>N° ticket</th><td class="mono">${escapeHtml(receiptNumber)}</td></tr>
+        <tr><th>Date et heure</th><td>${dateTimeFormatter.format(sale.createdAt)}</td></tr>
+        <tr><th>Client</th><td>${escapeHtml(sale.clientName)}${sale.clientDetail ? ` — ${escapeHtml(sale.clientDetail)}` : ""}</td></tr>
+        <tr><th>Caissier</th><td>${escapeHtml(sale.cashierName)}</td></tr>
+        ${sale.paymentMethod ? `<tr><th>Règlement</th><td>${escapeHtml(getPaymentMethodLabel(sale.paymentMethod))}</td></tr>` : ""}
+      </tbody>
+    </table>
+
+    <table class="items">
+      <thead>
+        <tr>
+          <th>Article / Service</th>
+          <th style="text-align:right;">Qté</th>
+          <th style="text-align:right;">P.U.</th>
+          <th style="text-align:right;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemRows}
+      </tbody>
+    </table>
+
+    <table class="totals">
+      <tbody>
+        <tr><td>Sous-total</td><td>${amountFormatter.format(sale.totalAmount)} FCFA</td></tr>
+        ${sale.discount > 0 ? `<tr><td>Remise</td><td>- ${amountFormatter.format(sale.discount)} FCFA</td></tr>` : ""}
+        <tr class="grand"><td>NET À PAYER</td><td>${amountFormatter.format(sale.netAmount)} FCFA</td></tr>
+      </tbody>
+    </table>
+
+    <p class="thanks">Merci de votre visite !</p>
+
+    ${buildLegalFooter(organization)}
   </main>
 </body>
 </html>`;

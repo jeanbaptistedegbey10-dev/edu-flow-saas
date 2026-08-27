@@ -37,6 +37,9 @@ import {
 
 const INITIAL_FORM_STATE: TaskFormState = { status: "idle" };
 
+/** Valeur sentinelle pour les champs Select optionnels (Radix interdit ""). */
+const NONE_VALUE = "__none__";
+
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return (
@@ -57,7 +60,20 @@ export function AddTaskDialog({
 
   // Enveloppe l'action serveur pour fermer la modale dès que la création réussit.
   const [state, formAction, pending] = useActionState(
-    async (_prevState: TaskFormState, formData: FormData) => {
+    async (_prevState: TaskFormState, rawFormData: FormData) => {
+      // Clone les entrées puis convertit les sentinelles « non attribué »
+      // en chaînes vides attendues par l'action serveur.
+      const formData = new FormData();
+      for (const [key, value] of rawFormData.entries()) {
+        formData.append(key, value);
+      }
+
+      for (const field of ["assigneeId", "studentId"]) {
+        if (String(formData.get(field) ?? "") === NONE_VALUE) {
+          formData.set(field, "");
+        }
+      }
+
       const result = await createTaskAction(_prevState, formData);
 
       if (result.status === "success") {
@@ -161,7 +177,7 @@ export function AddTaskDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="assigneeId">Membre de l’équipe</Label>
-              <Select name="assigneeId">
+              <Select name="assigneeId" defaultValue={NONE_VALUE}>
                 <SelectTrigger
                   id="assigneeId"
                   className="w-full"
@@ -170,6 +186,7 @@ export function AddTaskDialog({
                   <SelectValue placeholder="Non assignée" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={NONE_VALUE}>— Non assignée —</SelectItem>
                   {staffMembers.map((member) => (
                     <SelectItem key={member.id} value={member.id}>
                       {member.firstName} {member.lastName}
@@ -182,7 +199,7 @@ export function AddTaskDialog({
 
             <div className="grid gap-2">
               <Label htmlFor="studentId">Étudiant associé</Label>
-              <Select name="studentId">
+              <Select name="studentId" defaultValue={NONE_VALUE}>
                 <SelectTrigger
                   id="studentId"
                   className="w-full"
@@ -191,6 +208,7 @@ export function AddTaskDialog({
                   <SelectValue placeholder="Aucun" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={NONE_VALUE}>— Aucun —</SelectItem>
                   {students.map((student) => (
                     <SelectItem key={student.id} value={student.id}>
                       {student.firstName} {student.lastName} (

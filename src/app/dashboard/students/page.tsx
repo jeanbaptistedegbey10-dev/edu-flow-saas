@@ -1,3 +1,5 @@
+import { getClassOptions } from "@/actions/classes";
+import { getDefaultRegistrationFee } from "@/actions/organization";
 import { getStudents } from "@/actions/students";
 import { StudentsView } from "@/components/students/students-view";
 
@@ -7,7 +9,17 @@ export const metadata = {
 };
 
 export default async function StudentsPage() {
-  const students = await getStudents();
+  const [students, classes, registrationFee] = await Promise.all([
+    getStudents(),
+    getClassOptions(),
+    getDefaultRegistrationFee(),
+  ]);
 
-  return <StudentsView students={students} />;
+  return (
+    <StudentsView
+      students={students}
+      classes={classes}
+      registrationFee={registrationFee}
+    />
+  );
 }

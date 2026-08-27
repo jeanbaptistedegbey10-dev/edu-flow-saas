@@ -1,3 +1,4 @@
+import { auth } from "@/auth";
 import { getCourses, getTeachers } from "@/actions/courses";
 import { CoursesView } from "@/components/courses/courses-view";
 
@@ -7,7 +8,14 @@ export const metadata = {
 };
 
 export default async function CoursesPage() {
+  const session = await auth();
+  const isTeacher = session?.user?.role === "TEACHER";
+
+  // Un enseignant ne reçoit que les cours qui lui sont assignés
+  // (filtrage effectué dans l'action getCourses).
   const [courses, teachers] = await Promise.all([getCourses(), getTeachers()]);
 
-  return <CoursesView courses={courses} teachers={teachers} />;
+  return (
+    <CoursesView courses={courses} teachers={teachers} isTeacher={isTeacher} />
+  );
 }

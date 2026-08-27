@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { CheckCircle2Icon, GraduationCapIcon } from "lucide-react";
 
 import { LoginForm } from "@/components/auth/login-form";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getValidatedSessionContext } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Connexion - EduFlow SaaS",
@@ -23,11 +25,30 @@ function LoginFormFallback() {
   );
 }
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ registered?: string }>;
 }) {
+  const params = await searchParams;
+
+  // --------------------------------------
+  // Garde « déjà connecté » validée en base de données
+  // --------------------------------------
+  // Un JWT décodable ne suffit pas : l'utilisateur ou son organisation peut
+  // avoir disparu de la base (cookie obsolète/corrompu). Dans ce cas le
+  // contexte vaut `null` (UNAUTHENTICATED) et on ignore simplement la session :
+  // le formulaire est affiché, sans aucune redirection vers /dashboard — c'est
+  // ce qui casse la boucle /login ↔ /dashboard.
+  //
+  // Les comptes STUDENT n'ont accès à aucun tableau de bord : ils voient eux
+  // aussi le formulaire (le proxy les renvoie ici depuis /dashboard).
+  const sessionContext = await getValidatedSessionContext();
+
+  if (sessionContext && sessionContext.role !== "STUDENT") {
+    redirect("/dashboard");
+  }
+
   return (
     <main className="flex min-h-svh flex-1 items-center justify-center bg-muted/40 p-4">
       <div className="w-full max-w-sm rounded-xl border bg-background p-6 shadow-sm sm:p-8">
@@ -47,9 +68,7 @@ export default function LoginPage({
         <Separator className="mb-6" />
 
         {/* Message de succès après inscription */}
-        <Suspense fallback={null}>
-          <RegisteredSuccessMessage searchParams={searchParams} />
-        </Suspense>
+        {params.registered === "1" ? <RegisteredSuccessMessage /> : null}
 
         {/* Formulaire (Suspense requis : useSearchParams dans le composant client) */}
         <Suspense fallback={<LoginFormFallback />}>
@@ -70,17 +89,7 @@ export default function LoginPage({
   );
 }
 
-async function RegisteredSuccessMessage({
-  searchParams,
-}: {
-  searchParams: Promise<{ registered?: string }>;
-}) {
-  const params = await searchParams;
-
-  if (params.registered !== "1") {
-    return null;
-  }
-
+function RegisteredSuccessMessage() {
   return (
     <div className="mb-4 flex items-start gap-2 rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
       <CheckCircle2Icon className="mt-0.5 size-4 shrink-0" />

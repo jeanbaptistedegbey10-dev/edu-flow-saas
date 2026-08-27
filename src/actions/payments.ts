@@ -10,7 +10,7 @@ import { after } from "next/server";
 
 import { sendPaymentConfirmationEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId } from "@/lib/session";
+import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -58,6 +58,16 @@ export type OrganizationProfileDTO = {
   email: string | null;
   phone: string | null;
   address: string | null;
+  /** Ville de l'organisation (affichée sur l'en-tête des reçus). */
+  city: string | null;
+  /** Site web officiel (en-tête et pied de page légal des reçus). */
+  website: string | null;
+  /** URL du logo (affiché à gauche de l'en-tête des reçus). */
+  logoUrl: string | null;
+  /** Numéro RCCM (mention légale en pied de reçu). */
+  rccm: string | null;
+  /** Numéro IFU / NIF (mention légale en pied de reçu). */
+  ifu: string | null;
 };
 
 export type PaymentFormField =
@@ -182,33 +192,49 @@ function parsePaymentForm(formData: FormData): ParsedPaymentInput {
 /**
  * Récupère l'historique des règlements de l'organisation active,
  * avec la relation `student`.
+ *
+ * (`studentId` étant nullable au schéma, on écarte les lignes sans étudiant
+ * afin de respecter le contrat `PaymentDTO`.)
  */
 export async function getPayments(): Promise<PaymentDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
-  return prisma.payment.findMany({
-    where: { organizationId },
-    orderBy: { paidAt: "desc" },
-    select: {
-      id: true,
-      amount: true,
-      currency: true,
-      paymentMethod: true,
-      status: true,
-      reference: true,
-      description: true,
-      paidAt: true,
-      createdAt: true,
-      student: {
-        select: {
-          id: true,
-          studentCode: true,
-          firstName: true,
-          lastName: true,
+  try {
+    const rows = await prisma.payment.findMany({
+      where: { organizationId },
+      orderBy: { paidAt: "desc" },
+      select: {
+        id: true,
+        amount: true,
+        currency: true,
+        paymentMethod: true,
+        status: true,
+        reference: true,
+        description: true,
+        paidAt: true,
+        createdAt: true,
+        student: {
+          select: {
+            id: true,
+            studentCode: true,
+            firstName: true,
+            lastName: true,
+          },
         },
       },
-    },
-  });
+    });
+
+    return rows.flatMap((row) =>
+      row.student ? [{ ...row, student: row.student }] : []
+    );
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getPayments] Échec de lecture :", error);
+
+    // Dégradation gracieuse : liste vide plutôt que crash serveur.
+    return [];
+  }
 }
 
 /**
@@ -225,31 +251,45 @@ export async function getFinancialStats(): Promise<FinancialStatsDTO> {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
-  const [collected, pending, expenses, transactionCount] = await Promise.all([
-    prisma.payment.aggregate({
-      where: { organizationId, status: "COMPLETED" },
-      _sum: { amount: true },
-    }),
-    prisma.payment.aggregate({
-      where: { organizationId, status: "PENDING" },
-      _sum: { amount: true },
-    }),
-    prisma.expense.aggregate({
-      where: {
-        organizationId,
-        expenseDate: { gte: monthStart, lt: monthEnd },
-      },
-      _sum: { amount: true },
-    }),
-    prisma.payment.count({ where: { organizationId } }),
-  ]);
+  try {
+    const [collected, pending, expenses, transactionCount] = await Promise.all([
+      prisma.payment.aggregate({
+        where: { organizationId, status: "COMPLETED" },
+        _sum: { amount: true },
+      }),
+      prisma.payment.aggregate({
+        where: { organizationId, status: "PENDING" },
+        _sum: { amount: true },
+      }),
+      prisma.expense.aggregate({
+        where: {
+          organizationId,
+          expenseDate: { gte: monthStart, lt: monthEnd },
+        },
+        _sum: { amount: true },
+      }),
+      prisma.payment.count({ where: { organizationId } }),
+    ]);
 
-  return {
-    totalCollected: collected._sum.amount ?? 0,
-    pendingAmount: pending._sum.amount ?? 0,
-    monthlyExpenses: expenses._sum.amount ?? 0,
-    transactionCount,
-  };
+    return {
+      totalCollected: collected._sum.amount ?? 0,
+      pendingAmount: pending._sum.amount ?? 0,
+      monthlyExpenses: expenses._sum.amount ?? 0,
+      transactionCount,
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getFinancialStats] Échec de calcul :", error);
+
+    // Dégradation gracieuse : indicateurs à zéro plutôt que crash serveur.
+    return {
+      totalCollected: 0,
+      pendingAmount: 0,
+      monthlyExpenses: 0,
+      transactionCount: 0,
+    };
+  }
 }
 
 /**
@@ -259,16 +299,25 @@ export async function getFinancialStats(): Promise<FinancialStatsDTO> {
 export async function getStudentOptions(): Promise<StudentOptionDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
-  return prisma.student.findMany({
-    where: { organizationId },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-    select: {
-      id: true,
-      studentCode: true,
-      firstName: true,
-      lastName: true,
-    },
-  });
+  try {
+    return await prisma.student.findMany({
+      where: { organizationId },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      select: {
+        id: true,
+        studentCode: true,
+        firstName: true,
+        lastName: true,
+      },
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getStudentOptions] Échec de lecture :", error);
+
+    // Dégradation gracieuse : liste vide plutôt que crash serveur.
+    return [];
+  }
 }
 
 /**
@@ -278,16 +327,44 @@ export async function getStudentOptions(): Promise<StudentOptionDTO[]> {
 export async function getCurrentOrganizationProfile(): Promise<OrganizationProfileDTO> {
   const organizationId = await getCurrentOrganizationId();
 
-  return prisma.organization.findUniqueOrThrow({
-    where: { id: organizationId },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      address: true,
-    },
-  });
+  try {
+    // `findUnique` sécurisé : l'organisation est garantie par la résolution de
+    // session ; une absence ici signale une course (suppression concurrente).
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        address: true,
+        city: true,
+        website: true,
+        logoUrl: true,
+        rccm: true,
+        ifu: true,
+      },
+    });
+
+    if (!organization) {
+      throw new Error(
+        "Organisation introuvable : votre session pointe vers une organisation qui n'existe plus."
+      );
+    }
+
+    return organization;
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error(
+      "[getCurrentOrganizationProfile] Échec de lecture :",
+      error
+    );
+
+    throw new Error(
+      "Impossible de charger le profil de l'organisation pour le moment."
+    );
+  }
 }
 
 /**
@@ -522,6 +599,8 @@ export async function deletePaymentAction(
 
     return { ok: true };
   } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
     console.error("[deletePaymentAction] Échec de suppression :", error);
 
     return {

@@ -1,53 +1,35 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
+  AlarmClockIcon,
+  ArrowRightIcon,
   BadgeCheckIcon,
-  GraduationCapIcon,
-  LayoutGridIcon,
-  ListIcon,
+  CalendarClockIcon,
+  CheckIcon,
+  CircleDollarSignIcon,
+  FileStackIcon,
+  LayersIcon,
   Loader2Icon,
   MapPinIcon,
   PlaneTakeoffIcon,
   SearchIcon,
-  SendIcon,
-  StampIcon,
+  UserRoundXIcon,
 } from "lucide-react";
 
-import type { TravelStatus } from "@prisma/client";
-
 import {
-  updateTravelStatusAction,
+  setTravelCurrentStageAction,
   type StudentOptionDTO,
   type TravelProcedureDTO,
-  type UpdateTravelStatusResult,
+  type WorkflowDTO,
 } from "@/actions/travels";
-import { deleteTravelProcedureAction } from "@/actions/travels";
 import { AddTravelDialog } from "@/components/travels/add-travel-dialog";
 import { EditTravelDialog } from "@/components/travels/edit-travel-dialog";
+import { WorkflowsManager } from "@/components/travels/workflows-manager";
 import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  TRAVEL_STATUS_BADGE_CLASSES,
-  TRAVEL_STATUS_LABELS,
-  TRAVEL_STATUS_ORDER,
-} from "@/lib/travel-status";
 import { cn } from "@/lib/utils";
 
 // Formatage déterministe (locale + fuseau fixes) pour éviter tout écart d'hydratation.
@@ -58,17 +40,11 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
   timeZone: "UTC",
 });
 
-type ViewMode = "kanban" | "list";
-type StatusFilter = "ALL" | TravelStatus;
+const amountFormatter = new Intl.NumberFormat("fr-FR", {
+  maximumFractionDigits: 0,
+});
 
-/** Onglets de filtrage par statut (avec entrée « Tous »). */
-const STATUS_FILTERS: readonly { value: StatusFilter; label: string }[] = [
-  { value: "ALL", label: "Tous" },
-  ...TRAVEL_STATUS_ORDER.map((status) => ({
-    value: status as StatusFilter,
-    label: TRAVEL_STATUS_LABELS[status],
-  })),
-];
+type ViewTab = "dossiers" | "workflows";
 
 // --------------------------------------
 // Sous-composants internes
@@ -81,7 +57,7 @@ function StatCard({
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  value: number;
+  value: string | number;
 }) {
   return (
     <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
@@ -99,162 +75,301 @@ function StatCard({
 }
 
 /**
- * Select compact stylisé en badge coloré permettant de changer
- * le statut d'un dossier via `updateTravelStatusAction`.
+ * Barre de progression animée : la largeur est pilotée par un style inline
+ * avec transition CSS (animation fluide au montage et aux mises à jour).
  */
-function TravelStatusSelect({
-  procedureId,
-  status,
-  onResult,
-}: {
-  procedureId: string;
-  status: TravelStatus;
-  onResult: (result: UpdateTravelStatusResult) => void;
-}) {
-  const [isPending, startTransition] = React.useTransition();
+function ProgressBar({ percent }: { percent: number }) {
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    // Double frame : garantit la transition depuis 0 % vers la valeur cible.
+    const raf = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   return (
-    <Select
-      value={status}
-      onValueChange={(next) => {
-        if (next === status) return;
-
-        startTransition(async () => {
-          const result = await updateTravelStatusAction(
-            procedureId,
-            next as TravelStatus
-          );
-          onResult(result);
-        });
-      }}
+    <div
+      role="progressbar"
+      aria-valuenow={percent}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={`Progression de la procédure : ${percent} %`}
+      className="h-2 w-full overflow-hidden rounded-full bg-muted"
     >
-      <SelectTrigger
-        size="sm"
-        disabled={isPending}
-        aria-label="Changer le statut du dossier"
-        className={cn(
-          "w-full gap-1 rounded-full border-none px-2.5 text-xs font-medium shadow-none",
-          TRAVEL_STATUS_BADGE_CLASSES[status]
-        )}
-      >
-        {isPending ? <Loader2Icon className="size-3 animate-spin" /> : null}
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent position="popper" align="start">
-        {TRAVEL_STATUS_ORDER.map((option) => (
-          <SelectItem key={option} value={option}>
-            {TRAVEL_STATUS_LABELS[option]}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      <div
+        className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-[width] duration-700 ease-out"
+        style={{ width: `${mounted ? percent : 0}%` }}
+      />
+    </div>
   );
 }
 
-/** Carte d'un dossier dans le tableau Kanban. */
+/**
+ * Stepper horizontal des jalons de la procédure :
+ * Vert = Validé · Indigo = En cours · Slate = À venir.
+ */
+function StageStepper({
+  validated,
+  total,
+}: {
+  validated: number;
+  total: number;
+}) {
+  if (total <= 0) {
+    return (
+      <p className="text-xs italic text-muted-foreground">
+        Aucun modèle associé — progression libre
+      </p>
+    );
+  }
+
+  return (
+    <ol aria-label="Jalons de la procédure" className="flex items-center gap-1">
+      {Array.from({ length: total }, (_, index) => {
+        const isValidated = index < validated;
+        const isCurrent = index === validated;
+
+        return (
+          <li key={index} className="flex min-w-0 flex-1 items-center gap-1">
+            <span
+              title={
+                isValidated
+                  ? `Étape ${index + 1} validée`
+                  : isCurrent
+                    ? `Étape ${index + 1} en cours`
+                    : `Étape ${index + 1} à venir`
+              }
+              className={cn(
+                "flex size-4 shrink-0 items-center justify-center rounded-full border text-[9px] font-bold transition-colors",
+                isValidated &&
+                  "border-emerald-500 bg-emerald-500 text-white",
+                isCurrent &&
+                  "border-indigo-500 bg-indigo-500 text-white ring-4 ring-indigo-500/20",
+                !isValidated &&
+                  !isCurrent &&
+                  "border-slate-300 bg-slate-100 text-transparent dark:border-slate-600 dark:bg-slate-800"
+              )}
+            >
+              {isValidated ? <CheckIcon className="size-2.5" /> : null}
+            </span>
+            {index < total - 1 ? (
+              <span
+                className={cn(
+                  "h-0.5 min-w-1.5 flex-1 rounded-full",
+                  index < validated - 1 || (isValidated && total === 1)
+                    ? "bg-emerald-400"
+                    : "bg-slate-200 dark:bg-slate-700"
+                )}
+              />
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Pastille d'échéance : rouge si dépassée, ambre si proche (≤ 7 jours). */
+function DeadlineBadge({ deadline }: { deadline: Date }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Normalise l'échéance à minuit UTC pour une comparaison en jours entiers.
+  const deadlineDay = new Date(deadline);
+  deadlineDay.setUTCHours(0, 0, 0, 0);
+  const todayUtc = new Date(
+    Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+  );
+
+  const daysLeft = Math.round(
+    (deadlineDay.getTime() - todayUtc.getTime()) / 86_400_000
+  );
+
+  const isOverdue = daysLeft < 0;
+  const isSoon = daysLeft >= 0 && daysLeft <= 7;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
+        isOverdue &&
+          "border-red-200/60 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400",
+        isSoon &&
+          !isOverdue &&
+          "border-amber-200/60 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400",
+        !isOverdue &&
+          !isSoon &&
+          "border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400"
+      )}
+    >
+      <AlarmClockIcon className="size-3" />
+      {isOverdue
+        ? `En retard (${dateFormatter.format(deadline)})`
+        : daysLeft === 0
+          ? "Aujourd'hui"
+          : `J-${daysLeft} · ${dateFormatter.format(deadline)}`}
+    </span>
+  );
+}
+
+/** Carte d'un dossier candidat : progression, jalons, finances et actions. */
 function TravelCard({
   procedure,
-  onStatusResult,
   onEdit,
+  onValidateResult,
 }: {
   procedure: TravelProcedureDTO;
-  onStatusResult: (result: UpdateTravelStatusResult) => void;
   onEdit: (procedure: TravelProcedureDTO) => void;
+  onValidateResult: (message: string | null) => void;
 }) {
+  const [isValidating, setIsValidating] = React.useState(false);
+  const canValidate =
+    procedure.totalStages > 0 &&
+    procedure.validatedStages < procedure.totalStages;
+
+  const handleValidate = async () => {
+    setIsValidating(true);
+    try {
+      const result = await setTravelCurrentStageAction(
+        procedure.id,
+        procedure.validatedStages + 1
+      );
+      onValidateResult(result.ok ? null : result.message);
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
   return (
-    <article className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-3 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-sm font-medium leading-tight">
-            {procedure.student.firstName} {procedure.student.lastName}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {procedure.student.studentCode}
-          </span>
+    <article className="flex flex-col rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+      <header className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <Link
+            href={`/dashboard/travels/${procedure.id}`}
+            className="block truncate font-semibold tracking-tight hover:text-primary hover:underline"
+          >
+            {procedure.candidateName}
+          </Link>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <MapPinIcon className="size-3 shrink-0" />
+              {procedure.destination}
+            </span>
+            {procedure.isExternalCandidate ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-px text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                <UserRoundXIcon className="size-2.5" />
+                Externe
+              </span>
+            ) : procedure.candidateCode ? (
+              <span>{procedure.candidateCode}</span>
+            ) : null}
+          </p>
         </div>
 
         <EntityActionsMenu
-          entityName={`le dossier de ${procedure.student.firstName} ${
-            procedure.student.lastName
-          } (${procedure.destination})`}
+          entityName={`le dossier de ${procedure.candidateName} (${procedure.destination})`}
           onEdit={() => onEdit(procedure)}
-          onDelete={() => deleteTravelProcedureAction(procedure.id)}
+          onDelete={() =>
+            import("@/actions/travels").then((mod) =>
+              mod.deleteTravelProcedureAction(procedure.id)
+            )
+          }
         />
-      </div>
-
-      <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-        <p className="flex items-center gap-1.5">
-          <MapPinIcon className="size-3.5 shrink-0" />
-          <span className="truncate">{procedure.destination}</span>
-        </p>
-        {procedure.targetProgram ? (
-          <p className="flex items-center gap-1.5">
-            <GraduationCapIcon className="size-3.5 shrink-0" />
-            <span className="truncate">{procedure.targetProgram}</span>
-          </p>
-        ) : null}
-        {procedure.advisor ? (
-          <p className="truncate">
-            Conseiller : {procedure.advisor.firstName}{" "}
-            {procedure.advisor.lastName}
-          </p>
-        ) : null}
-        <p>Ouvert le {dateFormatter.format(procedure.createdAt)}</p>
-      </div>
-
-      <div className="mt-3">
-        <TravelStatusSelect
-          procedureId={procedure.id}
-          status={procedure.status}
-          onResult={onStatusResult}
-        />
-      </div>
-    </article>
-  );
-}
-
-/** Colonne du tableau Kanban correspondant à une étape du pipeline. */
-function KanbanColumn({
-  status,
-  procedures,
-  onStatusResult,
-  onEdit,
-}: {
-  status: TravelStatus;
-  procedures: TravelProcedureDTO[];
-  onStatusResult: (result: UpdateTravelStatusResult) => void;
-  onEdit: (procedure: TravelProcedureDTO) => void;
-}) {
-  return (
-    <section
-      aria-label={TRAVEL_STATUS_LABELS[status]}
-      className="flex w-[270px] shrink-0 flex-col rounded-lg border bg-muted/40"
-    >
-      <header className="flex items-center justify-between gap-2 px-3 py-2.5">
-        <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-          {TRAVEL_STATUS_LABELS[status]}
-        </h3>
-        <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium tabular-nums">
-          {procedures.length}
-        </span>
       </header>
-      <div className="flex flex-col gap-2 p-2 pt-0">
-        {procedures.length === 0 ? (
-          <p className="px-1 py-6 text-center text-xs text-muted-foreground">
-            Aucun dossier
-          </p>
-        ) : (
-          procedures.map((procedure) => (
-            <TravelCard
-              key={procedure.id}
-              procedure={procedure}
-              onStatusResult={onStatusResult}
-              onEdit={onEdit}
-            />
-          ))
-        )}
+
+      {procedure.targetProgram ? (
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {procedure.targetProgram}
+        </p>
+      ) : null}
+
+      {/* Progression : pourcentage animé + jalons colorés */}
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-medium text-muted-foreground">
+            {procedure.currentStageTitle ?? "Progression"}
+          </span>
+          <span className="font-bold tabular-nums">
+            {procedure.progressPercent}%
+            <span className="ml-1 font-normal text-muted-foreground">
+              ({procedure.validatedStages}/{procedure.totalStages || "—"})
+            </span>
+          </span>
+        </div>
+
+        <ProgressBar percent={procedure.progressPercent} />
+        <StageStepper
+          validated={procedure.validatedStages}
+          total={procedure.totalStages}
+        />
       </div>
-    </section>
+
+      {/* Échéance de l'étape en cours */}
+      {procedure.currentStageDeadline ? (
+        <div className="mt-3">
+          <DeadlineBadge deadline={procedure.currentStageDeadline} />
+        </div>
+      ) : null}
+
+      {/* Synthèse financière */}
+      <dl className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-2.5 text-xs">
+        <div>
+          <dt className="text-muted-foreground">Net à payer</dt>
+          <dd className="font-semibold tabular-nums">
+            {amountFormatter.format(procedure.netAmount)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Encaissé</dt>
+          <dd className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+            {amountFormatter.format(procedure.paidAmount)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Reste</dt>
+          <dd
+            className={cn(
+              "font-semibold tabular-nums",
+              procedure.remainingAmount > 0
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-emerald-600 dark:text-emerald-400"
+            )}
+          >
+            {amountFormatter.format(procedure.remainingAmount)}
+          </dd>
+        </div>
+      </dl>
+
+      {/* Actions rapides */}
+      <footer className="mt-3 flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          disabled={!canValidate || isValidating}
+          onClick={handleValidate}
+          title={
+            canValidate
+              ? "Valider l'étape en cours"
+              : "Toutes les étapes sont déjà validées"
+          }
+        >
+          {isValidating ? (
+            <Loader2Icon data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <BadgeCheckIcon data-icon="inline-start" />
+          )}
+          Valider l’étape
+        </Button>
+        <Button asChild size="sm" variant="ghost">
+          <Link href={`/dashboard/travels/${procedure.id}`}>
+            Détail
+            <ArrowRightIcon data-icon="inline-end" />
+          </Link>
+        </Button>
+      </footer>
+    </article>
   );
 }
 
@@ -265,345 +380,194 @@ function KanbanColumn({
 export function TravelsView({
   procedures,
   students,
+  workflows,
 }: {
   procedures: TravelProcedureDTO[];
   students: StudentOptionDTO[];
+  workflows: WorkflowDTO[];
 }) {
+  const [tab, setTab] = React.useState<ViewTab>("dossiers");
   const [search, setSearch] = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("ALL");
-  const [viewMode, setViewMode] = React.useState<ViewMode>("kanban");
-  const [statusError, setStatusError] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
   const [editingProcedure, setEditingProcedure] =
     React.useState<TravelProcedureDTO | null>(null);
 
-  const handleStatusResult = React.useCallback(
-    (result: UpdateTravelStatusResult) => {
-      if (result.ok) {
-        setStatusError(null);
-      } else {
-        setStatusError(result.message);
-      }
-    },
-    []
-  );
-
-  /** Nombre de dossiers par statut (pour les onglets et les compteurs). */
-  const countsByStatus = React.useMemo(() => {
-    const counts = new Map<TravelStatus, number>();
-
-    for (const procedure of procedures) {
-      counts.set(procedure.status, (counts.get(procedure.status) ?? 0) + 1);
-    }
-
-    return counts;
-  }, [procedures]);
-
-  /** Recherche instantanée par nom/code étudiant ou destination + filtre par statut. */
+  /** Recherche instantanée par nom/code candidat ou destination. */
   const filteredProcedures = React.useMemo(() => {
     const query = search.trim().toLowerCase();
 
+    if (!query) return procedures;
+
     return procedures.filter((procedure) => {
-      if (statusFilter !== "ALL" && procedure.status !== statusFilter) {
-        return false;
-      }
-
-      if (!query) return true;
-
-      const fullName =
-        `${procedure.student.firstName} ${procedure.student.lastName}`.toLowerCase();
-
       return (
-        fullName.includes(query) ||
-        procedure.student.firstName.toLowerCase().includes(query) ||
-        procedure.student.lastName.toLowerCase().includes(query) ||
-        procedure.student.studentCode.toLowerCase().includes(query) ||
-        procedure.destination.toLowerCase().includes(query)
+        procedure.candidateName.toLowerCase().includes(query) ||
+        (procedure.candidateCode?.toLowerCase().includes(query) ?? false) ||
+        procedure.destination.toLowerCase().includes(query) ||
+        (procedure.targetProgram?.toLowerCase().includes(query) ?? false)
       );
     });
-  }, [procedures, search, statusFilter]);
+  }, [procedures, search]);
 
-  /** Dossiers groupés par statut pour les colonnes Kanban. */
-  const groupedByStatus = React.useMemo(() => {
-    const groups = new Map<TravelStatus, TravelProcedureDTO[]>();
-
-    for (const status of TRAVEL_STATUS_ORDER) {
-      groups.set(status, []);
-    }
-
-    for (const procedure of filteredProcedures) {
-      groups.get(procedure.status)?.push(procedure);
-    }
-
-    return groups;
-  }, [filteredProcedures]);
-
-  // Compteurs clés demandés : admissions et visas en cours.
-  const admissionInProgressCount = countsByStatus.get("ADMISSION_APPLIED") ?? 0;
-  const visaAppliedCount = countsByStatus.get("VISA_APPLIED") ?? 0;
-  const visaApprovedCount = countsByStatus.get("VISA_APPROVED") ?? 0;
+  // Indicateurs clés du module voyage.
+  const inProgressCount = procedures.filter(
+    (p) => p.totalStages > 0 && p.validatedStages < p.totalStages
+  ).length;
+  const completedCount = procedures.filter(
+    (p) => p.totalStages > 0 && p.validatedStages >= p.totalStages
+  ).length;
+  const overdueCount = procedures.filter((p) => {
+    if (!p.currentStageDeadline) return false;
+    const today = new Date();
+    const deadline = new Date(p.currentStageDeadline);
+    deadline.setUTCHours(23, 59, 59, 999);
+    return deadline.getTime() < today.getTime();
+  }).length;
 
   const hasProcedures = procedures.length > 0;
-  const hasResults = filteredProcedures.length > 0;
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
       {/* En-tête de page */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">
-            Procédures voyage
+          <h2 className="text-2xl font-semibold tracking-tight">
+            Module Voyage
           </h2>
           <p className="text-sm text-muted-foreground">
-            Suivez les dossiers de mobilité internationale, de la préparation
-            du dossier jusqu’au départ.
+            Suivi visuel des procédures candidats, échelonnement financier et
+            modèles de workflows par pays.
           </p>
         </div>
-        <AddTravelDialog students={students} />
+        {tab === "dossiers" ? (
+          <AddTravelDialog students={students} workflows={workflows} />
+        ) : null}
       </div>
 
-      {/* Compteurs rapides */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          icon={PlaneTakeoffIcon}
-          label="Dossiers au total"
-          value={procedures.length}
-        />
-        <StatCard
-          icon={SendIcon}
-          label="Admissions en cours"
-          value={admissionInProgressCount}
-        />
-        <StatCard
-          icon={StampIcon}
-          label="Demandes de visa"
-          value={visaAppliedCount}
-        />
-        <StatCard
-          icon={BadgeCheckIcon}
-          label="Visas approuvés"
-          value={visaApprovedCount}
-        />
+      {/* Onglets principaux */}
+      <div
+        role="group"
+        aria-label="Sections du module voyage"
+        className="flex w-fit items-center gap-1 rounded-lg border p-1"
+      >
+        <Button
+          type="button"
+          variant={tab === "dossiers" ? "secondary" : "ghost"}
+          size="sm"
+          aria-pressed={tab === "dossiers"}
+          onClick={() => setTab("dossiers")}
+        >
+          <PlaneTakeoffIcon data-icon="inline-start" />
+          Dossiers candidats
+          <span className="ml-1 text-xs text-muted-foreground tabular-nums">
+            {procedures.length}
+          </span>
+        </Button>
+        <Button
+          type="button"
+          variant={tab === "workflows" ? "secondary" : "ghost"}
+          size="sm"
+          aria-pressed={tab === "workflows"}
+          onClick={() => setTab("workflows")}
+        >
+          <FileStackIcon data-icon="inline-start" />
+          Workflows & modèles
+          <span className="ml-1 text-xs text-muted-foreground tabular-nums">
+            {workflows.length}
+          </span>
+        </Button>
       </div>
 
-      {/* Carte principale : barre d'outils + vue Kanban / Liste */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
-        <div className="flex flex-col gap-3 border-b p-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+      {tab === "workflows" ? (
+        <WorkflowsManager workflows={workflows} />
+      ) : (
+        <>
+          {/* Compteurs rapides */}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              icon={PlaneTakeoffIcon}
+              label="Dossiers au total"
+              value={procedures.length}
+            />
+            <StatCard
+              icon={LayersIcon}
+              label="Procédures en cours"
+              value={inProgressCount}
+            />
+            <StatCard
+              icon={BadgeCheckIcon}
+              label="Procédures terminées"
+              value={completedCount}
+            />
+            <StatCard
+              icon={CalendarClockIcon}
+              label="Échéances dépassées"
+              value={overdueCount}
+            />
+          </div>
+
           {/* Recherche instantanée */}
-          <div className="relative w-full 2xl:max-w-xs">
+          <div className="relative w-full max-w-md">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Rechercher par étudiant ou destination..."
+              placeholder="Rechercher par candidat ou destination..."
               aria-label="Rechercher un dossier de voyage"
               className="pl-8"
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Onglets par statut */}
-            <div
-              role="group"
-              aria-label="Filtrer par statut"
-              className="flex flex-wrap items-center gap-1"
+          {actionError ? (
+            <p
+              role="alert"
+              className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
             >
-              {STATUS_FILTERS.map((filter) => {
-                const isActive = statusFilter === filter.value;
-                const count =
-                  filter.value === "ALL"
-                    ? procedures.length
-                    : (countsByStatus.get(filter.value) ?? 0);
+              {actionError}
+            </p>
+          ) : null}
 
-                return (
-                  <Button
-                    key={filter.value}
-                    type="button"
-                    variant={isActive ? "secondary" : "ghost"}
-                    size="sm"
-                    aria-pressed={isActive}
-                    onClick={() => setStatusFilter(filter.value)}
-                  >
-                    {filter.label}
-                    <span className="ml-1 text-xs text-muted-foreground tabular-nums">
-                      {count}
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
-
-            {/* Bascule Kanban / Liste */}
-            <div
-              role="group"
-              aria-label="Mode d'affichage"
-              className="flex items-center gap-1 rounded-lg border p-1"
-            >
-              <Button
-                type="button"
-                variant={viewMode === "kanban" ? "secondary" : "ghost"}
-                size="sm"
-                aria-pressed={viewMode === "kanban"}
-                onClick={() => setViewMode("kanban")}
-              >
-                <LayoutGridIcon data-icon="inline-start" />
-                Kanban
-              </Button>
-              <Button
-                type="button"
-                variant={viewMode === "list" ? "secondary" : "ghost"}
-                size="sm"
-                aria-pressed={viewMode === "list"}
-                onClick={() => setViewMode("list")}
-              >
-                <ListIcon data-icon="inline-start" />
-                Liste
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Erreur éventuelle lors d'un changement de statut */}
-        {statusError ? (
-          <p
-            role="alert"
-            className="border-b bg-destructive/10 px-4 py-2 text-sm text-destructive"
-          >
-            {statusError}
-          </p>
-        ) : null}
-
-        {hasProcedures ? (
-          viewMode === "kanban" ? (
-            hasResults ? (
-              /* Tableau Kanban : une colonne par étape du pipeline */
-              <div className="overflow-x-auto p-4">
-                <div className="flex min-w-max gap-3">
-                  {TRAVEL_STATUS_ORDER.map((status) => (
-                    <KanbanColumn
-                      key={status}
-                      status={status}
-                      procedures={groupedByStatus.get(status) ?? []}
-                      onStatusResult={handleStatusResult}
-                      onEdit={setEditingProcedure}
-                    />
-                  ))}
-                </div>
+          {hasProcedures ? (
+            filteredProcedures.length > 0 ? (
+              <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                {filteredProcedures.map((procedure) => (
+                  <TravelCard
+                    key={procedure.id}
+                    procedure={procedure}
+                    onEdit={setEditingProcedure}
+                    onValidateResult={setActionError}
+                  />
+                ))}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center gap-1 px-6 py-12 text-center">
+              <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-6 py-12 text-center">
                 <SearchIcon className="size-8 text-muted-foreground/50" />
                 <p className="text-sm font-medium">Aucun résultat trouvé</p>
                 <p className="text-sm text-muted-foreground">
-                  Essayez un autre terme de recherche ou changez de filtre de
-                  statut.
+                  Essayez un autre terme de recherche.
                 </p>
               </div>
             )
-          ) : hasResults ? (
-            /* Vue liste */
-            <>
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Étudiant</TableHead>
-                    <TableHead>Destination</TableHead>
-                    <TableHead>Programme visé</TableHead>
-                    <TableHead>Statut</TableHead>
-                    <TableHead>Conseiller</TableHead>
-                    <TableHead>Ouvert le</TableHead>
-                    <TableHead className="text-right">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredProcedures.map((procedure) => (
-                    <TableRow key={procedure.id}>
-                      <TableCell>
-                        <div className="flex flex-col gap-0.5">
-                          <span className="font-medium">
-                            {procedure.student.firstName}{" "}
-                            {procedure.student.lastName}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {procedure.student.studentCode}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {procedure.destination}
-                      </TableCell>
-                      <TableCell className="max-w-48 truncate text-muted-foreground">
-                        {procedure.targetProgram ?? "—"}
-                      </TableCell>
-                      <TableCell>
-                        <TravelStatusSelect
-                          procedureId={procedure.id}
-                          status={procedure.status}
-                          onResult={handleStatusResult}
-                        />
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {procedure.advisor
-                          ? `${procedure.advisor.firstName} ${procedure.advisor.lastName}`
-                          : "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {dateFormatter.format(procedure.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <EntityActionsMenu
-                          entityName={`le dossier de ${
-                            procedure.student.firstName
-                          } ${procedure.student.lastName} (${
-                            procedure.destination
-                          })`}
-                          onEdit={() => setEditingProcedure(procedure)}
-                          onDelete={() =>
-                            deleteTravelProcedureAction(procedure.id)
-                          }
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-
-              <div className="border-t px-4 py-3 text-xs text-muted-foreground">
-                {filteredProcedures.length} dossier
-                {filteredProcedures.length > 1 ? "s" : ""} sur{" "}
-                {procedures.length}
-              </div>
-            </>
           ) : (
-            <div className="flex flex-col items-center justify-center gap-1 px-6 py-12 text-center">
-              <SearchIcon className="size-8 text-muted-foreground/50" />
-              <p className="text-sm font-medium">Aucun résultat trouvé</p>
-              <p className="text-sm text-muted-foreground">
-                Essayez un autre terme de recherche ou changez de filtre de
-                statut.
+            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-16 text-center">
+              <div className="flex size-12 items-center justify-center rounded-full bg-muted">
+                <CircleDollarSignIcon className="size-6 text-muted-foreground" />
+              </div>
+              <p className="font-medium">Aucun dossier de voyage pour le moment</p>
+              <p className="max-w-sm text-sm text-muted-foreground">
+                Ouvrez votre premier dossier avec le bouton « Nouveau dossier »
+                pour accompagner un candidat dans sa procédure.
               </p>
             </div>
-          )
-        ) : (
-          <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
-            <div className="flex size-12 items-center justify-center rounded-full bg-muted">
-              <PlaneTakeoffIcon className="size-6 text-muted-foreground" />
-            </div>
-            <p className="font-medium">Aucun dossier de voyage pour le moment</p>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              Ouvrez votre premier dossier avec le bouton « Nouveau dossier »
-              pour accompagner un étudiant dans sa procédure.
-            </p>
-          </div>
-        )}
-      </div>
+          )}
+        </>
+      )}
 
       {/* Modale d'édition pré-remplie */}
       <EditTravelDialog
         procedure={editingProcedure}
         students={students}
+        workflows={workflows}
         open={editingProcedure !== null}
         onOpenChange={(open) => {
           if (!open) setEditingProcedure(null);
