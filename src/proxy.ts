@@ -46,6 +46,53 @@ const SESSION_COOKIE_NAMES: readonly string[] = [
 ];
 
 /**
+ * Résout le JWT de session côté proxy.
+ *
+ * Auth.js v5 (`@auth/core`) écrit le cookie de session avec le préfixe
+ * `__Secure-` dès que `useSecureCookies` est actif, ce qui est auto-détecté à
+ * partir de l'URL (`url.protocol === "https:"`, voir init.js) : sur Vercel le
+ * cookie est donc `__Secure-authjs.session-token`.
+ *
+ * Or `getToken()` (`@auth/core/jwt`) utilise par défaut `secureCookie ?? false`,
+ * soit cookie `authjs.session-token` NON préfixé. En production (HTTPS) il ne
+ * lit donc JAMAIS le cookie `__Secure-` → token = null → redirection
+ * /login?callbackUrl=/dashboard. C'est la cause racine du bug signalé.
+ *
+ * On tente donc les deux variantes (sans puis avec préfixe). On fournit
+ * explicitement `cookieName` : en plus de pointer le bon cookie, `getToken`
+ * l'utilise comme `salt` de dérivation de clé (valeur par défaut), ce qui
+ * correspond exactement au `salt` choisi à l'écriture
+ * (`options.cookies.sessionToken.name`, cf. lib/actions/callback/*.js).
+ * `secureCookie:true` ajoute de plus l'attribut `Secure` au cookie lu.
+ */
+async function resolveSessionToken(request: NextRequest) {
+  const secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+
+  if (!secret) {
+    return null;
+  }
+
+  for (const secureCookie of [false, true] as const) {
+    const cookieName = `${secureCookie ? "__Secure-" : ""}authjs.session-token`;
+    try {
+      const token = await getToken({
+        req: request,
+        secret,
+        secureCookie,
+        cookieName,
+      });
+      if (token) {
+        return token;
+      }
+    } catch {
+      // Cookie corrompu / signature invalide : on essaie l'autre variante.
+    }
+  }
+
+  return null;
+}
+
+/**
  * Routes interdites aux enseignants : gestion financière, dossiers
  * administratifs et configuration de l'organisation. Un enseignant ne voit
  * que ses cours, ses émargements et ses cahiers de texte (+ tâches/calendrier).
@@ -70,12 +117,20 @@ function clearInvalidSessionCookies(
   response: NextResponse,
   request: NextRequest
 ): NextResponse {
-  const hasStaleCookie = SESSION_COOKIE_NAMES.some((name) =>
-    request.cookies.has(name)
-  );
+  // Collecte les noms de cookies de session potentiellement invalides,
+  // y compris les entrées chunkées (`__Secure-authjs.session-token.0`, `.1`…)
+  // afin de détruire tous les fragments d'une session obsolète.
+  const staleNames = request.cookies
+    .getAll()
+    .map((c) => c.name)
+    .filter((name) =>
+      SESSION_COOKIE_NAMES.some(
+        (base) => name === base || name.startsWith(`${base}.`)
+      )
+    );
 
-  if (hasStaleCookie) {
-    for (const name of SESSION_COOKIE_NAMES) {
+  if (staleNames.length > 0) {
+    for (const name of staleNames) {
       response.cookies.delete(name);
     }
   }
@@ -86,19 +141,7 @@ function clearInvalidSessionCookies(
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  let token = null;
-
-  try {
-    token = await getToken({
-      req: request,
-      // NextAuth v5 lit AUTH_SECRET (fallback NEXTAUTH_SECRET pour compatibilité).
-      secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
-    });
-  } catch {
-    // Cookie corrompu / signature invalide : traité comme une absence de
-    // session (le nettoyage ci-dessous détruira le cookie fautif).
-    token = null;
-  }
+  let token = await resolveSessionToken(request);
 
   // --------------------------------------
   // Sessions inexistantes ou invalides
