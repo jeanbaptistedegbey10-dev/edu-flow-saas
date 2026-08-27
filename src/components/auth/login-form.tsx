@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2Icon, LogInIcon } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { AlertCircleIcon, Loader2Icon, LogInIcon } from "lucide-react";
 import { signIn } from "next-auth/react";
 
 import { Button } from "@/components/ui/button";
@@ -17,12 +17,12 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * - Validation côté client de l'email et du mot de passe.
  * - Bouton de soumission avec état de chargement.
  * - Affichage des erreurs d'authentification (identifiants invalides,
- *   erreur réseau…).
- * - Après succès : redirection vers `callbackUrl` (mémorisé par le proxy
- *   lors de la redirection initiale) ou vers le tableau de bord.
+ *   erreur réseau…) dans un composant d'alerte rouge.
+ * - Après succès : redirection explicite côté client via
+ *   `window.location.href` pour forcer un rechargement complet du
+ *   navigateur et charger le nouveau cookie de session.
  */
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [isPending, setIsPending] = React.useState(false);
@@ -58,24 +58,39 @@ export function LoginForm() {
         redirect: false,
       });
 
+      // --- Gestion des erreurs ---
+      // Si NextAuth signale une erreur (identifiants invalides, compte
+      // désactivé, erreur interne…), on l'affiche dans un composant
+      // d'alerte rouge sur l'écran.
       if (result?.error) {
-        setError(
-          "Email ou mot de passe incorrect. Veuillez réessayer."
-        );
+        setError("Email ou mot de passe incorrect. Veuillez réessayer.");
         return;
       }
 
-      // Destination mémorisée par le proxy, sinon tableau de bord.
-      const callbackUrl = searchParams.get("callbackUrl");
-      const destination =
-        callbackUrl && callbackUrl.startsWith("/") ? callbackUrl : "/dashboard";
+      // --- Redirection après succès ---
+      // `result?.ok` est `true` lorsque la connexion a réussi.
+      // On utilise `window.location.href` (au lieu de `router.push`) pour
+      // forcer un rechargement complet du navigateur : cela garantit que
+      // le nouveau cookie de session est bien chargé avant l'affichage
+      // du tableau de bord, évitant les boucles /login ↔ /dashboard.
+      if (result?.ok) {
+        const callbackUrl = searchParams.get("callbackUrl");
+        const destination =
+          callbackUrl && callbackUrl.startsWith("/")
+            ? callbackUrl
+            : "/dashboard";
 
-      router.push(destination);
-      // Force le re-rendu des Server Components avec la nouvelle session.
-      router.refresh();
+        window.location.href = destination;
+        return;
+      }
+
+      // result inattendu (null / undefined) — aucun succès détecté.
+      setError(
+        "Une erreur est survenue lors de la connexion. Veuillez réessayer.",
+      );
     } catch {
       setError(
-        "Une erreur est survenue lors de la connexion. Veuillez réessayer."
+        "Une erreur est survenue lors de la connexion. Veuillez réessayer.",
       );
     } finally {
       setIsPending(false);
@@ -85,12 +100,13 @@ export function LoginForm() {
   return (
     <form onSubmit={handleSubmit} className="grid gap-4" noValidate>
       {error ? (
-        <p
+        <div
           role="alert"
-          className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive"
+          className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive"
         >
-          {error}
-        </p>
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+          <p>{error}</p>
+        </div>
       ) : null}
 
       <div className="grid gap-2">

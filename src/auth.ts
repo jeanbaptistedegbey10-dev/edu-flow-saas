@@ -50,7 +50,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
        *
        * Retourne `null` en cas d'échec → NextAuth renvoie une erreur
        * `CredentialsSignin` côté client (message générique, sans fuite d'information).
-       */
+        */
       async authorize(credentials) {
         const email =
           typeof credentials?.email === "string"
@@ -60,6 +60,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           typeof credentials?.password === "string" ? credentials.password : null;
 
         if (!email || !password) {
+          console.error(
+            "[auth] authorize: email or password missing in credentials",
+          );
           return null;
         }
 
@@ -69,12 +72,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         // Compte inexistant ou désactivé : même réponse générique.
         if (!user || !user.isActive) {
+          console.error(
+            `[auth] authorize: user not found or inactive for email "${email}" (isActive: ${user ? user.isActive : "user not found"})`,
+          );
           return null;
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
 
         if (!isPasswordValid) {
+          console.error(
+            `[auth] authorize: password verification failed for email "${email}"`,
+          );
           return null;
         }
 
