@@ -6,19 +6,24 @@ import { getToken } from "next-auth/jwt";
 // Protection des routes (ex-middleware, renommé « proxy » en Next.js 16)
 // --------------------------------------
 //
-// Matcher : toutes les routes SAUF /api, /_next, /favicon.ico et /login.
-// Cela garantit que :
-//   - Le proxy ne s'exécute JAMAIS sur /login → aucune interférence avec
-//     la logique de redirection de la page (auth() vs getToken() mismatch →
-//     boucle /login ↔ /dashboard).
+// Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/:path*.
+// Tout le reste (/, /login, /api, /_next, /favicon.ico, assets) est ignoré
+// par le middleware et passe directement en NextResponse.next() — le proxy
+// n'intervient JAMAIS ailleurs, sans AUCUNE redirection.
+//   - /login est JAMAIS intercepté → aucune interférence possible avec la
+//     logique de redirection de la page (auth() vs getToken() mismatch →
+//     anciennement boucle /login ↔ /dashboard).
 //   - Les endpoints NextAuth (/api/auth/*) et les assets statiques ne sont
 //     jamais interceptés.
+//   - La page /login n'effectue elle-même aucune redirection serveur →
+//     /dashboard (voir src/app/login/page.tsx) : la boucle est cassée.
 //
 // Logique de redirection :
 //   - /dashboard/* : si !token → redirect /login (avec callbackUrl) + nettoyage
 //     cookie invalide (cas qui brise la boucle de redirection).
-//   - /login       : exclue du matcher ; la page gère token → redirect /dashboard
-//     via auth() validée en base de données (voir src/app/login/page.tsx).
+//   - /login       : exclue du matcher ET aucune redirection serveur → /dashboard
+//     (voir src/app/login/page.tsx) : la page affiche toujours le formulaire,
+//     ce qui casse définitivement la boucle /login ↔ /dashboard.
 //   - Cookies invalides : nettoyés uniquement lors de la redirection vers /login.
 //
 // - Rôle STUDENT : aucun accès au tableau de bord (aucun compte étudiant prévu).
@@ -121,16 +126,12 @@ export async function proxy(request: NextRequest) {
 
   // --------------------------------------
   // Session JWT valide : contrôle d'accès par rôle sur /dashboard
-  // et redirection /login → /dashboard
   // --------------------------------------
-  // /login est exclue du matcher (voir config ci-dessous) : cette vérification
-  // agit comme filet de sécurité au cas où le matcher serait modifié pour
-  // inclure /login. La redirection « déjà connecté » est PRINCIPALEMENT gérée
-  // par la page /login elle-même, qui valide la session en base de données
-  // (voir src/app/login/page.tsx).
-  if (pathname === LOGIN_PATH || pathname.startsWith(`${LOGIN_PATH}/`)) {
-    return NextResponse.redirect(new URL(DASHBOARD_PATH, request.url));
-  }
+  // Règle stricte : le proxy ne protège QUE /dashboard/* (voir matcher
+  // ci-dessous) et ne redirige JAMAIS /login → /dashboard. La page /login
+  // n'effectue aucune redirection serveur (voir src/app/login/page.tsx) :
+  // cela casse définitivement la boucle /login ↔ /dashboard
+  // (ERR_TOO_MANY_REDIRECTS). Toute autre route → NextResponse.next().
 
   // Contrôle d'accès par rôle sur /dashboard
   if (pathname.startsWith(DASHBOARD_PATH)) {
@@ -161,15 +162,13 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Le proxy s'exécute sur TOUTES les routes SAUF :
-  // - /api/*            : endpoints NextAuth (signin, signout, session, callback…)
-  // - /_next/static/*   : assets statiques générés
-  // - /_next/image/*    : optimisation d'images
-  // - /favicon.ico      : favicon
-  // - /login            : exclue pour éviter toute interférence avec la page
-  //   /login, qui gère elle-même la redirection authentifiée → /dashboard
-  //   via auth() (validée en base). Sans cette exclusion, un mismatch entre
-  //   getToken() (proxy) et auth() (page) pouvait créer une boucle infinie
-  //   sur Vercel : /dashboard → /login → /dashboard → … (ERR_TOO_MANY_REDIRECTS).
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|login).*)"],
+  // Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/*.
+  // Tout le reste (/, /login, /api, /_next, /favicon.ico, assets) est ignoré
+  // par le middleware et passe directement en NextResponse.next() — le proxy
+  // n'intervient JAMAIS ailleurs, sans AUCUNE redirection. Cette exclusion
+  // stricte de /login casse la boucle infinie sur Vercel :
+  // /dashboard → /login → /dashboard → … (ERR_TOO_MANY_REDIRECTS), liée à un
+  // désaccord entre getToken() (proxy) et auth() (page /login). La page /login
+  // n'effectue plus, elle-même, aucune redirection serveur → /dashboard.
+  matcher: ["/dashboard/:path*"],
 };

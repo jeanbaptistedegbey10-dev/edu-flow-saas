@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { redirect } from "next/navigation";
+// import { redirect } from "next/navigation"; // Désactivé : redirection serveur /login → /dashboard désactivée (cas 2) pour casser la boucle ERR_TOO_MANY_REDIRECTS
 import { Suspense } from "react";
 import { CheckCircle2Icon, GraduationCapIcon } from "lucide-react";
 
 import { LoginForm } from "@/components/auth/login-form";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getValidatedSessionContext } from "@/lib/session";
+// import { getValidatedSessionContext } from "@/lib/session"; // Désactivé : cas 2 — plus de redirection serveur depuis /login
 
 export const metadata: Metadata = {
   title: "Connexion - EduFlow SaaS",
@@ -43,11 +43,21 @@ export default async function LoginPage({
   //
   // Les comptes STUDENT n'ont accès à aucun tableau de bord : ils voient eux
   // aussi le formulaire (le proxy les renvoie ici depuis /dashboard).
-  const sessionContext = await getValidatedSessionContext();
-
-  if (sessionContext && sessionContext.role !== "STUDENT") {
-    redirect("/dashboard");
-  }
+    // ATTENTION (cas 2 — correctif définitif) : la redirection serveur
+  // automatique « déjà connecté → /dashboard » est DÉSACTIVÉE pour casser
+  // définitivement la boucle ERR_TOO_MANY_REDIRECTS /login ↔ /dashboard.
+  // La page /login AFFICHE TOUJOURS le formulaire, même avec une session
+  // résiduelle valide en base. La redirection après connexion réussie est
+  // gérée côté client par LoginForm (router.push vers callbackUrl ou /dashboard).
+  //
+  // Pour réactiver : décommenter les deux imports en haut du fichier ainsi que
+  // le bloc ci-dessous.
+  //
+  // const sessionContext = await getValidatedSessionContext();
+  //
+  // if (sessionContext && sessionContext.role !== "STUDENT") {
+  //   redirect("/dashboard");
+  // }
 
   return (
     <main className="flex min-h-svh flex-1 items-center justify-center bg-muted/40 p-4">
