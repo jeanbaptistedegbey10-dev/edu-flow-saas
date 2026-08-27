@@ -20,7 +20,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // tandis que auth() réussit, créant une boucle /login ↔ /dashboard sur Vercel.
   // En production, ce secret doit être défini dans les variables d'environnement
   // Vercel (AUTH_SECRET ou NEXTAUTH_SECRET).
-  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  secret:
+    process.env.AUTH_SECRET ||
+    process.env.NEXTAUTH_SECRET ||
+    "fallback-secret-for-production-build",
 
   // Stratégie JWT obligatoire avec CredentialsProvider (pas de sessions base de données).
   session: {
@@ -30,14 +33,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Nécessaire lorsque l'application est déployée derrière un proxy / sur Vercel.
   trustHost: true,
 
-  // Politique de cookies adaptée à l'environnement.
-  // En production (HTTPS, Vercel derrière un proxy), le cookie de session est
-  // émis préfixé `__Secure-` et marqué `Secure` → uniquement transmis en HTTPS.
-  // En développement (http://localhost) on retombe sur `authjs.session-token`.
-  // Ces deux noms exacts sont ceux attendus par le nettoyage de cookie invalide
-  // dans src/proxy.ts (SESSION_COOKIE_NAMES). Le forçage explicite garantit
-  // cohérence du cookie entre la page /login et le proxy.
-  useSecureCookies: process.env.NODE_ENV === "production",
+  // Politique de cookies : on laisse NextAuth choisir son mode par défaut afin
+  // d'éviter tout blocage de cookies `__Secure-` sur les domaines Vercel
+  // (.vercel.app). Le forçage explicite de `useSecureCookies` en production
+  // provoquait des échecs de session sur ces domaines. Voir src/proxy.ts
+  // (SESSION_COOKIE_NAMES) qui gère le nettoyage des cookies invalides.
+  // useSecureCookies: process.env.NODE_ENV === "production",
 
   pages: {
     signIn: "/login",

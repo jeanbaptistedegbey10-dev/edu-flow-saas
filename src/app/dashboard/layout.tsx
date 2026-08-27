@@ -1,5 +1,3 @@
-import { redirect } from "next/navigation";
-
 import { auth } from "@/auth";
 import { getCurrentOrganizationBranding } from "@/actions/organization";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
@@ -22,14 +20,13 @@ export default async function DashboardLayout({
 
   // Journal de diagnostic : observable dans les logs Vercel pour vérifier si la
   // session est présente ou null lors de l'accès au tableau de bord.
-  console.log("[DASHBOARD AUTH CHECK]", session);
-
-  // Protection serveur du tableau de bord : si la session est confirmée comme
-  // absente (null), redirection vers /login. Seconde ligne de défense derrière
-  // le proxy (src/proxy.ts) qui protège déjà /dashboard/*.
-  if (!session?.user) {
-    redirect("/login");
-  }
+  // Note : pas de redirection 307 ici. La sécurité est assurée par le proxy
+  // (src/proxy.ts) qui protège /dashboard/*. La redirection serveur dans le
+  // layout générait un code HTTP 307 vers /login sur Vercel.
+  console.log(
+    "[DASHBOARD SESSION STATUS]:",
+    session ? "Connecté" : "Non connecté",
+  );
 
   // Identité visuelle de l'organisation (logo + nom) affichée dans l'en-tête.
   // Dégradation gracieuse : monogramme par défaut si indisponible.
