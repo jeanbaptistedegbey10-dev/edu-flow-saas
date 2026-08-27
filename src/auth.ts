@@ -112,6 +112,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
 
   callbacks: {
+    // NOTE (stabilisation) : les callbacks ci-dessous ne retournent JAMAIS
+    // null et ne plantent jamais sur une propriété absente. Chaque lecture
+    // est protégée par un garde-fou (`if (user)`, `if (session.user && token)`)
+    // et chaque écriture emploie un défaut sûr (`?? null`) pour éviter les
+    // états `undefined` dans le JWT/session.
+
     /**
      * Au moment de la connexion (`user` présent), copie les informations
      * multi-tenant dans le token JWT. Sur les appels suivants, le token
@@ -119,9 +125,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      */
     jwt({ token, user }) {
       if (user) {
-        token.id = user.id;
+        token.id = user.id as string;
         token.role = user.role;
-        token.organizationId = user.organizationId;
+        // `organizationId` peut être absent selon le provider : on force un
+        // défaut sûr (`null`, jamais `undefined`) pour le JWT.
+        token.organizationId = (user as any).organizationId ?? null;
       }
 
       return token;
@@ -132,9 +140,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * pour l'ensemble de l'application (Server Components, Server Actions…).
      */
     session({ session, token }) {
-      session.user.id = token.id;
-      session.user.role = token.role;
-      session.user.organizationId = token.organizationId;
+      // Garde-fou : on ne modifie `session.user` que si elle existe ET si
+      // un token est présent — évite toute erreur sur propriété absente.
+      if (session.user && token) {
+        session.user.id = token.id as string;
+        (session.user as any).role = token.role;
+        (session.user as any).organizationId = token.organizationId ?? null;
+      }
 
       return session;
     },

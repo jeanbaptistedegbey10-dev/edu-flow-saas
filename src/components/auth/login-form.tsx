@@ -18,9 +18,11 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * - Bouton de soumission avec état de chargement.
  * - Affichage des erreurs d'authentification (identifiants invalides,
  *   erreur réseau…) dans un composant d'alerte rouge.
- * - Après succès : redirection explicite côté client via
- *   `window.location.href` pour forcer un rechargement complet du
- *   navigateur et charger le nouveau cookie de session.
+ * - Après succès : la redirection est **gérée par NextAuth** — le POST vers
+ *   `/api/auth/callback/credentials` pose le cookie de session puis renvoie
+ *   l'URL finale (`redirectTo`) dans `result.url`, que le client suit via
+ *   `window.location.replace(...)` (rechargement complet du navigateur pour
+ *   charger le nouveau cookie de session).
  */
 export function LoginForm() {
   const searchParams = useSearchParams();
@@ -50,12 +52,26 @@ export function LoginForm() {
     setIsPending(true);
 
     try {
-      // `redirect: false` permet de gérer la redirection manuellement
-      // et d'afficher les erreurs sans rechargement de page.
+      // Redirection gérée par NextAuth : l'appel POST vers
+      // `/api/auth/callback/credentials` pose lui-même le cookie de session
+      // puis renvoie l'URL finale (redirectTo) dans `result.url`. On se
+      // contente de suivre cette URL — NextAuth garde la main sur la pose du
+      // cookie et la destination, ce qui évite toute boucle /login ↔ /dashboard.
+      //
+      // `redirect: false` permet de conserver l'affichage des erreurs sans
+      // rechargement de page, tout en passant par l'endpoint de callback de
+      // NextAuth (redirection « gérée » par la bibliothèque, pas par le client).
+      const callbackUrl = searchParams.get("callbackUrl");
+      const destination =
+        callbackUrl && callbackUrl.startsWith("/")
+          ? callbackUrl
+          : "/dashboard";
+
       const result = await signIn("credentials", {
         email,
         password,
         redirect: false,
+        redirectTo: destination,
       });
 
       // --- Gestion des erreurs ---
@@ -68,21 +84,14 @@ export function LoginForm() {
       }
 
       // --- Redirection après succès ---
-      // `result?.ok` est `true` lorsque la connexion a réussi.
-      // On utilise `window.location.replace(...)` (au lieu de `router.push`)
-      // pour forcer un rechargement complet du navigateur : cela garantit que
-      // le nouveau cookie de session est bien chargé avant l'affichage
-      // du tableau de bord, évitant les boucles /login ↔ /dashboard.
-      // `replace` (vs `href`) retire la page actuelle de l'historique : le
-      // bouton retour ne repasse jamais par `/login` en boucle.
-      if (result?.ok) {
-        const callbackUrl = searchParams.get("callbackUrl");
-        const destination =
-          callbackUrl && callbackUrl.startsWith("/")
-            ? callbackUrl
-            : "/dashboard";
-
-        window.location.replace(destination);
+      // Le callback NextAuth a déjà posé le cookie de session et renvoyé
+      // l'URL finale dans `result.url` (normalement la valeur de `redirectTo`).
+      // `window.location.replace(...)` (au lieu de `router.push`) force un
+      // rechargement complet du navigateur pour charger le nouveau cookie ;
+      // `replace` (vs `href`) retire `/login` de l'historique : le bouton
+      // retour ne repasse jamais par la page de connexion en boucle.
+      if (result?.url) {
+        window.location.replace(result.url);
         return;
       }
 

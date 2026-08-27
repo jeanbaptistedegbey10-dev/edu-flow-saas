@@ -18,7 +18,11 @@ export const metadata: Metadata = {
   description: "Plateforme SaaS de gestion pour centres de formation et agences de mobilité internationale",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="fr"

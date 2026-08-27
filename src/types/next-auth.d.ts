@@ -12,17 +12,20 @@ import type { DefaultSession } from "next-auth";
 // - `organizationId` : organisation de rattachement de l'utilisateur
 
 declare module "next-auth" {
+  // `organizationId` est nullable au niveau du JWT/session car il peut être
+  // absent à la connexion. La base de données (via src/lib/session.ts) reste
+  // la source de vérité et ré-affiche toujours une organisation valide.
   interface User {
     id: string;
     role: Role;
-    organizationId: string;
+    organizationId: string | null;
   }
 
   interface Session {
     user: {
       id: string;
       role: Role;
-      organizationId: string;
+      organizationId: string | null;
     } & DefaultSession["user"];
   }
 }
@@ -34,6 +37,6 @@ declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
     role: Role;
-    organizationId: string;
+    organizationId: string | null;
   }
 }
