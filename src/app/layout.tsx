@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { NavigationProgressBar } from "@/components/providers/navigation-progress";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,6 +31,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/* Barre de progression globale : s'anime dès qu'un lien interne est
+            cliqué (Sidebar, cartes…) ou qu'une Server Action démarre. */}
+        <Suspense fallback={null}>
+          <NavigationProgressBar />
+        </Suspense>
         <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>

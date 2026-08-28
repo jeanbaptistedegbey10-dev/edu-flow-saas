@@ -6,6 +6,10 @@ import { useRouter } from "next/navigation";
 import { Loader2Icon, UserPlusIcon } from "lucide-react";
 
 import { registerAction, type RegisterFormState } from "@/actions/register";
+import {
+  completeNavigationProgress,
+  startNavigationProgress,
+} from "@/components/providers/navigation-progress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,26 +36,56 @@ function FieldError({ message }: { message?: string }) {
 export function RegisterForm() {
   const router = useRouter();
 
+  // L'inscription inclut par défaut le jeu de démonstration : le message
+  // d'attente s'adapte à ce choix (case décochée = création seule).
+  const [includeDemoData, setIncludeDemoData] = React.useState(true);
+
   // Enveloppe l'action serveur pour rediriger dès que la création réussit.
   const [state, formAction, pending] = useActionState(
     async (_prevState: RegisterFormState, formData: FormData) => {
-      const result = await registerAction(_prevState, formData);
+      // La Server Action (création du compte + injection de la démo) peut
+      // prendre plusieurs secondes : la barre de progression globale donne
+      // un retour immédiat, en complément du spinner du bouton.
+      startNavigationProgress();
 
-      if (result.status === "success") {
-        // Redirection vers /login avec un message de succès.
-        router.push("/login?registered=1");
-        router.refresh();
+      try {
+        const result = await registerAction(_prevState, formData);
+
+        if (result.status === "success") {
+          // Redirection vers /login avec un message de succès.
+          router.push("/login?registered=1");
+          router.refresh();
+        }
+
+        return result;
+      } finally {
+        completeNavigationProgress();
       }
-
-      return result;
     },
     INITIAL_FORM_STATE
   );
 
   const fieldErrors = state.fieldErrors ?? {};
 
+  // Message d'attente dynamique affiché pendant le traitement de l'action.
+  const pendingMessage = includeDemoData
+    ? "Création de votre compte et injection de la démo en cours..."
+    : "Création de votre compte en cours...";
+
   return (
-    <form action={formAction} className="grid gap-4" noValidate>
+    <form
+      action={formAction}
+      className="grid gap-4"
+      noValidate
+      aria-busy={pending}
+      onSubmit={(event) => {
+        // Garde anti double-clic : toute soumission alors qu'une action est
+        // déjà en cours est annulée (complète le `disabled` du bouton).
+        if (pending) {
+          event.preventDefault();
+        }
+      }}
+    >
       {state.message && state.status === "error" && !state.fieldErrors ? (
         <p
           role="alert"
@@ -153,6 +187,7 @@ export function RegisterForm() {
           defaultChecked
           required
           disabled={pending}
+          onChange={(event) => setIncludeDemoData(event.target.checked)}
           className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
         />
         <span className="grid gap-0.5">
@@ -174,6 +209,18 @@ export function RegisterForm() {
         )}
         {pending ? "Création du compte..." : "Créer mon compte"}
       </Button>
+
+      {/* Message d'attente dynamique (annoncé aux lecteurs d'écran). */}
+      {pending ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="flex items-center justify-center gap-2 text-sm text-muted-foreground"
+        >
+          <Loader2Icon className="size-4 shrink-0 animate-spin" aria-hidden />
+          {pendingMessage}
+        </p>
+      ) : null}
     </form>
   );
 }
