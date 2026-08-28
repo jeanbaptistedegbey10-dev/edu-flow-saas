@@ -138,6 +138,34 @@ export function RegisterForm() {
         <FieldError message={fieldErrors.password} />
       </div>
 
+      {/* Case à cocher OBLIGATOIRE : injecte automatiquement le jeu de
+          données de démonstration dès la création du compte (cochée par
+          défaut, `required` bloque la soumission si elle est décochée). */}
+      <label
+        htmlFor="includeDemoData"
+        className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200/80 p-3 transition-colors hover:bg-muted/40 dark:border-slate-800"
+      >
+        <input
+          id="includeDemoData"
+          name="includeDemoData"
+          type="checkbox"
+          value="on"
+          defaultChecked
+          required
+          disabled={pending}
+          className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
+        />
+        <span className="grid gap-0.5">
+          <span className="text-sm font-medium">
+            Jeu de données de démonstration *
+          </span>
+          <span className="text-xs text-muted-foreground">
+            Inclure un jeu de données de démonstration (élèves, cours, notes,
+            dépenses) pour visiter la plateforme.
+          </span>
+        </span>
+      </label>
+
       <Button type="submit" size="lg" className="w-full" disabled={pending}>
         {pending ? (
           <Loader2Icon data-icon="inline-start" className="animate-spin" />

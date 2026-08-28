@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import {
   getAttendanceTrendAction,
+  getCashFlowAction,
   getDashboardStatsAction,
   getFinancialOverviewAction,
   getStudentDistributionAction,
@@ -29,10 +30,11 @@ export default async function DashboardPage() {
 
   // Vue analytique globale : les données sont calculées serveur et
   // transmises aux composants clients (graphiques Recharts inclus).
-  const [stats, financialOverview, distribution, attendanceTrend] =
+  const [stats, financialOverview, cashFlow, distribution, attendanceTrend] =
     await Promise.all([
       getDashboardStatsAction(),
       getFinancialOverviewAction(),
+      getCashFlowAction(),
       getStudentDistributionAction(),
       getAttendanceTrendAction(),
     ]);
@@ -41,6 +43,7 @@ export default async function DashboardPage() {
     <DashboardOverview
       stats={stats}
       financialOverview={financialOverview}
+      cashFlow={cashFlow}
       distribution={distribution}
       attendanceTrend={attendanceTrend}
     />

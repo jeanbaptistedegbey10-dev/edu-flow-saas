@@ -884,5 +884,133 @@ export async function getAttendanceTrendAction(
 }
 
 
+// --------------------------------------
+// Server Action — Trésorerie (caisse)
+// --------------------------------------
+
+/** Indicateurs de trésorerie de la caisse. */
+export type CashFlowDTO = {
+  /** Encaissements du mois courant (paiements confirmés + ventes POS nettes). */
+  collectedThisMonth: number;
+  /** Dépenses du mois courant. */
+  expensesThisMonth: number;
+  /** Total des encaissements (tous temps, toutes sources). */
+  collectedTotal: number;
+  /** Total des dépenses (tous temps). */
+  expensesTotal: number;
+  /**
+   * Solde de caisse global = total encaissements − total dépenses.
+   * (Solde Caisse = Tous Encaissements Totaux − Toutes Dépenses Totales.)
+   */
+  cashBalance: number;
+};
+
+/**
+ * Calcule les indicateurs de trésorerie de l'organisation active :
+ * - encaissements / dépenses du mois courant ;
+ * - totaux globaux (tous temps) et solde de caisse.
+ * Seuls les rôles administratifs y ont accès (défense en profondeur).
+ */
+export async function getCashFlowAction(): Promise<CashFlowDTO> {
+  const user = await getCurrentSessionUser();
+  assertFinancialAccess(user.role);
+  const organizationId = user.organizationId;
+
+  const now = new Date();
+  const monthStart = currentMonthStart(now);
+  const nextMonth = new Date(
+    monthStart.getFullYear(),
+    monthStart.getMonth() + 1,
+    1
+  );
+
+  try {
+    const [
+      monthlyPayments,
+      monthlySales,
+      monthlyExpenses,
+      totalPayments,
+      totalSales,
+      totalExpenses,
+    ] = await Promise.all([
+      // Encaissements du mois (paiements confirmés).
+      prisma.payment.aggregate({
+        where: {
+          organizationId,
+          status: "COMPLETED",
+          paidAt: { gte: monthStart, lt: nextMonth },
+        },
+        _sum: { amount: true },
+      }),
+      // Encaissements POS du mois (ventes comptoir nettes).
+      prisma.sale.aggregate({
+        where: {
+          organizationId,
+          status: "COMPLETED",
+          createdAt: { gte: monthStart, lt: nextMonth },
+        },
+        _sum: { netAmount: true },
+      }),
+      // Dépenses du mois.
+      prisma.expense.aggregate({
+        where: {
+          organizationId,
+          expenseDate: { gte: monthStart, lt: nextMonth },
+        },
+        _sum: { amount: true },
+      }),
+      // Encaissements totaux (tous temps).
+      prisma.payment.aggregate({
+        where: { organizationId, status: "COMPLETED" },
+        _sum: { amount: true },
+      }),
+      prisma.sale.aggregate({
+        where: { organizationId, status: "COMPLETED" },
+        _sum: { netAmount: true },
+      }),
+      // Dépenses totales (tous temps).
+      prisma.expense.aggregate({
+        where: { organizationId },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const collectedThisMonth = roundAmount(
+      (monthlyPayments._sum.amount ?? 0) +
+        (monthlySales._sum.netAmount ?? 0)
+    );
+    const expensesThisMonth = roundAmount(
+      monthlyExpenses._sum.amount ?? 0
+    );
+    const collectedTotal = roundAmount(
+      (totalPayments._sum.amount ?? 0) + (totalSales._sum.netAmount ?? 0)
+    );
+    const expensesTotal = roundAmount(totalExpenses._sum.amount ?? 0);
+
+    return {
+      collectedThisMonth,
+      expensesThisMonth,
+      collectedTotal,
+      expensesTotal,
+      cashBalance: roundAmount(collectedTotal - expensesTotal),
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error(
+      "[getCashFlowAction] Échec de calcul de la trésorerie :",
+      error
+    );
+
+    // Dégradation gracieuse : caisse neutre plutôt que crash serveur.
+    return {
+      collectedThisMonth: 0,
+      expensesThisMonth: 0,
+      collectedTotal: 0,
+      expensesTotal: 0,
+      cashBalance: 0,
+    };
+  }
+}
 
 

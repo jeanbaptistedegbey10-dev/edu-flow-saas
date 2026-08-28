@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import {
   BadgeCheckIcon,
   Loader2Icon,
+  LockKeyholeIcon,
   PlusIcon,
   UserPlusIcon,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 /** Valeur sentinelle pour les champs Select optionnels (Radix interdit ""). */
 const NONE_VALUE = "__none__";
@@ -66,19 +68,48 @@ export function AddStudentDialog({
 }) {
   const [open, setOpen] = React.useState(false);
 
-  // Champs financiers : le Net à Payer est recalculé en direct
-  // (netAmount = totalCost − discount), sans jamais être saisissable.
+  // Champs financiers : le Net à Payer est recalculé en direct, sans jamais
+  // être saisissable. La sélection d'une classe verrouille le coût total sur
+  // les frais de scolarité configurés pour cette classe (frais de classe ou
+  // prix du cours porteur).
+  const [selectedClassId, setSelectedClassId] =
+    React.useState<string>(NONE_VALUE);
+  const [discountType, setDiscountType] =
+    React.useState<"FIXED" | "PERCENTAGE">("FIXED");
   const [totalCost, setTotalCost] = React.useState("");
   const [discount, setDiscount] = React.useState("");
 
+  const selectedClass = classes.find((klass) => klass.id === selectedClassId);
+  const classFeeLocked = selectedClass !== null;
+
+  /** Réaction à la sélection d'une classe : pré-remplit et verrouille les frais. */
+  const handleClassChange = (value: string) => {
+    setSelectedClassId(value);
+
+    if (value !== NONE_VALUE) {
+      const klass = classes.find((item) => item.id === value);
+      if (klass?.tuitionFee != null) {
+        setTotalCost(String(klass.tuitionFee));
+      }
+    }
+  };
+
   const netAmount = React.useMemo(() => {
     const cost = Number(totalCost.replace(",", "."));
-    const reduction = discount ? Number(discount.replace(",", ".")) : 0;
-
     if (!totalCost || Number.isNaN(cost)) return null;
 
-    return Math.max(0, cost - (Number.isNaN(reduction) ? 0 : reduction));
-  }, [totalCost, discount]);
+    const rawReduction = discount ? Number(discount.replace(",", ".")) : 0;
+    const reduction = Number.isNaN(rawReduction) ? 0 : rawReduction;
+
+    if (discountType === "PERCENTAGE") {
+      return Math.max(
+        0,
+        Math.round(cost * (1 - (Math.min(100, reduction) / 100)))
+      );
+    }
+
+    return Math.max(0, cost - reduction);
+  }, [totalCost, discount, discountType]);
 
   // Enveloppe l'action serveur pour fermer la modale dès que la création réussit.
   const [state, formAction, pending] = useActionState(
@@ -98,6 +129,8 @@ export function AddStudentDialog({
 
       if (result.status === "success") {
         setOpen(false);
+        setSelectedClassId(NONE_VALUE);
+        setDiscountType("FIXED");
         setTotalCost("");
         setDiscount("");
       }
@@ -219,7 +252,11 @@ export function AddStudentDialog({
 
             <div className="grid gap-2">
               <Label htmlFor="classId">Classe</Label>
-              <Select name="classId" defaultValue={NONE_VALUE}>
+              <Select
+                name="classId"
+                value={selectedClassId}
+                onValueChange={handleClassChange}
+              >
                 <SelectTrigger id="classId" className="w-full">
                   <SelectValue placeholder="Aucune classe (facultatif)" />
                 </SelectTrigger>
@@ -233,6 +270,16 @@ export function AddStudentDialog({
                 </SelectContent>
               </Select>
               <FieldError message={fieldErrors.classId} />
+              {selectedClass ? (
+                <p className="text-xs text-muted-foreground">
+                  Frais de scolarité appliqués :{" "}
+                  <strong className="font-semibold tabular-nums">
+                    {selectedClass.tuitionFee?.toLocaleString("fr-FR") ?? "—"}{" "}
+                    FCFA
+                  </strong>{" "}
+                  (coût total verrouillé sur cette classe).
+                </p>
+              ) : null}
               {classes.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   Aucune classe disponible : créez-en une depuis la page
@@ -260,15 +307,55 @@ export function AddStudentDialog({
                   step="any"
                   inputMode="decimal"
                   placeholder="Ex : 400000"
-                  value={totalCost}
+                  readOnly={classFeeLocked}
+                  value={
+                    classFeeLocked && selectedClass?.tuitionFee != null
+                      ? String(selectedClass.tuitionFee)
+                      : totalCost
+                  }
                   onChange={(event) => setTotalCost(event.target.value)}
                   aria-invalid={Boolean(fieldErrors.totalCost)}
+                  className={cn(
+                    classFeeLocked &&
+                      "cursor-not-allowed bg-muted/50 focus-visible:ring-0"
+                  )}
                 />
                 <FieldError message={fieldErrors.totalCost} />
+                {classFeeLocked ? (
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <LockKeyholeIcon className="size-3 shrink-0" />
+                    Montant imposé par la classe — choisissez «&nbsp;Aucune
+                    classe&nbsp;» pour le modifier.
+                  </p>
+                ) : null}
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="discount">Réduction (FCFA)</Label>
+                <Label htmlFor="discountType">Type de réduction</Label>
+                <Select
+                  name="discountType"
+                  value={discountType}
+                  onValueChange={(value) =>
+                    setDiscountType(value as "FIXED" | "PERCENTAGE")
+                  }
+                >
+                  <SelectTrigger id="discountType" className="w-full">
+                    <SelectValue placeholder="Type de réduction" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="FIXED">Montant fixe (FCFA)</SelectItem>
+                    <SelectItem value="PERCENTAGE">
+                      Pourcentage (%)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="discount">
+                  Réduction{" "}
+                  {discountType === "PERCENTAGE" ? "(%)" : "(FCFA)"}
+                </Label>
                 <Input
                   id="discount"
                   name="discount"
@@ -276,7 +363,7 @@ export function AddStudentDialog({
                   min="0"
                   step="any"
                   inputMode="decimal"
-                  placeholder="Ex : 25000"
+                  placeholder={discountType === "PERCENTAGE" ? "Ex : 10" : "Ex : 25000"}
                   value={discount}
                   onChange={(event) => setDiscount(event.target.value)}
                   aria-invalid={Boolean(fieldErrors.discount)}
@@ -284,6 +371,13 @@ export function AddStudentDialog({
                 <FieldError message={fieldErrors.discount} />
               </div>
             </div>
+
+            {discountType === "PERCENTAGE" ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                La réduction est calculée en pourcentage du coût total
+                (réduction = coût total × pourcentage).
+              </p>
+            ) : null}
 
             {/* Annonce des frais d'inscription uniques */}
             {registrationFee > 0 ? (

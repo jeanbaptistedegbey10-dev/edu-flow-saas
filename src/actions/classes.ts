@@ -15,6 +15,11 @@ export type ClassDTO = {
   name: string;
   /** Créneau horaire (ex : « 08h-11h »). */
   schedule: string;
+  /**
+   * Frais de scolarité configurés pour la classe (FCFA), ou `null` pour
+   * hériter du prix du cours porteur.
+   */
+  tuitionFee: number | null;
   courseId: string;
   courseTitle: string;
   courseCode: string;
@@ -31,11 +36,17 @@ export type ClassOptionDTO = {
   schedule: string;
   courseTitle: string;
   courseCode: string;
+  /**
+   * Montant effectif appliqué au coût total de scolarité de l'étudiant :
+   * frais de la classe si configurés, sinon prix du cours porteur.
+   */
+  tuitionFee: number | null;
 };
 
 export type ClassFormField =
   | "name"
   | "schedule"
+  | "tuitionFee"
   | "courseId"
   | "teacherId";
 
@@ -63,6 +74,7 @@ type ParsedClassInput =
       data: {
         name: string;
         schedule: string;
+        tuitionFee: number | null;
         courseId: string;
         teacherId: string | null;
       };
@@ -74,6 +86,7 @@ function parseClassForm(formData: FormData): ParsedClassInput {
   const schedule = String(formData.get("schedule") ?? "").trim();
   const courseId = String(formData.get("courseId") ?? "").trim();
   const teacherId = String(formData.get("teacherId") ?? "").trim();
+  const rawTuitionFee = String(formData.get("tuitionFee") ?? "").trim();
 
   const fieldErrors: Partial<Record<ClassFormField, string>> = {};
 
@@ -93,6 +106,22 @@ function parseClassForm(formData: FormData): ParsedClassInput {
     fieldErrors.courseId = "Veuillez sélectionner un cours.";
   }
 
+  // Frais de scolarité de la classe : optionnel. Absent ⇒ héritage du prix
+  // du cours porteur au moment de l'affectation d'un étudiant.
+  let tuitionFee: number | null = null;
+  if (rawTuitionFee) {
+    const value = Number(rawTuitionFee.replace(",", "."));
+    if (Number.isNaN(value)) {
+      fieldErrors.tuitionFee = "Les frais doivent être un nombre.";
+    } else if (value < 0) {
+      fieldErrors.tuitionFee = "Les frais ne peuvent pas être négatifs.";
+    } else if (value > 1_000_000_000) {
+      fieldErrors.tuitionFee = "Les frais dépassent la limite autorisée.";
+    } else {
+      tuitionFee = value;
+    }
+  }
+
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, fieldErrors };
   }
@@ -102,6 +131,7 @@ function parseClassForm(formData: FormData): ParsedClassInput {
     data: {
       name,
       schedule,
+      tuitionFee,
       courseId,
       teacherId: teacherId || null,
     },
@@ -159,6 +189,7 @@ export async function getClasses(): Promise<ClassDTO[]> {
         id: true,
         name: true,
         schedule: true,
+        tuitionFee: true,
         courseId: true,
         createdAt: true,
         course: {
@@ -176,6 +207,7 @@ export async function getClasses(): Promise<ClassDTO[]> {
       id: klass.id,
       name: klass.name,
       schedule: klass.schedule,
+      tuitionFee: klass.tuitionFee,
       courseId: klass.courseId,
       courseTitle: klass.course.title,
       courseCode: klass.course.code,
@@ -211,8 +243,9 @@ export async function getClassOptions(): Promise<ClassOptionDTO[]> {
         id: true,
         name: true,
         schedule: true,
+        tuitionFee: true,
         course: {
-          select: { title: true, code: true },
+          select: { title: true, code: true, price: true },
         },
       },
     });
@@ -223,6 +256,8 @@ export async function getClassOptions(): Promise<ClassOptionDTO[]> {
       schedule: klass.schedule,
       courseTitle: klass.course.title,
       courseCode: klass.course.code,
+      // Montant effectif : frais de classe si configurés, sinon prix du cours.
+      tuitionFee: klass.tuitionFee ?? klass.course.price,
     }));
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -276,6 +311,7 @@ export async function createClassAction(
         organizationId,
         name: parsed.data.name,
         schedule: parsed.data.schedule,
+        tuitionFee: parsed.data.tuitionFee,
         courseId: parsed.data.courseId,
         teacherId: parsed.data.teacherId,
       },
@@ -364,6 +400,7 @@ export async function updateClassAction(
       data: {
         name: parsed.data.name,
         schedule: parsed.data.schedule,
+        tuitionFee: parsed.data.tuitionFee,
         courseId: parsed.data.courseId,
         teacherId: parsed.data.teacherId,
       },

@@ -1,6 +1,6 @@
 "use server";
 
-import { Prisma, type StudentStatus } from "@prisma/client";
+import { Prisma, type DiscountType, type StudentStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 
@@ -22,9 +22,11 @@ export type StudentDTO = {
   status: StudentStatus;
   /** Coût total de la formation (FCFA), facultatif. */
   totalCost: number | null;
-  /** Réduction accordée sur le coût total (FCFA). */
+  /** Réduction accordée (pourcentage 0–100 ou montant fixe en FCFA). */
   discount: number | null;
-  /** Net à payer = totalCost − discount (calculé automatiquement). */
+  /** Type de réduction : pourcentage du coût total ou montant fixe. */
+  discountType: DiscountType;
+  /** Net à payer = totalCost − réduction (calculé automatiquement). */
   netAmount: number | null;
   /** Frais d'inscription déjà réglés (uniques à vie). */
   hasPaidRegistrationFee: boolean;
@@ -42,6 +44,7 @@ export type StudentFormField =
   | "status"
   | "totalCost"
   | "discount"
+  | "discountType"
   | "classId";
 
 export type StudentFormState = {
@@ -76,14 +79,16 @@ const MAX_AMOUNT = 1_000_000_000;
 type ParsedFinancials = {
   totalCost: number | null;
   discount: number | null;
+  discountType: DiscountType;
   netAmount: number | null;
 };
 
 /**
  * Analyse et valide les champs financiers du formulaire étudiant.
- * Le Net à Payer est TOUJOURS recalculé côté serveur
- * (`netAmount = totalCost − discount`) : la valeur soumise par le client,
- * même présente, n'est jamais utilisée.
+ * Le Net à Payer est TOUJOURS recalculé côté serveur :
+ * - réduction en montant fixe  → `netAmount = totalCost − discount` ;
+ * - réduction en pourcentage  → `netAmount = totalCost × (1 − discount / 100)`.
+ * La valeur soumise par le client, même présente, n'est jamais utilisée.
  */
 function parseFinancialFields(
   formData: FormData,
@@ -91,6 +96,13 @@ function parseFinancialFields(
 ): ParsedFinancials {
   const rawTotalCost = String(formData.get("totalCost") ?? "").trim();
   const rawDiscount = String(formData.get("discount") ?? "").trim();
+  const rawDiscountType = String(formData.get("discountType") ?? "FIXED")
+    .trim()
+    .toUpperCase();
+
+  // Type de réduction : nouveauté serveur-calibrée, défaut sûr « montant fixe ».
+  const discountType: DiscountType =
+    rawDiscountType === "PERCENTAGE" ? "PERCENTAGE" : "FIXED";
 
   let totalCost: number | null = null;
   let discount: number | null = null;
@@ -117,7 +129,14 @@ function parseFinancialFields(
       fieldErrors.discount = "La réduction doit être un nombre.";
     } else if (value < 0) {
       fieldErrors.discount = "La réduction ne peut pas être négative.";
-    } else if (totalCost !== null && value > totalCost) {
+    } else if (discountType === "PERCENTAGE" && value > 100) {
+      fieldErrors.discount =
+        "Le pourcentage de réduction ne peut pas dépasser 100 %.";
+    } else if (
+      discountType === "FIXED" &&
+      totalCost !== null &&
+      value > totalCost
+    ) {
       fieldErrors.discount =
         "La réduction ne peut pas dépasser le coût total de la formation.";
     } else if (value > MAX_AMOUNT) {
@@ -133,10 +152,15 @@ function parseFinancialFields(
   }
 
   // Net à payer calculé automatiquement (jamais lu depuis le formulaire).
-  const netAmount =
-    totalCost !== null && discount !== null ? totalCost - discount : null;
+  let netAmount: number | null = null;
+  if (totalCost !== null && discount !== null) {
+    netAmount =
+      discountType === "PERCENTAGE"
+        ? totalCost * (1 - discount / 100)
+        : totalCost - discount;
+  }
 
-  return { totalCost, discount, netAmount };
+  return { totalCost, discount, discountType, netAmount };
 }
 
 type ParsedStudentInput =
@@ -150,6 +174,7 @@ type ParsedStudentInput =
         status: StudentStatus;
         totalCost: number | null;
         discount: number | null;
+        discountType: DiscountType;
         netAmount: number | null;
       };
     }
@@ -229,7 +254,12 @@ function formatFcfa(amount: number): string {
   return `${amount.toLocaleString("fr-FR")} FCFA`;
 }
 
-type TargetClass = { id: string; courseId: string };
+type TargetClass = {
+  id: string;
+  courseId: string;
+  /** Frais de scolarité effectifs de la classe (frais de classe, sinon prix du cours). */
+  tuitionFee: number | null;
+};
 
 /**
  * Résout et valide la classe ciblée par le formulaire (champ `classId`,
@@ -246,14 +276,46 @@ async function resolveTargetClass(
 
   const klass = await prisma.class.findFirst({
     where: { id: rawClassId, organizationId },
-    select: { id: true, courseId: true },
+    select: {
+      id: true,
+      courseId: true,
+      tuitionFee: true,
+      course: { select: { price: true } },
+    },
   });
 
   if (!klass) {
     throw new Error("CLASS_NOT_FOUND");
   }
 
-  return klass;
+  return {
+    id: klass.id,
+    courseId: klass.courseId,
+    tuitionFee: klass.tuitionFee ?? klass.course.price,
+  };
+}
+
+/**
+ * Complète automatiquement le coût total de scolarité de l'étudiant avec les
+ * frais de scolarité de la classe lorsqu'aucun montant n'a été saisi.
+ * La réduction et le net à payer sont alors recalculés en conséquence.
+ */
+function applyClassTuitionFee(
+  financials: ParsedFinancials,
+  classFee: number | null | undefined
+): ParsedFinancials {
+  if (financials.totalCost !== null || classFee === null || classFee === undefined) {
+    return financials;
+  }
+
+  const totalCost = classFee;
+  const discount = financials.discount ?? 0;
+  const netAmount =
+    financials.discountType === "PERCENTAGE"
+      ? totalCost * (1 - discount / 100)
+      : totalCost - discount;
+
+  return { ...financials, totalCost, discount, netAmount };
 }
 
 /**
@@ -272,11 +334,17 @@ function computeFinancialsWithFee(
 
   const totalCost = (financials.totalCost ?? 0) + registrationFee;
   const discount = financials.discount ?? 0;
+  const discountType = financials.discountType;
+  const netAmount =
+    discountType === "PERCENTAGE"
+      ? totalCost * (1 - discount / 100)
+      : totalCost - discount;
 
   return {
     totalCost,
     discount,
-    netAmount: totalCost - discount,
+    discountType,
+    netAmount,
   };
 }
 
@@ -306,9 +374,11 @@ export type StudentDetailDTO = {
   createdAt: Date;
   /** Coût initial de la formation (avant réduction). */
   totalCost: number | null;
-  /** Réduction accordée. */
+  /** Réduction accordée (pourcentage ou montant fixe). */
   discount: number | null;
-  /** Net à payer (totalCost − discount). */
+  /** Type de réduction (pourcentage du coût total ou montant fixe). */
+  discountType: DiscountType;
+  /** Net à payer (totalCost − réduction). */
   netAmount: number | null;
   /** Montant déjà encaissé : somme des paiements COMPLETED. */
   paidAmount: number;
@@ -352,6 +422,7 @@ export async function getStudentDetail(
         createdAt: true,
         totalCost: true,
         discount: true,
+        discountType: true,
         netAmount: true,
         hasPaidRegistrationFee: true,
         currentClassId: true,
@@ -408,6 +479,7 @@ export async function getStudentDetail(
       createdAt: student.createdAt,
       totalCost: student.totalCost,
       discount: student.discount,
+      discountType: student.discountType,
       netAmount: student.netAmount,
       hasPaidRegistrationFee: student.hasPaidRegistrationFee,
       currentClassId: student.currentClassId,
@@ -490,6 +562,7 @@ export async function getStudents(): Promise<StudentDTO[]> {
         status: true,
         totalCost: true,
         discount: true,
+        discountType: true,
         netAmount: true,
         hasPaidRegistrationFee: true,
         currentClassId: true,
@@ -508,6 +581,7 @@ export async function getStudents(): Promise<StudentDTO[]> {
       status: student.status,
       totalCost: student.totalCost,
       discount: student.discount,
+      discountType: student.discountType,
       netAmount: student.netAmount,
       hasPaidRegistrationFee: student.hasPaidRegistrationFee,
       currentClassId: student.currentClassId,
@@ -569,13 +643,10 @@ export async function createStudentAction(
   // Un nouvel étudiant n'a jamais réglé les frais d'inscription :
   // ils sont facturés dès cette première inscription (si > 0).
   const appliesRegistrationFee = registrationFee > 0;
-  const financials = computeFinancialsWithFee(
-    parsed.data,
-    appliesRegistrationFee,
-    registrationFee
-  );
 
-  // Classe / cohorte ciblée (validation multi-tenant).
+  // Classe / cohorte ciblée (validation multi-tenant) — résolue AVANT le
+  // calcul financier afin d'appliquer automatiquement les frais de la classe
+  // au coût total de scolarité lorsqu'aucun montant n'est saisi.
   let targetClass: TargetClass | null = null;
 
   try {
@@ -591,6 +662,14 @@ export async function createStudentAction(
 
     throw error;
   }
+
+  // Complète le coût total avec les frais de la classe si nécessaire, puis
+  // ajoute les frais d'inscription le cas échéant.
+  const financials = computeFinancialsWithFee(
+    applyClassTuitionFee(parsed.data, targetClass?.tuitionFee),
+    appliesRegistrationFee,
+    registrationFee
+  );
 
   // Réessais en cas de collision sur le code étudiant généré (contrainte unique).
   const MAX_ATTEMPTS = 5;
@@ -612,6 +691,7 @@ export async function createStudentAction(
             status: parsed.data.status,
             totalCost: financials.totalCost,
             discount: financials.discount,
+            discountType: financials.discountType,
             netAmount: financials.netAmount,
             // Les frais d'inscription sont réglés dès la création.
             hasPaidRegistrationFee: true,
@@ -775,11 +855,6 @@ export async function updateStudentAction(
     // Frais d'inscription : uniquement s'ils n'ont jamais été réglés.
     const appliesRegistrationFee =
       !existing.hasPaidRegistrationFee && registrationFee > 0;
-    const financials = computeFinancialsWithFee(
-      parsed.data,
-      appliesRegistrationFee,
-      registrationFee
-    );
 
     // Classe / cohorte ciblée (validation multi-tenant).
     // Sélection explicite « Aucune classe » ⇒ retrait de la cohorte active.
@@ -801,6 +876,15 @@ export async function updateStudentAction(
       throw error;
     }
 
+    // Complète le coût total avec les frais de la classe si nécessaire (lors
+    // d'un changement de classe sans montant saisi), puis ajoute les frais
+    // d'inscription le cas échéant.
+    const financials = computeFinancialsWithFee(
+      applyClassTuitionFee(parsed.data, targetClass?.tuitionFee),
+      appliesRegistrationFee,
+      registrationFee
+    );
+
     const classChanged =
       targetClass !== null && targetClass.id !== existing.currentClassId;
 
@@ -815,6 +899,7 @@ export async function updateStudentAction(
           status: parsed.data.status,
           totalCost: financials.totalCost,
           discount: financials.discount,
+          discountType: financials.discountType,
           netAmount: financials.netAmount,
           ...(appliesRegistrationFee
             ? { hasPaidRegistrationFee: true }

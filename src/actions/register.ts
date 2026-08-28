@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { seedDemoDataForOrganization } from "@/lib/demo-seed";
 
 // --------------------------------------
 // Types publics (contrat avec le composant client)
@@ -31,6 +32,15 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Nombre de tours bcrypt pour le hachage du mot de passe. */
 const BCRYPT_ROUNDS = 10;
 
+/**
+ * L'injection du jeu de données de démonstration est OBLIGATOIRE à
+ * l'inscription : la case est cochée par défaut (et requise) dans le
+ * formulaire public `/register` ; côté serveur, la valeur est de toute façon
+ * forcée à `true` pour garantir le comportement même en cas d'appel direct de
+ * l'action. Repasser ce drapeau à `false` redonnerait la main à l'utilisateur.
+ */
+const DEMO_DATA_FORCED = true;
+
 type ParsedRegisterInput =
   | {
       ok: true;
@@ -40,6 +50,7 @@ type ParsedRegisterInput =
         lastName: string;
         email: string;
         password: string;
+        includeDemoData: boolean;
       };
     }
   | { ok: false; fieldErrors: Partial<Record<RegisterFormField, string>> };
@@ -50,6 +61,10 @@ function parseRegisterForm(formData: FormData): ParsedRegisterInput {
   const lastName = String(formData.get("lastName") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  // Case « jeu de données de démonstration » : cochée par défaut dans le
+  // formulaire (`defaultChecked` + `required`) ; une case non cochée n'envoie
+  // rien du tout (comportement HTML), d'où la comparaison stricte à "on".
+  const includeDemoData = formData.get("includeDemoData") === "on";
 
   const fieldErrors: Partial<Record<RegisterFormField, string>> = {};
 
@@ -96,6 +111,7 @@ function parseRegisterForm(formData: FormData): ParsedRegisterInput {
       lastName,
       email,
       password,
+      includeDemoData,
     },
   };
 }
@@ -162,7 +178,8 @@ export async function registerAction(
     };
   }
 
-  const { organizationName, firstName, lastName, email, password } = parsed.data;
+  const { organizationName, firstName, lastName, email, password, includeDemoData } =
+    parsed.data;
 
   // Vérifie qu'aucun compte n'existe déjà avec cet email.
   const existingUser = await prisma.user.findUnique({
@@ -184,6 +201,9 @@ export async function registerAction(
 
     // Transaction atomique : l'organisation et son administrateur sont créés
     // ensemble. Si l'un échoue, aucun enregistrement n'est persisté.
+    let organizationId = "";
+    let adminUserId = "";
+
     await prisma.$transaction(async (tx) => {
       const organization = await tx.organization.create({
         data: {
@@ -191,8 +211,9 @@ export async function registerAction(
           slug,
         },
       });
+      organizationId = organization.id;
 
-      await tx.user.create({
+      const admin = await tx.user.create({
         data: {
           organizationId: organization.id,
           email,
@@ -202,7 +223,34 @@ export async function registerAction(
           role: "ADMIN",
         },
       });
+      adminUserId = admin.id;
     });
+
+    // Seeding automatique SYNCHRONE (await) : crée un jeu de données de
+    // démonstration complet (cours, classes, étudiants, paiements, procédures
+    // voyage, logements, comptes Secrétaire / Enseignant) immédiatement après
+    // la création de l'organisation et de l'administrateur. L'appel est
+    // volontairement BLOQUANT au sein de la Server Action (et non un
+    // fire-and-forget) afin d'être garanti non annulé après l'envoi de la
+    // réponse. En contrepartie, un éventuel échec n'empêche pas la création
+    // du compte : on journalise et on poursuit.
+    if (includeDemoData || DEMO_DATA_FORCED) {
+      try {
+        const seedSummary = await seedDemoDataForOrganization(
+          organizationId,
+          adminUserId
+        );
+        console.info(
+          "[registerAction] Seeding de démonstration :",
+          seedSummary
+        );
+      } catch (seedError) {
+        console.error(
+          "[registerAction] Échec du seeding de démonstration :",
+          seedError
+        );
+      }
+    }
 
     return {
       status: "success",

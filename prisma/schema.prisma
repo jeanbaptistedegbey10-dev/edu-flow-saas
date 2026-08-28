@@ -43,6 +43,13 @@ enum PaymentStatus {
   REFUNDED
 }
 
+/// Type de réduction accordée sur les frais de scolarité d'un étudiant :
+/// un pourcentage du coût total ou un montant fixe en FCFA.
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
 enum PaymentMethod {
   CASH
   BANK_TRANSFER
@@ -111,19 +118,19 @@ enum DocumentType {
 /// Le fichier lui-même est conservé sur un stockage externe (Drive, storage) ;
 /// seul le lien distant (`fileUrl`) est enregistré en base.
 model Document {
-  id               String       @id @default(cuid())
-  organizationId   String
-  title            String
-  type             DocumentType @default(OTHER)
-  fileUrl          String
-  fileSize         Int?
-  studentId        String?
+  id                String       @id @default(cuid())
+  organizationId    String
+  title             String
+  type              DocumentType @default(OTHER)
+  fileUrl           String
+  fileSize          Int?
+  studentId         String?
   travelProcedureId String?
-  createdAt        DateTime     @default(now())
+  createdAt         DateTime     @default(now())
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  student          Student?          @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  travelProcedure  TravelProcedure? @relation(fields: [travelProcedureId], references: [id], onDelete: Cascade)
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student         Student?         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  travelProcedure TravelProcedure? @relation(fields: [travelProcedureId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([studentId])
@@ -135,21 +142,21 @@ model Document {
 // --------------------------------------
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  email     String?
-  phone     String?
-  address   String?
-  city      String?
-  website   String?
-  logoUrl   String?
-  rccm      String?
-  ifu       String?
+  id                     String   @id @default(cuid())
+  name                   String
+  slug                   String   @unique
+  email                  String?
+  phone                  String?
+  address                String?
+  city                   String?
+  website                String?
+  logoUrl                String?
+  rccm                   String?
+  ifu                    String?
   /// Frais d'inscription uniques facturés une seule fois par étudiant (FCFA).
   defaultRegistrationFee Float    @default(15000)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   users            User[]
   students         Student[]
@@ -162,13 +169,15 @@ model Organization {
   payrolls         Payroll[]
   tasks            Task[]
   workflows        Workflow[]
-  workflowStages    WorkflowStage[]
+  workflowStages   WorkflowStage[]
   productServices  ProductService[]
   sales            Sale[]
   attendances      Attendance[]
-  courseLogs        CourseLog[]
+  courseLogs       CourseLog[]
   evaluations      Evaluation[]
   documents        Document[]
+  customRoles      CustomRole[]
+  housings         Housing[]
 }
 
 model User {
@@ -181,19 +190,22 @@ model User {
   role           Role     @default(STAFF)
   avatarUrl      String?
   isActive       Boolean  @default(true)
+  /// Rôle personnalisé (matrice de permissions) assigné à l'utilisateur.
+  customRoleId   String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  taughtCourses    Course[]          @relation("TeacherCourses")
-  taughtClasses    Class[]           @relation("TeacherClasses")
-  createdExpenses  Expense[]         @relation("ExpenseCreator")
-  payrolls         Payroll[]
-  assignedTasks    Task[]            @relation("TaskAssignee")
-  createdTasks     Task[]            @relation("TaskCreator")
-  managedTravels   TravelProcedure[] @relation("TravelAdvisor")
-  createdSales     Sale[]            @relation("SaleCreator")
-  courseLogs       CourseLog[]       @relation("TeacherCourseLogs")
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customRole      CustomRole?       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  taughtCourses   Course[]          @relation("TeacherCourses")
+  taughtClasses   Class[]           @relation("TeacherClasses")
+  createdExpenses Expense[]         @relation("ExpenseCreator")
+  payrolls        Payroll[]
+  assignedTasks   Task[]            @relation("TaskAssignee")
+  createdTasks    Task[]            @relation("TaskCreator")
+  managedTravels  TravelProcedure[] @relation("TravelAdvisor")
+  createdSales    Sale[]            @relation("SaleCreator")
+  courseLogs      CourseLog[]       @relation("TeacherCourseLogs")
 }
 
 // --------------------------------------
@@ -201,26 +213,28 @@ model User {
 // --------------------------------------
 
 model Student {
-  id             String        @id @default(cuid())
-  organizationId String
-  studentCode    String        @unique
-  firstName      String
-  lastName       String
-  email          String?
-  phone          String
-  clientType     ClientType    @default(LANGUAGE_AND_TRAVEL)
-  totalCost      Float?
-  discount       Float?
-  netAmount      Float?
-  dateOfBirth    DateTime?
-  address        String?
-  status         StudentStatus @default(PROSPECT)
+  id                     String        @id @default(cuid())
+  organizationId         String
+  studentCode            String        @unique
+  firstName              String
+  lastName               String
+  email                  String?
+  phone                  String
+  clientType             ClientType    @default(LANGUAGE_AND_TRAVEL)
+  totalCost              Float?
+  discount               Float?
+  /// Type de réduction : pourcentage du coût total ou montant fixe en FCFA.
+  discountType           DiscountType  @default(FIXED)
+  netAmount              Float?
+  dateOfBirth            DateTime?
+  address                String?
+  status                 StudentStatus @default(PROSPECT)
   /// Frais d'inscription déjà réglés au moins une fois (uniques à vie).
-  hasPaidRegistrationFee Boolean @default(false)
+  hasPaidRegistrationFee Boolean       @default(false)
   /// Classe / cohorte active de l'étudiant (dernière affectation).
-  currentClassId String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  currentClassId         String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
 
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   enrollments      Enrollment[]
@@ -233,6 +247,7 @@ model Student {
   sales            Sale[]
   grades           Grade[]
   documents        Document[]
+  housings         Housing[]
 }
 
 model Course {
@@ -268,6 +283,9 @@ model Class {
   teacherId      String?
   name           String
   schedule       String
+  /// Frais de scolarité configurés pour la classe (FCFA). Lorsqu'il est
+  /// absent, le prix du cours porteur est utilisé comme montant par défaut.
+  tuitionFee     Float?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -431,21 +449,21 @@ model Workflow {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  stages          WorkflowStage[]
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stages           WorkflowStage[]
   travelProcedures TravelProcedure[]
 }
 
 model WorkflowStage {
-  id               String   @id @default(cuid())
-  workflowId       String
-  organizationId   String
-  title            String
-  order            Int
+  id                String   @id @default(cuid())
+  workflowId        String
+  organizationId    String
+  title             String
+  order             Int
   requiredDocuments Json?
-  createdAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
 
-  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflow     Workflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([workflowId, order])
@@ -457,32 +475,32 @@ model WorkflowStage {
 // --------------------------------------
 
 model TravelProcedure {
-  id                  String       @id @default(cuid())
-  organizationId      String
-  studentId           String?
-  candidateName       String?
-  candidatePhone      String?
-  workflowId          String?
-  advisorId           String?
-  destination         String
-  targetProgram       String?
-  status              TravelStatus @default(DOSSIER_PREPARATION)
-  totalCost           Float        @default(0)
-  discount            Float        @default(0)
-  netAmount           Float        @default(0)
-  currentStageOrder   Int          @default(0)
+  id                   String       @id @default(cuid())
+  organizationId       String
+  studentId            String?
+  candidateName        String?
+  candidatePhone       String?
+  workflowId           String?
+  advisorId            String?
+  destination          String
+  targetProgram        String?
+  status               TravelStatus @default(DOSSIER_PREPARATION)
+  totalCost            Float        @default(0)
+  discount             Float        @default(0)
+  netAmount            Float        @default(0)
+  currentStageOrder    Int          @default(0)
   currentStageDeadline DateTime?
-  notes               String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  notes                String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
-  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  student     Student?           @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  workflow    Workflow?          @relation(fields: [workflowId], references: [id], onDelete: SetNull)
-  advisor     User?              @relation("TravelAdvisor", fields: [advisorId], references: [id], onDelete: SetNull)
-  payments    Payment[]
-  sales       Sale[]
-  documents   Document[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student      Student?     @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  workflow     Workflow?    @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  advisor      User?        @relation("TravelAdvisor", fields: [advisorId], references: [id], onDelete: SetNull)
+  payments     Payment[]
+  sales        Sale[]
+  documents    Document[]
 }
 
 // --------------------------------------
@@ -503,8 +521,8 @@ model Payment {
   paidAt            DateTime      @default(now())
   createdAt         DateTime      @default(now())
 
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  student         Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student         Student?         @relation(fields: [studentId], references: [id], onDelete: SetNull)
   travelProcedure TravelProcedure? @relation(fields: [travelProcedureId], references: [id], onDelete: SetNull)
 }
 
@@ -533,7 +551,7 @@ model Payroll {
   bonus          Float    @default(0)
   deductions     Float    @default(0)
   netPaid        Float
-  payPeriod      String   // Ex: "2026-08"
+  payPeriod      String // Ex: "2026-08"
   paidAt         DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -556,39 +574,39 @@ model ProductService {
   updatedAt      DateTime        @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  saleItems     SaleItem[]
+  saleItems    SaleItem[]
 }
 
 model Sale {
-  id                String          @id @default(cuid())
+  id                String         @id @default(cuid())
   organizationId    String
   studentId         String?
   travelProcedureId String?
   createdById       String
   totalAmount       Float
-  discount          Float           @default(0)
+  discount          Float          @default(0)
   netAmount         Float
   paymentMethod     PaymentMethod?
-  status            SaleStatus      @default(COMPLETED)
-  createdAt         DateTime        @default(now())
+  status            SaleStatus     @default(COMPLETED)
+  createdAt         DateTime       @default(now())
 
-  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  student         Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  travelProcedure TravelProcedure?  @relation(fields: [travelProcedureId], references: [id], onDelete: SetNull)
-  cashier         User              @relation("SaleCreator", fields: [createdById], references: [id])
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student         Student?         @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  travelProcedure TravelProcedure? @relation(fields: [travelProcedureId], references: [id], onDelete: SetNull)
+  cashier         User             @relation("SaleCreator", fields: [createdById], references: [id])
   items           SaleItem[]
 }
 
 model SaleItem {
-  id               String          @id @default(cuid())
+  id               String @id @default(cuid())
   saleId           String
   productServiceId String
-  quantity         Int             @default(1)
+  quantity         Int    @default(1)
   unitPrice        Float
   subtotal         Float
 
-  sale           Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productService ProductService  @relation(fields: [productServiceId], references: [id], onDelete: Restrict)
+  sale           Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productService ProductService @relation(fields: [productServiceId], references: [id], onDelete: Restrict)
 }
 
 // --------------------------------------
@@ -617,4 +635,60 @@ model Task {
   @@index([organizationId, status])
   @@index([assigneeId])
   @@index([dueDate])
+}
+
+// --------------------------------------
+// Rôles personnalisés (matrice de permissions)
+// --------------------------------------
+
+/// Rôle créé par l'administrateur avec une matrice de permissions simples
+/// (Accès Finance, Inscription, Suppression, POS, Voyages, Évaluations…).
+/// Les permissions sont stockées en `String[]` (tableau SQL PostgreSQL natif)
+/// pour une interrogation directe en base et un affichage immédiat de la liste.
+model CustomRole {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  permissions    String[] @default([])
+  /// Rôle créé par le système (ex : « Secrétaire Adjoint » pré-configuré) :
+  /// sa suppression est restreinte.
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users        User[]
+
+  @@index([organizationId])
+}
+
+// --------------------------------------
+// Logements (hébergement des étudiants en mobilité)
+// --------------------------------------
+
+/// Fiche de logement rattachée à un étudiant (souvent en mobilité) :
+/// adresse, ville, loyer mensuel, dépôt de garantie et période du contrat.
+/// Utilisée par le seeding de démonstration et consultable dans la fiche
+/// voyage de l'étudiant.
+model Housing {
+  id             String    @id @default(cuid())
+  organizationId String
+  studentId      String
+  name           String
+  address        String?
+  city           String?
+  monthlyRent    Float
+  deposit        Float     @default(0)
+  contractStart  DateTime?
+  contractEnd    DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentId])
 }

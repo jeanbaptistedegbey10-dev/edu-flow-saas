@@ -4,9 +4,11 @@ import * as React from "react";
 import { useActionState } from "react";
 import {
   BellIcon,
+  ChevronRightIcon,
   CircleUserRoundIcon,
   Loader2Icon,
   SaveIcon,
+  ShieldCheckIcon,
 } from "lucide-react";
 
 import {
@@ -80,6 +82,28 @@ export function SettingsView({
           </p>
         </div>
       </div>
+
+      {/* Raccourci : gestion des rôles personnalisés (admins uniquement) */}
+      {role === "ADMIN" || role === "SUPER_ADMIN" ? (
+        <a
+          href="/dashboard/settings/roles"
+          className="flex items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 shadow-sm transition-all duration-200 hover:bg-indigo-100/70 hover:shadow-md dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20"
+        >
+          <span className="flex items-center gap-3">
+            <ShieldCheckIcon className="size-5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+            <span>
+              <span className="block text-sm font-semibold">
+                Rôles &amp; Permissions
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                Créez des rôles sur mesure (ex : Secrétaire Adjoint) et cochez
+                les accès accordés à chaque membre de l&apos;équipe.
+              </span>
+            </span>
+          </span>
+          <ChevronRightIcon className="size-4 shrink-0 text-indigo-500" />
+        </a>
+      ) : null}
 
       {/* Carte de profil */}
       <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">

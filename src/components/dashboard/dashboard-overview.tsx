@@ -1,6 +1,8 @@
 import Link from "next/link";
 import {
   ArrowRightIcon,
+  CoinsIcon,
+  FileTextIcon,
   PlaneIcon,
   ReceiptTextIcon,
   TriangleAlertIcon,
@@ -11,6 +13,7 @@ import {
 
 import type {
   AttendanceTrendPointDTO,
+  CashFlowDTO,
   DashboardAnalyticsDTO,
   FinancialOverviewPointDTO,
   StudentDistributionDTO,
@@ -59,6 +62,7 @@ function getInitials(firstName: string, lastName: string): string {
 export type DashboardOverviewProps = {
   stats: DashboardAnalyticsDTO;
   financialOverview: FinancialOverviewPointDTO[];
+  cashFlow: CashFlowDTO;
   distribution: StudentDistributionDTO;
   attendanceTrend: AttendanceTrendPointDTO[];
 };
@@ -204,6 +208,7 @@ function UnpaidAlertsList({ alerts }: { alerts: UnpaidAlertDTO[] }) {
 export function DashboardOverview({
   stats,
   financialOverview,
+  cashFlow,
   distribution,
   attendanceTrend,
 }: DashboardOverviewProps) {
@@ -213,6 +218,8 @@ export function DashboardOverview({
     stats.monthlyAttendanceRate === null
       ? "—"
       : `${numberFormatter.format(stats.monthlyAttendanceRate)} %`;
+
+  const cashBalanceValue = formatAmount(cashFlow.cashBalance);
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
@@ -311,6 +318,61 @@ export function DashboardOverview({
           }
           hint="Présences effectives (retards inclus)"
         />
+      </div>
+
+      {/* Trésorerie / caisse : 3 cartes dédiées */}
+      <div>
+        <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+          <WalletCardsIcon className="size-4 text-muted-foreground" />
+          Trésorerie &amp; caisse
+        </h3>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <KpiCard
+            label="Total encaissé (mois)"
+            value={formatAmount(cashFlow.collectedThisMonth)}
+            icon={<WalletCardsIcon />}
+            iconClasses="bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20 ring-inset dark:text-emerald-400"
+            badge={
+              <span className={cn(BADGE_BASE_CLASSES, TINTED_BADGE_CLASSES)}>
+                Paiements + POS
+              </span>
+            }
+            hint={`Total global encaissé : ${formatAmount(cashFlow.collectedTotal)}`}
+          />
+
+          <KpiCard
+            label="Total dépenses (mois)"
+            value={formatAmount(cashFlow.expensesThisMonth)}
+            icon={<FileTextIcon />}
+            iconClasses="bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/20 ring-inset dark:text-amber-400"
+            badge={
+              <span className={cn(BADGE_BASE_CLASSES, TINTED_BADGE_CLASSES)}>
+                Dépenses du mois
+              </span>
+            }
+            hint={`Total global dépensé : ${formatAmount(cashFlow.expensesTotal)}`}
+          />
+
+          <KpiCard
+            label="Solde total caisse (global)"
+            value={cashBalanceValue}
+            icon={<CoinsIcon />}
+            iconClasses="bg-indigo-500/10 text-indigo-700 ring-1 ring-indigo-500/20 ring-inset dark:text-indigo-400"
+            badge={
+              <span
+                className={cn(
+                  BADGE_BASE_CLASSES,
+                  cashFlow.cashBalance >= 0
+                    ? TINTED_BADGE_CLASSES
+                    : "border border-red-200/60 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400"
+                )}
+              >
+                {cashFlow.cashBalance >= 0 ? "Caisse positive" : "Déficit"}
+              </span>
+            }
+            hint="Tous encaissements − toutes dépenses"
+          />
+        </div>
       </div>
 
       {/* Graphique recettes + donut répartition */}

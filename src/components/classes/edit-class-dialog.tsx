@@ -134,6 +134,28 @@ function EditClassForm({
         </div>
 
         <div className="grid gap-2">
+          <Label htmlFor="edit-class-tuition-fee">
+            Frais de scolarité (FCFA)
+          </Label>
+          <Input
+            id="edit-class-tuition-fee"
+            name="tuitionFee"
+            type="number"
+            min="0"
+            step="any"
+            inputMode="decimal"
+            defaultValue={klass.tuitionFee !== null ? String(klass.tuitionFee) : ""}
+            placeholder="Vide = prix du cours porteur"
+            aria-invalid={Boolean(fieldErrors.tuitionFee)}
+          />
+          <FieldError message={fieldErrors.tuitionFee} />
+          <p className="text-xs text-muted-foreground">
+            Si laissé vide, le prix configuré sur le cours porteur sera
+            appliqué automatiquement aux étudiants de cette classe.
+          </p>
+        </div>
+
+        <div className="grid gap-2">
           <Label htmlFor="edit-class-course">Cours *</Label>
           <Select name="courseId" defaultValue={klass.courseId}>
             <SelectTrigger id="edit-class-course" className="w-full">

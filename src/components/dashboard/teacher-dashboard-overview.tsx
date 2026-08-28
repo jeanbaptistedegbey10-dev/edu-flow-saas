@@ -9,9 +9,15 @@ import {
   UsersRoundIcon,
 } from "lucide-react";
 
+import { TeacherGradeTrendChart } from "@/components/dashboard/charts/teacher-grade-trend-chart";
 import type { TeacherDashboardStatsDTO } from "@/actions/dashboard";
+import type { AttendanceStatus } from "@prisma/client";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { Button } from "@/components/ui/button";
+import {
+  getAttendanceStatusBadgeClass,
+  getAttendanceStatusLabel,
+} from "@/lib/attendance-status";
 import { cn } from "@/lib/utils";
 
 // Formatage déterministe (locale + fuseau fixes) pour éviter tout écart
@@ -245,6 +251,85 @@ export function TeacherDashboardOverview({
           )}
         </div>
       </div>
+
+      {/* Courbe d'évolution des notes par élève / classe */}
+      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm dark:border-slate-800">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold">
+              Évolution des notes par élève / classe
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Moyenne /100 de chaque étudiant au fil des évaluations.
+            </p>
+          </div>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/dashboard/evaluations">
+              Évaluations
+              <ArrowRightIcon data-icon="inline-end" />
+            </Link>
+          </Button>
+        </div>
+        <div className="p-4">
+          <TeacherGradeTrendChart students={stats.gradeTrend} />
+        </div>
+      </section>
+
+      {/* Feuille de présence récente */}
+      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm dark:border-slate-800">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold">Feuille de présence</h3>
+            <p className="text-xs text-muted-foreground">
+              Les 8 derniers émargements de vos cours.
+            </p>
+          </div>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/dashboard/attendance">
+              Tout voir
+              <ArrowRightIcon data-icon="inline-end" />
+            </Link>
+          </Button>
+        </div>
+
+        {stats.attendanceSheet.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
+            <div className="flex size-10 items-center justify-center rounded-full bg-muted">
+              <UserCheckIcon className="size-5 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium">Aucun émargement</p>
+            <p className="text-sm text-muted-foreground">
+              Prenez les présences depuis « Présences &amp; Cahier de texte ».
+            </p>
+          </div>
+        ) : (
+          <ul className="divide-y">
+            {stats.attendanceSheet.map((row) => (
+              <li
+                key={row.id}
+                className="flex items-center justify-between gap-3 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {row.studentName}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {row.className ?? "—"} · {dateFormatter.format(row.date)}
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    BADGE_BASE_CLASSES,
+                    getAttendanceStatusBadgeClass(row.status as AttendanceStatus)
+                  )}
+                >
+                  {getAttendanceStatusLabel(row.status as AttendanceStatus)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {/* Rappel discret du module pédagogique */}
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

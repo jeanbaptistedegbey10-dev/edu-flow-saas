@@ -109,6 +109,32 @@ export type TeacherDashboardStatsDTO = {
   courses: TeacherCourseSummaryDTO[];
   /** Les 5 dernières entrées de son cahier de texte. */
   recentLogs: TeacherRecentLogDTO[];
+  /**
+   * Courbe d'évolution des notes par élève / classe : pour chaque étudiant,
+   * la moyenne /100 obtenue à chaque évaluation de son périmètre.
+   */
+  gradeTrend: TeacherGradeTrendStudentDTO[];
+  /** Feuille de présence récente (dernières saisies dans son périmètre). */
+  attendanceSheet: TeacherAttendanceSheetRowDTO[];
+};
+
+/** Étudiant du graphique d'évolution des notes. */
+export type TeacherGradeTrendStudentDTO = {
+  studentId: string;
+  studentName: string;
+  className: string | null;
+  /** Une moyenne normalisée /100 par évaluation (X du graphique). */
+  points: Array<{ evaluationTitle: string; score: number }>;
+};
+
+/** Ligne de la feuille de présence récente de l'enseignant. */
+export type TeacherAttendanceSheetRowDTO = {
+  id: string;
+  studentId: string;
+  studentName: string;
+  className: string | null;
+  date: Date;
+  status: string;
 };
 
 /**
@@ -172,7 +198,11 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
 
-    const [monthStatusCounts, evaluationRows] = await Promise.all([
+    const [
+      monthStatusCounts,
+      evaluationRows,
+      attendanceSheetRows,
+    ] = await Promise.all([
       prisma.attendance.groupBy({
         by: ["status"],
         where: {
@@ -205,12 +235,44 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
         },
         select: {
           id: true,
+          title: true,
+          class: { select: { name: true } },
           modules: {
             select: {
               maxScore: true,
-              grades: { select: { score: true } },
+              grades: {
+                select: {
+                  score: true,
+                  student: {
+                    select: { id: true, firstName: true, lastName: true },
+                  },
+                },
+              },
             },
           },
+        },
+      }),
+      // Feuille de présence récente dans le périmètre de l'enseignant.
+      prisma.attendance.findMany({
+        where: {
+          organizationId: user.organizationId,
+          ...(isTeacherRole
+            ? {
+                OR: [
+                  { course: { teacherId: user.id } },
+                  { class: { teacherId: user.id } },
+                ],
+              }
+            : {}),
+        },
+        orderBy: { date: "desc" },
+        take: 8,
+        select: {
+          id: true,
+          date: true,
+          status: true,
+          student: { select: { id: true, firstName: true, lastName: true } },
+          class: { select: { name: true } },
         },
       }),
     ]);
@@ -237,6 +299,85 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
         }
       }
     }
+
+    // ----- Courbe d'évolution des notes par élève / classe -----
+    // Pour chaque évaluation, on regroupe les notes par étudiant et on
+    // normalise sur 100 (moyenne des scores / barème). Un point par évaluation.
+    const studentsMap = new Map<
+      string,
+      { name: string; className: string | null; points: Map<string, number> }
+    >();
+
+    for (const evaluation of evaluationRows) {
+      const className = evaluation.class?.name ?? null;
+
+      // Accumule somme des scores et nombre de modules notés par étudiant.
+      const acc = new Map<string, { score: number; count: number }>();
+      for (const evaluationModule of evaluation.modules) {
+        if (!(evaluationModule.maxScore > 0)) continue;
+
+        for (const grade of evaluationModule.grades) {
+          const entry = acc.get(grade.student.id) ?? { score: 0, count: 0 };
+          entry.score += grade.score;
+          entry.count += 1;
+          acc.set(grade.student.id, entry);
+        }
+      }
+
+      for (const [studentId, sums] of acc) {
+        if (!studentsMap.has(studentId)) {
+          // Retrouve le nom complet depuis les notes de cette évaluation.
+          let name = "Étudiant";
+          for (const evaluationModule of evaluation.modules) {
+            const grade = evaluationModule.grades.find(
+              (g) => g.student.id === studentId
+            );
+            if (grade) {
+              name = `${grade.student.firstName} ${grade.student.lastName}`;
+              break;
+            }
+          }
+          studentsMap.set(studentId, {
+            name,
+            className,
+            points: new Map(),
+          });
+        }
+
+        const student = studentsMap.get(studentId)!;
+        // Moyenne normalisée /100 (barèmes identiques : score moyen des modules).
+        const mean =
+          sums.count > 0
+            ? Math.round((sums.score / sums.count / 100) * 1000) / 10
+            : 0;
+        student.points.set(evaluation.title, mean);
+      }
+    }
+
+    const gradeTrend: TeacherGradeTrendStudentDTO[] = Array.from(
+      studentsMap.entries()
+    )
+      .map(([studentId, student]) => ({
+        studentId,
+        studentName: student.name,
+        className: student.className,
+        points: Array.from(student.points.entries()).map(
+          ([evaluationTitle, score]) => ({ evaluationTitle, score })
+        ),
+      }))
+      .filter((entry) => entry.points.length > 0)
+      .slice(0, 8);
+
+    // Feuille de présence récente.
+    const attendanceSheet: TeacherAttendanceSheetRowDTO[] =
+      attendanceSheetRows.map((row) => ({
+        id: row.id,
+        studentId: row.student.id,
+        studentName: `${row.student.firstName} ${row.student.lastName}`,
+        className: row.class?.name ?? null,
+        date: row.date,
+        status: row.status,
+      }));
 
     return {
       myCoursesCount: courses.length,
@@ -279,6 +420,8 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
         chapterTitle: log.chapterTitle,
         courseTitle: log.course.title,
       })),
+      gradeTrend,
+      attendanceSheet,
     };
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -299,6 +442,8 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
       averageScore: null,
       courses: [],
       recentLogs: [],
+      gradeTrend: [],
+      attendanceSheet: [],
     };
   }
 }

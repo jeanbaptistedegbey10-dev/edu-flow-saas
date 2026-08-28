@@ -121,6 +121,27 @@ export function AddClassDialog({
           </div>
 
           <div className="grid gap-2">
+            <Label htmlFor="class-tuition-fee">
+              Frais de scolarité (FCFA)
+            </Label>
+            <Input
+              id="class-tuition-fee"
+              name="tuitionFee"
+              type="number"
+              min="0"
+              step="any"
+              inputMode="decimal"
+              placeholder="Optionnel — prix du cours sinon"
+              aria-invalid={Boolean(fieldErrors.tuitionFee)}
+            />
+            <FieldError message={fieldErrors.tuitionFee} />
+            <p className="text-xs text-muted-foreground">
+              Si laissé vide, le prix configuré sur le cours porteur sera
+              appliqué automatiquement aux étudiants de cette classe.
+            </p>
+          </div>
+
+          <div className="grid gap-2">
             <Label htmlFor="class-course">Cours *</Label>
             <Select name="courseId">
               <SelectTrigger id="class-course" className="w-full">

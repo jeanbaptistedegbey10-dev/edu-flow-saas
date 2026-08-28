@@ -16,7 +16,10 @@ import {
   ShoppingCart,
   UserCheck,
   ClipboardCheck,
+  ShieldCheck,
+  type LucideIcon,
 } from "lucide-react"
+import { usePathname } from "next/navigation"
 
 import {
   Sidebar,
@@ -33,13 +36,27 @@ import {
 } from "@/components/ui/sidebar"
 
 import { NavUser, type SessionUser } from "@/components/dashboard/nav-user"
+import { cn } from "@/lib/utils"
 
 // Menu data
-const mainMenu = [
+type MenuItem = {
+  title: string
+  url: string
+  icon: LucideIcon
+  /**
+   * Correspondance stricte de l'URL (sans préfixe) : utilisée pour les
+   * entrées racine (ex : « Tableau de bord ») et pour éviter que
+   * « Paramètres » ne s'active aussi sur /dashboard/settings/roles.
+   */
+  exact?: boolean
+}
+
+const mainMenu: MenuItem[] = [
   {
     title: "Tableau de bord",
     url: "/dashboard",
     icon: LayoutDashboard,
+    exact: true,
   },
   {
     title: "Étudiants",
@@ -78,7 +95,7 @@ const mainMenu = [
   },
 ]
 
-const teacherMenu = [
+const teacherMenu: MenuItem[] = [
   {
     title: "Mes cours",
     url: "/dashboard/courses",
@@ -96,7 +113,7 @@ const teacherMenu = [
   },
 ]
 
-const managementMenu = [
+const managementMenu: MenuItem[] = [
   {
     title: "Tâches",
     url: "/dashboard/tasks",
@@ -114,7 +131,7 @@ const managementMenu = [
   },
 ]
 
-const organizationMenu = [
+const organizationMenu: MenuItem[] = [
   {
     title: "Organisation",
     url: "/dashboard/organization",
@@ -124,8 +141,54 @@ const organizationMenu = [
     title: "Paramètres",
     url: "/dashboard/settings",
     icon: Settings,
+    exact: true,
+  },
+  {
+    title: "Rôles & Permissions",
+    url: "/dashboard/settings/roles",
+    icon: ShieldCheck,
   },
 ]
+
+/**
+ * Détermine si l'entrée de menu correspond à la route active : égalité stricte
+ * lorsque `exact` est défini, sinon correspondance par préfixe d'URL (ex :
+ * /dashboard/students/xyz active « Étudiants »).
+ */
+function isItemActive(item: MenuItem, pathname: string | null): boolean {
+  if (!pathname) return false
+  if (item.exact) return pathname === item.url
+  return pathname === item.url || pathname.startsWith(`${item.url}/`)
+}
+
+/**
+ * Styles d'accentuation de l'onglet actif : fond coloré + bordure nette afin
+ * de repérer instantanément la section en cours (mode clair et sombre).
+ */
+const activeItemClass =
+  "border-indigo-300 bg-indigo-50 text-indigo-700 shadow-sm hover:bg-indigo-100 hover:text-indigo-800 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-300 dark:hover:bg-indigo-500/25 dark:hover:text-indigo-200"
+
+/** Lien de menu avec état actif surligné (fond coloré + bordure). */
+function SidebarLink({ item, active }: { item: MenuItem; active: boolean }) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        asChild
+        tooltip={item.title}
+        isActive={active}
+        className={cn(
+          "border border-transparent transition-all duration-200",
+          active && activeItemClass
+        )}
+      >
+        <a href={item.url}>
+          <item.icon />
+          <span>{item.title}</span>
+        </a>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  )
+}
 
 interface AppSidebarProps {
   /**
@@ -136,7 +199,8 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ user }: AppSidebarProps) {
-  const isTeacher = user?.role === "TEACHER";
+  const pathname = usePathname()
+  const isTeacher = user?.role === "TEACHER"
 
   return (
     <Sidebar collapsible="icon">
@@ -155,18 +219,15 @@ export function AppSidebar({ user }: AppSidebarProps) {
         {isTeacher ? (
           <>
             <SidebarGroup>
-              <SidebarGroupLabel>Espace enseignant</SidebarGroupLabel>
+              <SidebarGroupLabel>Principal</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   {teacherMenu.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild tooltip={item.title}>
-                        <a href={item.url}>
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </a>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <SidebarLink
+                      key={item.title}
+                      item={item}
+                      active={isItemActive(item, pathname)}
+                    />
                   ))}
                 </SidebarMenu>
               </SidebarGroupContent>
@@ -176,14 +237,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {managementMenu.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild tooltip={item.title}>
-                        <a href={item.url}>
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </a>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <SidebarLink
+                      key={item.title}
+                      item={item}
+                      active={isItemActive(item, pathname)}
+                    />
                   ))}
                 </SidebarMenu>
               </SidebarGroupContent>
@@ -196,14 +254,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {mainMenu.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild tooltip={item.title}>
-                        <a href={item.url}>
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </a>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <SidebarLink
+                      key={item.title}
+                      item={item}
+                      active={isItemActive(item, pathname)}
+                    />
                   ))}
                 </SidebarMenu>
               </SidebarGroupContent>
@@ -213,14 +268,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {managementMenu.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild tooltip={item.title}>
-                        <a href={item.url}>
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </a>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <SidebarLink
+                      key={item.title}
+                      item={item}
+                      active={isItemActive(item, pathname)}
+                    />
                   ))}
                 </SidebarMenu>
               </SidebarGroupContent>
@@ -230,14 +282,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {organizationMenu.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild tooltip={item.title}>
-                        <a href={item.url}>
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </a>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <SidebarLink
+                      key={item.title}
+                      item={item}
+                      active={isItemActive(item, pathname)}
+                    />
                   ))}
                 </SidebarMenu>
               </SidebarGroupContent>
