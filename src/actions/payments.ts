@@ -11,6 +11,7 @@ import { after } from "next/server";
 import { sendPaymentConfirmationEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -376,6 +377,7 @@ export async function createPaymentAction(
   _prevState: PaymentFormState,
   formData: FormData
 ): Promise<PaymentFormState> {
+  await assertCanMutate();
   const parsed = parsePaymentForm(formData);
 
   if (!parsed.ok) {
@@ -476,6 +478,7 @@ export async function updatePaymentAction(
   _prevState: PaymentFormState,
   formData: FormData
 ): Promise<PaymentFormState> {
+  await assertCanMutate();
   const paymentId = String(formData.get("id") ?? "").trim();
 
   if (!paymentId) {
@@ -572,6 +575,7 @@ export async function updatePaymentAction(
 export async function deletePaymentAction(
   paymentId: string
 ): Promise<PaymentMutationResult> {
+  await assertCanMutate();
   if (!paymentId) {
     return { ok: false, message: "Identifiant du paiement manquant." };
   }

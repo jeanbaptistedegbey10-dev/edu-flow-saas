@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
 import { TASK_PRIORITY_RANK } from "@/lib/task-priority";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -279,6 +280,7 @@ export async function createTaskAction(
   _prevState: TaskFormState,
   formData: FormData
 ): Promise<TaskFormState> {
+  await assertCanMutate();
   const parsed = parseTaskForm(formData);
 
   if (!parsed.ok) {
@@ -376,6 +378,7 @@ export async function updateTaskStatusAction(
   taskId: string,
   status: string
 ): Promise<UpdateTaskStatusState> {
+  await assertCanMutate();
   if (!TASK_STATUSES.includes(status as TaskStatus)) {
     return {
       status: "error",
@@ -432,6 +435,7 @@ export async function updateTaskAction(
   _prevState: TaskFormState,
   formData: FormData
 ): Promise<TaskFormState> {
+  await assertCanMutate();
   const taskId = String(formData.get("id") ?? "").trim();
 
   if (!taskId) {
@@ -536,6 +540,7 @@ export async function updateTaskAction(
 export async function deleteTaskAction(
   taskId: string
 ): Promise<TaskMutationResult> {
+  await assertCanMutate();
   if (!taskId) {
     return { ok: false, message: "Identifiant de la tâche manquant." };
   }

@@ -149,6 +149,28 @@ model Organization {
   ifu                    String?
   /// Frais d'inscription uniques facturés une seule fois par étudiant (FCFA).
   defaultRegistrationFee Float    @default(15000)
+
+  // --------------------------------------
+  // Abonnement / Licence (commercialisation multi-versions : SaaS + Licences)
+  // --------------------------------------
+  /// Type de plan commercial :
+  /// - TRIAL         : période d'essai gratuit (30 jours à l'onboarding) ;
+  /// - SAAS_MONTHLY  : abonnement SaaS mensuel (cloud) ;
+  /// - SAAS_YEARLY   : abonnement SaaS annuel (cloud) ;
+  /// - SELF_HOSTED   : licence installée chez le client ;
+  /// - OFFLINE       : licence hors-ligne.
+  planType String @default("TRIAL")
+  /// Statut du plan : ACTIVE, EXPIRED ou CANCELLED.
+  planStatus String @default("ACTIVE")
+  /// Fin de la période d'essai gratuit (fixée à J+30 à la création de
+  /// l'organisation). Au-delà, les écritures sont bloquées (voir
+  /// src/lib/license-check.ts).
+  trialEndsAt DateTime?
+  /// Clé de licence (éditions SELF_HOSTED / OFFLINE), unique globalement.
+  licenseKey String? @unique
+  /// Fin de validité de la licence (null = licence perpétuelle).
+  licenseEndsAt DateTime?
+
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 

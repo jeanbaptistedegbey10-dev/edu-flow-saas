@@ -8,6 +8,7 @@ import {
   getCurrentSessionUser,
   isNextRedirectError,
 } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -788,6 +789,7 @@ export async function createWorkflowAction(
   _prevState: WorkflowFormState,
   formData: FormData
 ): Promise<WorkflowFormState> {
+  await assertCanMutate();
   const parsed = parseWorkflowForm(formData);
 
   if (!parsed.ok) {
@@ -838,6 +840,7 @@ export async function updateWorkflowAction(
   _prevState: WorkflowFormState,
   formData: FormData
 ): Promise<WorkflowFormState> {
+  await assertCanMutate();
   const workflowId = String(formData.get("id") ?? "").trim();
 
   if (!workflowId) {
@@ -898,6 +901,7 @@ export async function updateWorkflowAction(
 export async function deleteWorkflowAction(
   workflowId: string
 ): Promise<TravelMutationResult> {
+  await assertCanMutate();
   if (!workflowId) {
     return { ok: false, message: "Identifiant du modèle manquant." };
   }
@@ -948,6 +952,7 @@ export async function saveWorkflowStagesAction(
   workflowId: string,
   stages: WorkflowStageInput[]
 ): Promise<TravelMutationResult> {
+  await assertCanMutate();
   if (!workflowId) {
     return { ok: false, message: "Identifiant du modèle manquant." };
   }
@@ -1157,6 +1162,7 @@ export async function createTravelProcedureAction(
   _prevState: TravelFormState,
   formData: FormData
 ): Promise<TravelFormState> {
+  await assertCanMutate();
   const parsed = parseTravelForm(formData);
 
   if (!parsed.ok) {
@@ -1247,6 +1253,7 @@ export async function updateTravelProcedureAction(
   _prevState: TravelFormState,
   formData: FormData
 ): Promise<TravelFormState> {
+  await assertCanMutate();
   const procedureId = String(formData.get("id") ?? "").trim();
 
   if (!procedureId) {
@@ -1350,6 +1357,7 @@ export async function updateTravelProcedureAction(
 export async function deleteTravelProcedureAction(
   procedureId: string
 ): Promise<TravelMutationResult> {
+  await assertCanMutate();
   if (!procedureId) {
     return { ok: false, message: "Identifiant du dossier manquant." };
   }
@@ -1399,6 +1407,7 @@ export async function setTravelCurrentStageAction(
   stageOrder: number,
   deadline?: string | null
 ): Promise<TravelMutationResult> {
+  await assertCanMutate();
   if (!procedureId) {
     return { ok: false, message: "Identifiant du dossier manquant." };
   }
@@ -1476,6 +1485,7 @@ export async function updateTravelDeadlineAction(
   procedureId: string,
   deadline: string
 ): Promise<TravelMutationResult> {
+  await assertCanMutate();
   if (!procedureId) {
     return { ok: false, message: "Identifiant du dossier manquant." };
   }
@@ -1535,6 +1545,7 @@ export async function addTravelInstallmentAction(
     description?: string | null;
   }
 ): Promise<AddInstallmentResult> {
+  await assertCanMutate();
   if (!procedureId) {
     return { ok: false, message: "Identifiant du dossier manquant." };
   }
@@ -1649,6 +1660,7 @@ export async function addTravelInstallmentAction(
 export async function deleteTravelInstallmentAction(
   paymentId: string
 ): Promise<TravelMutationResult> {
+  await assertCanMutate();
   if (!paymentId) {
     return { ok: false, message: "Identifiant du règlement manquant." };
   }

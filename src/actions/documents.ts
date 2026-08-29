@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -176,6 +177,7 @@ export async function addDocumentAction(
   _prevState: DocumentFormState,
   formData: FormData
 ): Promise<DocumentFormState> {
+  await assertCanMutate();
   const organizationId = await getCurrentOrganizationId();
 
   const title = String(formData.get("title") ?? "").trim();
@@ -280,6 +282,7 @@ export async function addDocumentAction(
 export async function deleteDocumentAction(
   id: string
 ): Promise<DocumentMutationResult> {
+  await assertCanMutate();
   const organizationId = await getCurrentOrganizationId();
 
   try {

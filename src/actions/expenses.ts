@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isSalaryCategory, SALARY_CATEGORIES } from "@/lib/expense-categories";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -225,6 +226,7 @@ export async function createExpenseAction(
   _prevState: ExpenseFormState,
   formData: FormData
 ): Promise<ExpenseFormState> {
+  await assertCanMutate();
   const parsed = parseExpenseForm(formData);
 
   if (!parsed.ok) {
@@ -308,6 +310,7 @@ export async function updateExpenseAction(
   _prevState: ExpenseFormState,
   formData: FormData
 ): Promise<ExpenseFormState> {
+  await assertCanMutate();
   const expenseId = String(formData.get("id") ?? "").trim();
 
   if (!expenseId) {
@@ -398,6 +401,7 @@ export async function updateExpenseAction(
 export async function deleteExpenseAction(
   expenseId: string
 ): Promise<ExpenseMutationResult> {
+  await assertCanMutate();
   if (!expenseId) {
     return { ok: false, message: "Identifiant de la dépense manquant." };
   }

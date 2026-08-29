@@ -9,6 +9,7 @@ import {
   getCurrentSessionUser,
   isNextRedirectError,
 } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -259,6 +260,7 @@ export async function createCourseAction(
   _prevState: CourseFormState,
   formData: FormData
 ): Promise<CourseFormState> {
+  await assertCanMutate();
   const parsed = parseCourseForm(formData);
 
   if (!parsed.ok) {
@@ -357,6 +359,7 @@ export async function updateCourseAction(
   _prevState: CourseFormState,
   formData: FormData
 ): Promise<CourseFormState> {
+  await assertCanMutate();
   const courseId = String(formData.get("id") ?? "").trim();
 
   if (!courseId) {
@@ -478,6 +481,7 @@ export async function updateCourseAction(
 export async function deleteCourseAction(
   courseId: string
 ): Promise<CourseMutationResult> {
+  await assertCanMutate();
   if (!courseId) {
     return { ok: false, message: "Identifiant du cours manquant." };
   }

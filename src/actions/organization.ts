@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -242,6 +243,7 @@ export async function updateOrganizationAction(
   _prevState: OrganizationFormState,
   formData: FormData
 ): Promise<OrganizationFormState> {
+  await assertCanMutate();
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();

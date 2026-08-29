@@ -10,8 +10,11 @@
  * format PDF »).
  *
  * Les trois documents partagent :
- * - un en-tête d'entreprise détaillé : logo à gauche, nom, adresse et ville,
- *   coordonnées (téléphone, e-mail, site web) alignées à droite ;
+ * - un en-tête d'entreprise sur structure flex à deux colonnes (55 % /
+ *   40 %) : à gauche le bloc établissement (logo, nom du centre, adresse
+ *   ancrée tout en bas) ; à droite les coordonnées (téléphone, e-mail,
+ *   site web) puis le titre du document et son numéro, eux aussi ancrés
+ *   tout en bas — les lignes du bas reposent sur la même baseline ;
  * - un pied de page légal discret mais lisible : N° RCCM, N° IFU / NIF,
  *   adresse complète, téléphone et site web ;
  * - une mise en page calibrée pour le format A4 / enregistrement PDF.
@@ -122,84 +125,11 @@ const BASE_STYLES = `
     .sheet { margin: 0 auto; border: none; border-radius: 0; max-width: none; padding: 0; }
   }
 
-  /* ---- En-tête entreprise : logo à gauche, coordonnées alignées à droite ---- */
-  .receipt-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 24px;
-    padding-bottom: 18px;
-    border-bottom: 2px solid #111827;
-  }
-  .org-block {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-width: 0;
-  }
-  /* Logo : aucun conteneur carré rigide — le visuel conserve son ratio
-     d'aspect d'origine (object-contain) pour s'adapter aux formats
-     rectangulaires comme carrés, sans compression ni déformation.
-     Dimensions généreuses (84px de haut, 260px de large) pour une
-     visibilité optimale des logos rectangulaires (bandeaux, enseignes). */
-  .logo-box {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    min-width: 64px;
-  }
-  .logo-box .logo-img {
-    max-height: 84px;
-    max-width: 260px;
-    width: auto;
-    height: auto;
-    object-fit: contain;
-  }
-  .logo-box .logo-fallback {
-    width: 64px;
-    height: 64px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 26px;
-    font-weight: 700;
-    color: #3730a3;
-    background: linear-gradient(135deg, #eef2ff, #e0e7ff);
-    border-radius: 12px;
-  }
-  .org-info h1 {
-    margin: 0 0 4px;
-    font-size: 19px;
-    line-height: 1.25;
-    letter-spacing: -0.01em;
-  }
-  .org-info p {
-    margin: 1px 0;
-    font-size: 12px;
-    color: #6b7280;
-  }
-  .doc-title { text-align: right; white-space: nowrap; }
-  .doc-title .contact-line {
-    margin: 1px 0;
-    font-size: 11.5px;
-    color: #374151;
-  }
-  .doc-kind {
-    margin: 8px 0 0;
-    padding-top: 8px;
-    border-top: 1px solid #e5e7eb;
-    font-size: 13px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-  }
-  .doc-number {
-    margin: 4px 0 0;
-    font-size: 12px;
-    color: #6b7280;
-    font-variant-numeric: tabular-nums;
-  }
+  /* ---- En-tête entreprise : structure flex stricte à deux colonnes
+     (bloc établissement à gauche, coordonnées + titre + numéro à droite).
+     La structure et les styles sont inline dans buildOrganizationHeader :
+     les lignes du bas (adresse / numéro) sont ancrées sur la même
+     baseline via justify-content: space-between dans chaque colonne. ---- */
 
   /* ---- Tableaux de détails (identité, règlement courant) ---- */
   .details {
@@ -391,9 +321,17 @@ const BASE_STYLES = `
 
 /**
  * Construit l'en-tête d'entreprise détaillé commun à tous les reçus :
- * logo (ou monogramme de secours) à gauche avec nom, adresse et ville ;
- * coordonnées (téléphone, e-mail, site web) alignées à droite au-dessus du
- * titre du document et de son numéro.
+ * structure flex stricte à deux colonnes (55 % / 40 %) réparties en
+ * `justify-content: space-between` — à gauche le bloc établissement
+ * (logo autorisé plus large, nom du centre, adresse ancrée tout en bas) ;
+ * à droite les coordonnées (téléphone, e-mail, site web) au-dessus du
+ * titre du document et de son numéro, eux aussi ancrés tout en bas.
+ *
+ * Chaque colonne est elle-même un flex vertical `space-between` : les
+ * blocs du bas (adresse à gauche, titre + numéro à droite) reposent ainsi
+ * rigoureusement sur la même baseline horizontale, sans aucun décalage,
+ * quelle que soit la hauteur du logo ou le nombre de lignes de contact.
+ * Un filet plein (2px) clôt l'en-tête avant le corps du document.
  */
 function buildOrganizationHeader(
   organization: OrganizationProfileDTO,
@@ -403,11 +341,18 @@ function buildOrganizationHeader(
   const fallbackInitial =
     organization.name.trim().charAt(0).toUpperCase() || "-";
 
+  // Logo importé : affiché tel quel — il est désormais recadré à la source
+  // (cadrage libre) via le rogneur d'images du formulaire d'organisation.
+  // Le conteneur occupe pleinement le rectangle supérieur gauche (260px de
+  // large max) et l'image s'y cale à gauche, jusqu'à 80px de haut. Sans
+  // logo : monogramme de secours.
   const logoMarkup = organization.logoUrl
-    ? `<img class="logo-img" src="${escapeHtml(organization.logoUrl)}" alt="" />`
-    : `<span class="logo-fallback">${escapeHtml(fallbackInitial)}</span>`;
+    ? `<div style="margin-bottom: 8px; width: 100%; max-width: 260px;"><img src="${escapeHtml(organization.logoUrl)}" alt="Logo" style="display: block; width: auto; max-width: 100%; max-height: 80px; object-fit: contain; object-position: left center;" /></div>`
+    : `<div style="margin-bottom: 8px; width: 100%; max-width: 260px;"><span style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; color: #3730a3; background: linear-gradient(135deg, #eef2ff, #e0e7ff); border-radius: 12px;">${escapeHtml(fallbackInitial)}</span></div>`;
 
-  const locationLine = [
+  // Adresse + ville : ancrées tout en bas de la colonne gauche (sur la
+  // même baseline que le numéro de reçu à droite).
+  const addressLine = [
     organization.address ? escapeHtml(organization.address) : null,
     organization.city ? escapeHtml(organization.city) : null,
   ]
@@ -426,22 +371,38 @@ function buildOrganizationHeader(
       : null,
   ].filter(Boolean);
 
-  return `<header class="receipt-header">
-      <div class="org-block">
-        <div class="logo-box">${logoMarkup}</div>
-        <div class="org-info">
-          <h1>${escapeHtml(organization.name)}</h1>
-          ${locationLine ? `<p>${locationLine}</p>` : ""}
-        </div>
+  return `<header class="header-container" style="display: flex; justify-content: space-between; align-items: stretch; margin-bottom: 16px;">
+
+  <!-- COLONNE GAUCHE -->
+  <div style="display: flex; flex-direction: column; justify-content: space-between; width: 55%;">
+    <div>
+      <!-- Conteneur Logo : occupe pleinement le rectangle supérieur gauche -->
+      ${logoMarkup}
+      <div style="font-size: 15px; font-weight: bold; color: #111827; text-transform: uppercase; line-height: 1.2;">
+        ${escapeHtml(organization.name)}
       </div>
-      <div class="doc-title">
-        ${contactLines
-          .map((line) => `<p class="contact-line">${line}</p>`)
-          .join("\n        ")}
-        <p class="doc-kind">${escapeHtml(docKind)}</p>
-        <p class="doc-number">N° ${escapeHtml(docNumber)}</p>
+    </div>
+    <!-- Adresse ancrée tout en bas -->
+    <div style="font-size: 11px; color: #6b7280; margin-top: 6px;">${addressLine}</div>
+  </div>
+
+  <!-- COLONNE DROITE -->
+  <div style="display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; text-align: right; width: 40%;">
+    <!-- CONTACTS ancrés en haut de la colonne -->
+    <div style="font-size: 11px; color: #374151; line-height: 1.4;">${contactLines.join("<br />")}</div>
+    <!-- Bloc Titre + Numéro ancré tout en bas pour s'aligner exactement avec l'adresse -->
+    <div style="margin-top: 6px;">
+      <div style="font-size: 14px; font-weight: 800; letter-spacing: 0.5px; color: #111827; text-transform: uppercase;">
+        ${escapeHtml(docKind)}
       </div>
-    </header>`;
+      <div style="font-size: 11px; color: #6b7280;">
+        N° ${escapeHtml(docNumber)}
+      </div>
+    </div>
+  </div>
+
+</header>
+<div style="width: 100%; border-bottom: 2px solid #111827; margin-bottom: 16px;"></div>`;
 }
 
 /**

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -277,6 +278,7 @@ export async function createClassAction(
   _prevState: ClassFormState,
   formData: FormData
 ): Promise<ClassFormState> {
+  await assertCanMutate();
   const parsed = parseClassForm(formData);
 
   if (!parsed.ok) {
@@ -344,6 +346,7 @@ export async function updateClassAction(
   _prevState: ClassFormState,
   formData: FormData
 ): Promise<ClassFormState> {
+  await assertCanMutate();
   const classId = String(formData.get("id") ?? "").trim();
 
   if (!classId) {
@@ -434,6 +437,7 @@ export async function updateClassAction(
 export async function deleteClassAction(
   classId: string
 ): Promise<ClassMutationResult> {
+  await assertCanMutate();
   if (!classId) {
     return { ok: false, message: "Identifiant de la classe manquant." };
   }

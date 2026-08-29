@@ -10,6 +10,7 @@ import {
   getCurrentSessionUser,
   isNextRedirectError,
 } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -617,6 +618,7 @@ export type CreateProductServiceResult =
 export async function createProductServiceAction(
   input: CreateProductServiceInput
 ): Promise<CreateProductServiceResult> {
+  await assertCanMutate();
   const user = await getCurrentSessionUser();
 
   // Action réservée aux administrateurs de l'établissement.
@@ -743,6 +745,7 @@ export type SaveProductCategoryResult =
 export async function saveProductCategoryAction(
   input: SaveProductCategoryInput
 ): Promise<SaveProductCategoryResult> {
+  await assertCanMutate();
   try {
     const user = await getCurrentSessionUser();
 
@@ -842,6 +845,7 @@ export async function saveProductCategoryAction(
 export async function deleteProductCategoryAction(
   categoryId: string
 ): Promise<{ ok: boolean; message: string }> {
+  await assertCanMutate();
   try {
     const user = await getCurrentSessionUser();
 
@@ -899,6 +903,7 @@ export async function deleteProductCategoryAction(
 export async function createSaleAction(
   input: CreateSaleInput
 ): Promise<CreateSaleResult> {
+  await assertCanMutate();
   if (!Array.isArray(input.items) || input.items.length === 0) {
     return { ok: false, message: "Le panier est vide." };
   }

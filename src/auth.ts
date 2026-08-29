@@ -1,9 +1,14 @@
+import { randomBytes } from "crypto";
+
 import bcrypt from "bcryptjs";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 
+import { seedDemoDataForOrganization } from "@/lib/demo-seed";
+import { computeTrialEndDate } from "@/lib/license-check";
 import { prisma } from "@/lib/prisma";
+import { generateUniqueOrganizationSlug } from "@/lib/slug";
 
 // --------------------------------------
 // Configuration NextAuth v5 (Auth.js)
@@ -125,33 +130,119 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // états `undefined` dans le JWT/session.
 
     /**
-     * Gère la connexion via OAuth (Google) :
-     * - Si l'utilisateur existe déjà (même email), on le connecte.
-     * - Sinon, on peut créer un compte (optionnel, selon la configuration).
+     * Gère la connexion via OAuth (Google) — UNIQUE voie de création de compte
+     * Organisme / Administrateur :
+     * - Si un utilisateur avec ce même email existe déjà, on le connecte (et
+     *   on complète son avatar si besoin).
+     * - Sinon, la première connexion Google d'un administrateur crée
+     *   AUTOMATIQUEMENT :
+     *     1. son organisation (slug unique) en plan TRIAL/ACTIVE avec une
+     *        période d'essai gratuite de 30 jours (`trialEndsAt = J+30`) ;
+     *     2. son compte administrateur (un mot de passe aléatoire est haché
+     *        pour satisfaire la contrainte `User.passwordHash @nonNullable` ;
+     *        l'authentification de ce compte passe exclusivement par Google).
+     *   Le jeu de données de démonstration est ensuite injecté pour permettre
+     *   une prise en main immédiate (voir Task 4 — actions de ré-injection /
+     *   réinitialisation dédiées dans src/lib/actions/demo-data.ts).
+     *
      * `allowDangerousEmailAccountLinking: true` permet de lier automatiquement
      * un compte existant avec le même email.
      */
     async signIn({ user, account, profile }) {
       if (account?.provider === "google" && user.email) {
-        // Vérifie si un utilisateur avec cet email existe déjà
-        const existingUser = await prisma.user.findUnique({
-          where: { email: user.email },
-        });
+        const email = user.email.trim().toLowerCase();
 
-        if (existingUser) {
-          // L'utilisateur existe : on met à jour l'avatar si nécessaire
-          if (!existingUser.avatarUrl && user.image) {
-            await prisma.user.update({
-              where: { id: existingUser.id },
-              data: { avatarUrl: user.image },
-            });
+        try {
+          // 1. Compte existant → simple connexion (+ avatar si manquant).
+          const existingUser = await prisma.user.findUnique({
+            where: { email },
+            select: { id: true, organizationId: true, avatarUrl: true },
+          });
+
+          if (existingUser) {
+            if (!existingUser.avatarUrl && user.image) {
+              await prisma.user.update({
+                where: { id: existingUser.id },
+                data: { avatarUrl: user.image },
+              });
+            }
+            return true; // Autorise la connexion
           }
-          return true; // Autorise la connexion
-        }
 
-        // Aucun compte existant : on refuse la connexion Google
-        // (l'utilisateur doit d'abord s'inscrire via /register)
-        return false;
+          // 2. Première connexion : création organisation (essai 30 j) + admin.
+          const organizationName =
+            user.name?.trim() || profile?.name?.trim() || "Centre de formation";
+          const slug = await generateUniqueOrganizationSlug(organizationName);
+          const trialEndsAt = computeTrialEndDate();
+          const passwordHash = await bcrypt.hash(
+            randomBytes(24).toString("base64url"),
+            10
+          );
+
+          let createdAdmin: { id: string; organizationId: string } | null =
+            null;
+
+          // La valeur est RETOURNÉE par le callback de transaction : TypeScript
+          // infère son type depuis le retour (évite le narrowing à `never`).
+          createdAdmin = await prisma.$transaction(async (tx) => {
+            const organization = await tx.organization.create({
+              data: {
+                name: organizationName,
+                slug,
+                // Onboarding : essai gratuit de 30 jours.
+                planType: "TRIAL",
+                planStatus: "ACTIVE",
+                trialEndsAt,
+              },
+            });
+
+            const admin = await tx.user.create({
+              data: {
+                organizationId: organization.id,
+                email,
+                passwordHash,
+                firstName:
+                  profile?.given_name ||
+                  (user.name?.trim().split(" ")[0] as string) ||
+                  "Admin",
+                lastName:
+                  profile?.family_name ||
+                  (user.name?.trim().split(" ").slice(1).join(" ") as string) ||
+                  "Administrateur",
+                role: "ADMIN",
+                avatarUrl: user.image ?? null,
+              },
+            });
+
+            return {
+              id: admin.id,
+              organizationId: admin.organizationId,
+            };
+          });
+
+          // 3. Injection du jeu de données de démonstration (non bloquante).
+          if (createdAdmin) {
+            try {
+              await seedDemoDataForOrganization(
+                createdAdmin.organizationId,
+                createdAdmin.id
+              );
+            } catch (seedError) {
+              console.error(
+                "[auth/signIn] Échec du seeding de démonstration :",
+                seedError
+              );
+            }
+          }
+
+          return true;
+        } catch (error) {
+          console.error(
+            "[auth/signIn] Échec de l'onboarding Google :",
+            error
+          );
+          return false;
+        }
       }
       return true;
     },
@@ -160,14 +251,48 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * Au moment de la connexion (`user` présent), copie les informations
      * multi-tenant dans le token JWT. Sur les appels suivants, le token
      * enrichi est simplement réutilisé.
+     *
+     * IMPORTANT (OAuth) : pour le provider Google, `user.id` fourni par
+     * Auth.js est le `sub` (identifiant Google), PAS l'identifiant de notre
+     * table `User`. On résout donc l'utilisateur de la base par email afin de
+     * propager le VRAI `id`, `role` et `organizationId` dans le JWT. Sans
+     * cela, la session pointait vers un id inexistant et toutes les requêtes
+     * multi-tenant échouaient silencieusement.
      */
-    jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
-        token.id = user.id as string;
-        token.role = user.role;
-        // `organizationId` peut être absent selon le provider : on force un
-        // défaut sûr (`null`, jamais `undefined`) pour le JWT.
-        token.organizationId = (user as any).organizationId ?? null;
+        if (account?.provider === "google") {
+          const email =
+            typeof user.email === "string"
+              ? user.email.trim().toLowerCase()
+              : null;
+
+          if (email) {
+            try {
+              const dbUser = await prisma.user.findUnique({
+                where: { email },
+                select: { id: true, role: true, organizationId: true },
+              });
+
+              if (dbUser) {
+                token.id = dbUser.id;
+                token.role = dbUser.role;
+                token.organizationId = dbUser.organizationId;
+              }
+            } catch (error) {
+              console.error(
+                "[auth/jwt] Échec de la résolution de l'utilisateur DB (OAuth) :",
+                error
+              );
+            }
+          }
+        } else {
+          token.id = user.id as string;
+          token.role = user.role;
+          // `organizationId` peut être absent selon le provider : on force un
+          // défaut sûr (`null`, jamais `undefined`) pour le JWT.
+          token.organizationId = (user as any).organizationId ?? null;
+        }
       }
 
       return token;

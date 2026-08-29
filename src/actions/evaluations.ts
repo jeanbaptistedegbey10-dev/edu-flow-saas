@@ -8,6 +8,7 @@ import {
   getCurrentSessionUser,
   isNextRedirectError,
 } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -342,6 +343,7 @@ export async function createEvaluationAction(
   _prevState: CreateEvaluationFormState,
   formData: FormData
 ): Promise<CreateEvaluationFormState> {
+  await assertCanMutate();
   const classId = String(formData.get("classId") ?? "").trim();
   const title = String(formData.get("title") ?? "").trim();
   const rawDay = String(formData.get("date") ?? "").trim();
@@ -427,6 +429,7 @@ export async function createEvaluationAction(
 export async function deleteEvaluationAction(
   evaluationId: string
 ): Promise<EvaluationMutationResult> {
+  await assertCanMutate();
   if (!evaluationId) {
     return { ok: false, message: "Identifiant de l'évaluation manquant." };
   }
@@ -608,6 +611,7 @@ export async function getGradeSheet(
 export async function saveGradesAction(
   formData: FormData
 ): Promise<EvaluationMutationResult> {
+  await assertCanMutate();
   try {
     const evaluationId = String(formData.get("evaluationId") ?? "").trim();
 

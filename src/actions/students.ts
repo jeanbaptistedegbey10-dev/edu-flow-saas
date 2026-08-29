@@ -7,6 +7,7 @@ import { after } from "next/server";
 import { sendWelcomeEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -612,6 +613,7 @@ export async function createStudentAction(
   _prevState: StudentFormState,
   formData: FormData
 ): Promise<StudentFormState> {
+  await assertCanMutate();
   const parsed = parseStudentForm(formData);
 
   if (!parsed.ok) {
@@ -801,6 +803,7 @@ export async function updateStudentAction(
   _prevState: StudentFormState,
   formData: FormData
 ): Promise<StudentFormState> {
+  await assertCanMutate();
   const studentId = String(formData.get("id") ?? "").trim();
 
   if (!studentId) {
@@ -1005,6 +1008,7 @@ export async function updateStudentAction(
 export async function deleteStudentAction(
   studentId: string
 ): Promise<StudentMutationResult> {
+  await assertCanMutate();
   if (!studentId) {
     return { ok: false, message: "Identifiant de l'étudiant manquant." };
   }

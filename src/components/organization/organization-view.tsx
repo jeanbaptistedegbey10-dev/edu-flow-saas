@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import {
   Building2Icon,
   CalendarIcon,
+  CropIcon,
   GlobeIcon,
   ImagePlusIcon,
   LandmarkIcon,
@@ -23,6 +24,10 @@ import {
   type OrganizationInfoDTO,
   type OrganizationMemberDTO,
 } from "@/actions/organization";
+import {
+  LOGO_MAX_VALUE_LENGTH,
+  LogoCropperDialog,
+} from "@/components/organization/logo-cropper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -61,66 +66,21 @@ function getInitials(firstName: string, lastName: string): string {
 // Logo de l'organisation
 // --------------------------------------
 
-/** Taille maximale (px) du logo après redimensionnement côté client. */
-const LOGO_MAX_SIZE_PX = 256;
 /** Taille maximale du fichier source accepté à l'upload (octets). */
 const LOGO_MAX_INPUT_BYTES = 4 * 1024 * 1024;
-/**
- * Taille maximale de la valeur stockée en base (longueur de la data URL /
- * de l'URL) — alignée sur la validation serveur.
- */
-const LOGO_MAX_VALUE_LENGTH = 500_000;
 
 /**
- * Convertit un fichier image sélectionné en data URL exploitable partout
- * (aperçu, header, reçus imprimables) :
- * - l'image est redimensionnée côté client (canvas) pour rester légère ;
- * - la transparence est préservée via PNG sauf pour les JPEG (compression).
- *
- * Lève une erreur si le fichier n'est pas une image exploitable.
+ * Lit un fichier SVG et le convertit en data URL. Les SVG ne passent pas
+ * par le rogneur (dessin canvas peu fiable) : ils sont conservés tels
+ * quels, comme les URLs http(s) saisies manuellement.
  */
-async function fileToLogoDataUrl(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) {
-    throw new Error("Le fichier sélectionné n'est pas une image.");
-  }
-
-  if (file.size > LOGO_MAX_INPUT_BYTES) {
-    throw new Error("L'image dépasse 4 Mo. Choisissez un fichier plus léger.");
-  }
-
-  // Les SVG ne passent pas par canvas : conservation directe en data URL.
-  if (file.type === "image/svg+xml") {
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("Lecture du fichier impossible."));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(
-    1,
-    LOGO_MAX_SIZE_PX / Math.max(bitmap.width, bitmap.height)
-  );
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-
-  const context = canvas.getContext("2d");
-  if (!context) {
-    bitmap.close();
-    throw new Error("Traitement de l'image impossible sur ce navigateur.");
-  }
-
-  context.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
-
-  const mimeType = file.type === "image/jpeg" ? "image/jpeg" : "image/png";
-  return canvas.toDataURL(mimeType, 0.9);
+async function readSvgFileAsDataUrl(file: File): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Lecture du fichier impossible."));
+    reader.readAsDataURL(file);
+  });
 }
 
 /**
@@ -138,9 +98,61 @@ function LogoField({
   const [value, setValue] = React.useState(defaultValue ?? "");
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [localError, setLocalError] = React.useState<string | null>(null);
+  /** Source transmise au rogneur ; `null` = modale fermée. */
+  const [cropSource, setCropSource] = React.useState<string | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  /** Object URL courant ouvert pour le rogneur (à révoquer en fermant). */
+  const cropObjectUrlRef = React.useRef<string | null>(null);
 
-  /** Import d'un fichier local : compression puis conversion en data URL. */
+  /** Ouvre le rogneur sur une image (object URL ou data URL). */
+  const openCropper = (source: string) => {
+    const previous = cropObjectUrlRef.current;
+    if (previous && previous !== source) {
+      URL.revokeObjectURL(previous);
+    }
+    cropObjectUrlRef.current = source.startsWith("blob:") ? source : null;
+    setCropSource(source);
+  };
+
+  /** Ferme le rogneur sans appliquer de recadrage. */
+  const closeCropper = React.useCallback(() => {
+    if (cropObjectUrlRef.current) {
+      URL.revokeObjectURL(cropObjectUrlRef.current);
+      cropObjectUrlRef.current = null;
+    }
+    setCropSource(null);
+  }, []);
+
+  /** Recadrage validé : contrôle du poids puis mise à jour de la valeur. */
+  const handleCroppedDataUrl = (dataUrl: string) => {
+    closeCropper();
+
+    if (dataUrl.length > LOGO_MAX_VALUE_LENGTH) {
+      setLocalError(
+        "L’image reste trop volumineuse après recadrage. Essayez un cadrage plus resserré ou un visuel plus simple."
+      );
+      return;
+    }
+
+    setLocalError(null);
+    setValue(dataUrl);
+  };
+
+  // Nettoyage de l'object URL si le composant est démonté modale ouverte.
+  React.useEffect(() => {
+    return () => {
+      if (cropObjectUrlRef.current) {
+        URL.revokeObjectURL(cropObjectUrlRef.current);
+        cropObjectUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  /**
+   * Import d'un fichier local : validation du type et du poids, puis SVG
+   * converti directement en data URL ou ouverture du rogneur interactif
+   * pour les images matricielles (PNG, JPEG, WebP, GIF).
+   */
   const handleFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -153,16 +165,31 @@ function LogoField({
     setIsProcessing(true);
 
     try {
-      const dataUrl = await fileToLogoDataUrl(file);
+      if (!file.type.startsWith("image/")) {
+        throw new Error("Le fichier sélectionné n'est pas une image.");
+      }
 
-      if (dataUrl.length > LOGO_MAX_VALUE_LENGTH) {
-        setLocalError(
-          "L'image reste trop volumineuse après compression. Essayez un visuel plus simple."
+      if (file.size > LOGO_MAX_INPUT_BYTES) {
+        throw new Error(
+          "L'image dépasse 4 Mo. Choisissez un fichier plus léger."
         );
+      }
+
+      if (file.type === "image/svg+xml") {
+        const dataUrl = await readSvgFileAsDataUrl(file);
+
+        if (dataUrl.length > LOGO_MAX_VALUE_LENGTH) {
+          setLocalError(
+            "Le fichier SVG est trop volumineux. Essayez un visuel plus simple."
+          );
+          return;
+        }
+
+        setValue(dataUrl);
         return;
       }
 
-      setValue(dataUrl);
+      openCropper(URL.createObjectURL(file));
     } catch (cause) {
       setLocalError(
         cause instanceof Error
@@ -227,6 +254,20 @@ function LogoField({
               {isProcessing ? "Traitement..." : "Importer un fichier"}
             </Button>
 
+            {/* Rogner à nouveau un logo déjà importé (data URL matricielle). */}
+            {value.startsWith("data:image/") &&
+            !value.startsWith("data:image/svg+xml") ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => openCropper(value)}
+              >
+                <CropIcon data-icon="inline-start" />
+                Rogner
+              </Button>
+            ) : null}
+
             {value ? (
               <Button
                 type="button"
@@ -245,10 +286,12 @@ function LogoField({
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Collez une URL d’image ou importez un fichier (PNG, JPEG, WebP ou
-            SVG — redimensionné automatiquement en 256×256). Ce logo s’affiche
-            dans l’en-tête du tableau de bord et sur tous les reçus et
-            factures imprimables.
+            Collez une URL d’image ou importez un fichier (PNG, JPEG, WebP,
+            GIF ou SVG) : les images importées passent par un rogneur
+            interactif (cadrage libre avec poignées ajustables, PNG
+            transparent) avant enregistrement. Ce logo s’affiche dans
+            l’en-tête du tableau de bord et sur tous les reçus et factures
+            imprimables.
           </p>
         </div>
       </div>
@@ -259,6 +302,12 @@ function LogoField({
         accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
         className="hidden"
         onChange={handleFileChange}
+      />
+
+      <LogoCropperDialog
+        imageSrc={cropSource}
+        onApplied={handleCroppedDataUrl}
+        onClose={closeCropper}
       />
 
       <FieldError message={error ?? localError ?? undefined} />

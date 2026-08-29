@@ -8,6 +8,7 @@ import {
 } from "@/actions/analytics";
 import { getTeacherDashboardStats } from "@/actions/dashboard";
 import { DashboardOverview } from "@/components/dashboard/dashboard-overview";
+import { DemoDataCard } from "@/components/dashboard/demo-data-card";
 import { TeacherDashboardOverview } from "@/components/dashboard/teacher-dashboard-overview";
 
 export const metadata = {
@@ -39,13 +40,21 @@ export default async function DashboardPage() {
       getAttendanceTrendAction(),
     ]);
 
+  const isAdmin =
+    session?.user?.role === "ADMIN" || session?.user?.role === "SUPER_ADMIN";
+
   return (
-    <DashboardOverview
-      stats={stats}
-      financialOverview={financialOverview}
-      cashFlow={cashFlow}
-      distribution={distribution}
-      attendanceTrend={attendanceTrend}
-    />
-    );
+    <div className="grid gap-6">
+      <DashboardOverview
+        stats={stats}
+        financialOverview={financialOverview}
+        cashFlow={cashFlow}
+        distribution={distribution}
+        attendanceTrend={attendanceTrend}
+      />
+
+      {/* Gestion des données de démonstration (injection / réinitialisation) */}
+      <DemoDataCard isAdmin={isAdmin} />
+    </div>
+  );
 }

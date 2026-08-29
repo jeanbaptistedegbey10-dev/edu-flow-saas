@@ -70,14 +70,29 @@ export function MemberFormDialog({ open, onOpenChange, member, roles }: MemberFo
             </div>
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="member-email">Email *</Label>
-            <Input id="member-email" name="email" type="email" placeholder="Ex : claire@example.com" defaultValue={member?.email ?? ""} required disabled={pending} aria-invalid={Boolean(fieldErrors.email)} />
+            <Label htmlFor="member-email">
+              Identifiant (email){" "}
+              <span className="font-normal text-muted-foreground">
+                — laisser vide pour génération automatique
+              </span>
+            </Label>
+            <Input id="member-email" name="email" type="email" placeholder="Ex : claire@example.com" defaultValue={member?.email ?? ""} disabled={pending} aria-invalid={Boolean(fieldErrors.email)} />
             {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="member-password">{isEditing ? "Nouveau mot de passe (laisser vide)" : "Mot de passe initial *"}</Label>
-            <Input id="member-password" name="password" type="password" placeholder="6 caractères minimum" required={!isEditing} disabled={pending} aria-invalid={Boolean(fieldErrors.password)} />
+            <Label htmlFor="member-password">
+              {isEditing
+                ? "Nouveau mot de passe (laisser vide pour conserver)"
+                : "Mot de passe initial (laisser vide = génération automatique)"}
+            </Label>
+            <Input id="member-password" name="password" type="password" placeholder={isEditing ? "••••••••" : "6 caractères minimum"} disabled={pending} aria-invalid={Boolean(fieldErrors.password)} />
             {fieldErrors.password && <p className="text-xs text-destructive">{fieldErrors.password}</p>}
+            {!isEditing ? (
+              <p className="text-xs text-muted-foreground">
+                Si laissé vide, un identifiant et un mot de passe sont générés
+                automatiquement et affichés une seule fois (aucun e-mail envoyé).
+              </p>
+            ) : null}
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="member-role">Rôle de base *</Label>

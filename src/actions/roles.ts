@@ -1,5 +1,7 @@
 "use server";
 
+import { randomBytes } from "crypto";
+
 import { revalidatePath } from "next/cache";
 
 import { auth } from "@/auth";
@@ -13,6 +15,7 @@ import type {
   MemberFormState,
   MemberActionResult,
 } from "@/types/roles";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Rôles personnalisés (matrice de permissions)
@@ -72,6 +75,80 @@ function sanitizePermissionKeys(raw: FormDataEntryValue[]): string[] {
     .filter((key) => VALID_PERMISSION_KEYS.has(key));
 
   return Array.from(new Set(keys));
+}
+
+// --------------------------------------
+// Génération d'identifiants & mot de passe (membres internes)
+// --------------------------------------
+//
+// Phase 1 (Task 5 — Sécurisation des accès) : la création d'un membre interne
+// (enseignant, comptable, secrétaire…) génère UNIQUEMENT un identifiant
+// (email de l'organisation) et un mot de passe local. Aucun e-mail SMTP
+// externe n'est envoyé — l'administrateur transmet les identifiants
+// directement au membre.
+
+/** Normalise un prénom / nom en segment d'identifiant (sans accents). */
+function normalizeLoginPart(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 24);
+}
+
+/**
+ * Génère un identifiant unique pour un membre interne au format
+ * `prenom.nom@<slug-organisation>.local`. L'unicité globale de
+ * `User.email` est garantie par un suffixe numérique si nécessaire.
+ */
+async function generateMemberLogin(
+  organizationId: string,
+  firstName: string,
+  lastName: string
+): Promise<string> {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { slug: true },
+  });
+  const domain = organization?.slug?.toLowerCase() || "organisation";
+  const baseParts = [
+    normalizeLoginPart(firstName),
+    normalizeLoginPart(lastName),
+  ].filter(Boolean);
+  const base = baseParts.join(".") || "membre";
+
+  let candidate = `${base}@${domain}.local`;
+  let counter = 2;
+
+  // Boucle bornée : suffisante pour résoudre toutes les collisions réelles.
+  while (counter < 100) {
+    const taken = await prisma.user.findUnique({
+      where: { email: candidate },
+      select: { id: true },
+    });
+    if (!taken) {
+      return candidate;
+    }
+    candidate = `${base}${counter}@${domain}.local`;
+    counter += 1;
+  }
+
+  return `${base}-${Date.now().toString(36)}@${domain}.local`;
+}
+
+/**
+ * Génère un mot de passe lisible (sans caractères ambigus O/0, I/l, etc.).
+ * Affiché une seule fois à l'administrateur — aucun envoi par e-mail.
+ */
+function generateMemberPassword(length = 10): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = randomBytes(length);
+  let password = "";
+  for (let index = 0; index < length; index += 1) {
+    password += alphabet[bytes[index]! % alphabet.length];
+  }
+  return password;
 }
 
 // --------------------------------------
@@ -143,6 +220,7 @@ export async function saveCustomRoleAction(
   _prevState: RoleFormState,
   formData: FormData
 ): Promise<RoleFormState> {
+  await assertCanMutate();
   const roleId = String(formData.get("roleId") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
@@ -241,6 +319,7 @@ export async function saveCustomRoleAction(
 export async function deleteCustomRoleAction(
   roleId: string
 ): Promise<{ ok: boolean; message: string }> {
+  await assertCanMutate();
   try {
     const admin = await requireAdminContext();
 
@@ -287,6 +366,7 @@ export async function assignCustomRoleAction(
   userId: string,
   customRoleId: string | null
 ): Promise<{ ok: boolean; message: string }> {
+  await assertCanMutate();
   try {
     const admin = await requireAdminContext();
 
@@ -350,12 +430,17 @@ export async function createMemberAction(
   _prevState: MemberFormState,
   formData: FormData
 ): Promise<MemberFormState> {
+  await assertCanMutate();
   try {
     const admin = await requireAdminContext();
 
     const firstName = String(formData.get("firstName") ?? "").trim();
     const lastName = String(formData.get("lastName") ?? "").trim();
+    // Identifiant optionnel : s'il est vide, il est généré automatiquement à
+    // partir du slug de l'organisation (prenom.nom@<slug>.local).
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    // Mot de passe optionnel : s'il est vide, un mot de passe lisible est
+    // généré et affiché UNE SEULE fois à l'administrateur (aucun e-mail SMTP).
     const password = String(formData.get("password") ?? "");
     const role = String(formData.get("role") ?? "STAFF");
     const customRoleId = String(formData.get("customRoleId") ?? "").trim();
@@ -364,12 +449,10 @@ export async function createMemberAction(
 
     if (!firstName) fieldErrors.firstName = "Le prénom est obligatoire.";
     if (!lastName) fieldErrors.lastName = "Le nom est obligatoire.";
-    if (!email) {
-      fieldErrors.email = "L'email est obligatoire.";
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       fieldErrors.email = "L'email n'est pas valide.";
     }
-    if (!password || password.length < 6) {
+    if (password && password.length < 6) {
       fieldErrors.password =
         "Le mot de passe doit contenir au moins 6 caractères.";
     }
@@ -381,7 +464,18 @@ export async function createMemberAction(
       return { status: "error", fieldErrors, message: "Vérifiez les champs." };
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    // Identifiant final (fourni ou généré) avec contrôle d'unicité globale.
+    const finalEmail = email
+      ? email
+      : await generateMemberLogin(
+          admin.organizationId,
+          firstName,
+          lastName
+        );
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: finalEmail },
+    });
     if (existingUser) {
       return {
         status: "error",
@@ -389,6 +483,10 @@ export async function createMemberAction(
         message: "Cet email est déjà utilisé.",
       };
     }
+
+    // Mot de passe final (fourni ou généré puis affiché une seule fois).
+    const generatedPassword = password ? null : generateMemberPassword();
+    const finalPassword = generatedPassword ?? password;
 
     let assignedCustomRoleId: string | null = null;
     if (customRoleId) {
@@ -406,14 +504,14 @@ export async function createMemberAction(
     }
 
     const bcrypt = await import("bcryptjs");
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(finalPassword, 10);
 
     await prisma.user.create({
       data: {
         organizationId: admin.organizationId,
         firstName,
         lastName,
-        email,
+        email: finalEmail,
         passwordHash,
         role: role as "STAFF" | "TEACHER" | "ADMIN",
         customRoleId: assignedCustomRoleId,
@@ -422,9 +520,16 @@ export async function createMemberAction(
     });
 
     revalidatePath(ROLES_PATH);
+
+    // Le mot de passe généré est affiché UNE SEULE fois à l'administrateur :
+    // aucun e-mail SMTP n'est envoyé (Task 5 — Sécurisation des accès).
+    const successMessage = generatedPassword
+      ? `Membre « ${firstName} ${lastName} » créé. Identifiant : ${finalEmail} — Mot de passe initial : ${generatedPassword} (transmettez-le au membre).`
+      : `Membre « ${firstName} ${lastName} » créé avec succès.`;
+
     return {
       status: "success",
-      message: `Membre « ${firstName} ${lastName} » créé avec succès.`,
+      message: successMessage,
     };
   } catch (error) {
     console.error("[createMemberAction] Échec de création :", error);
@@ -445,6 +550,7 @@ export async function updateMemberAction(
   _prevState: MemberFormState,
   formData: FormData
 ): Promise<MemberFormState> {
+  await assertCanMutate();
   try {
     const admin = await requireAdminContext();
 
@@ -560,6 +666,7 @@ export async function updateMemberAction(
 export async function deleteMemberAction(
   userId: string
 ): Promise<MemberActionResult> {
+  await assertCanMutate();
   try {
     const admin = await requireAdminContext();
 

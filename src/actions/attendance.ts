@@ -9,6 +9,7 @@ import {
   getCurrentSessionUser,
   isNextRedirectError,
 } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -481,6 +482,7 @@ export async function getAttendanceForDate(
 export async function saveAttendanceAction(
   formData: FormData
 ): Promise<AttendanceMutationResult> {
+  await assertCanMutate();
   try {
     const classId = String(formData.get("classId") ?? "").trim();
     const rawDay = String(formData.get("date") ?? "").trim();
@@ -783,6 +785,7 @@ export async function createCourseLogAction(
   _prevState: CourseLogFormState,
   formData: FormData
 ): Promise<CourseLogFormState> {
+  await assertCanMutate();
   const courseId = String(formData.get("courseId") ?? "").trim();
   const rawDay = String(formData.get("date") ?? "").trim();
   const chapterTitle = String(formData.get("chapterTitle") ?? "").trim();

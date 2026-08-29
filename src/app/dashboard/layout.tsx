@@ -7,7 +7,61 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { Bell, Building2, Search } from "lucide-react";
+import { getLicenseStateForCurrentUser } from "@/lib/license-check";
+import {
+  AlertTriangleIcon,
+  Bell,
+  Building2,
+  Clock3Icon,
+  Search,
+} from "lucide-react";
+import Link from "next/link";
+
+/**
+ * Bannière d'état de la licence / de l'essai, affichée en haut du tableau de
+ * bord :
+ * - essai actif expirant dans moins de 7 jours → avertissement ambre ;
+ * - essai / licence expiré(e) ou plan inactif → alerte rouge (accès en
+ *   écriture désactivé).
+ */
+function LicenseBanner({
+  trialDaysLeft,
+  restricted,
+}: {
+  trialDaysLeft: number | null;
+  restricted: boolean;
+}) {
+  if (!restricted && trialDaysLeft === null) {
+    return null;
+  }
+
+  const isExpired = restricted;
+
+  return (
+    <Link
+      href={isExpired ? "/billing?reason=TRIAL_EXPIRED" : "/billing"}
+      className={
+        "flex items-center justify-center gap-2 px-4 py-2 text-center text-sm font-medium transition-colors " +
+        (isExpired
+          ? "bg-red-600 text-white hover:bg-red-700"
+          : "bg-amber-100 text-amber-900 hover:bg-amber-200")
+      }
+    >
+      {isExpired ? (
+        <>
+          <AlertTriangleIcon className="size-4 shrink-0" />
+          Votre essai a expiré — les fonctionnalités de création et de
+          modification sont désactivées.
+        </>
+      ) : (
+        <>
+          <Clock3Icon className="size-4 shrink-0" />
+          Il vous reste {trialDaysLeft} jour{trialDaysLeft !== null && trialDaysLeft > 1 ? "s" : ""} d&apos;essai gratuit.
+        </>
+      )}
+    </Link>
+  );
+}
 
 export default async function DashboardLayout({
   children,
@@ -32,10 +86,17 @@ export default async function DashboardLayout({
   // Dégradation gracieuse : monogramme par défaut si indisponible.
   const branding = await getCurrentOrganizationBranding();
 
+  // État de la licence / de l'essai pour la bannière d'avertissement.
+  const license = await getLicenseStateForCurrentUser();
+
   return (
     <SidebarProvider>
       <AppSidebar user={session?.user} />
       <SidebarInset>
+        <LicenseBanner
+          trialDaysLeft={license?.trialDaysLeft ?? null}
+          restricted={license?.restrictionReason !== null}
+        />
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <SidebarTrigger className="-ml-1" />
           <Separator

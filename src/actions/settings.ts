@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isNextRedirectError } from "@/lib/session";
+import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -99,6 +100,7 @@ export async function updateProfileAction(
   _prevState: ProfileFormState,
   formData: FormData
 ): Promise<ProfileFormState> {
+  await assertCanMutate();
   const firstName = String(formData.get("firstName") ?? "").trim();
   const lastName = String(formData.get("lastName") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
@@ -193,6 +195,7 @@ export async function updateNotificationPreferencesAction(
   _prevState: NotificationPreferenceState,
   formData: FormData
 ): Promise<NotificationPreferenceState> {
+  await assertCanMutate();
   const emailNotifications = formData.get("emailNotifications") === "on";
 
   try {
