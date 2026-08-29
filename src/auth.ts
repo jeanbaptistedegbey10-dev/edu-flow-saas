@@ -19,17 +19,66 @@ import { generateUniqueOrganizationSlug } from "@/lib/slug";
 // ce qui permet au middleware/proxy de vérifier l'authentification
 // sans accès à la base de données.
 
+// ---------------------------------------------------------------------------
+// Variables d'environnement Auth/OAuth — résolues UNE SEULE fois au chargement
+// du module avec des logues explicites. Elles sont chargées par Next.js parmi
+// `.env*` (dev) ET les variables de déploiement (Vercel). Rappel : les fichiers
+// `.env` sont ignorés par git, il faut donc REPORTER ces valeurs dans les
+// « Environment Variables » du projet Vercel.
+// ---------------------------------------------------------------------------
+
+// Secret partagé pour la signature des JWT de session.
+// Garantit que getToken() dans src/proxy.ts et auth() utilisent exactement
+// le même secret — un mismatch fait échouer la vérification JWT côté proxy
+// tandis que auth() réussit, créant une boucle /login ↔ /dashboard sur Vercel.
+//
+// IMPORTANT : aucun fallback « en clair » n'est utilisé (un secret codé en dur
+// dans le code source serait publique et permettrait de forger des sessions).
+// En production, un secret manquant fait échouer Auth.js immédiatement
+// (MissingSecret → error=Configuration) — c'est volontaire : on préfère
+// échouer vite et visiblement plutôt que de fonctionner avec un secret compromis.
+const authSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+
+if (!authSecret) {
+  const message =
+    "[auth] AUTH_SECRET / NEXTAUTH_SECRET non défini. " +
+    (process.env.NODE_ENV === "production"
+      ? "ERREUR FATALE EN PRODUCTION : les connexions (Google incluses) échoueront avec error=Configuration. Définissez AUTH_SECRET (ou NEXTAUTH_SECRET) dans les variables d'environnement Vercel et redéployez."
+      : "En développement, Auth.js peut fonctionner sans secret local stable, mais il est recommandé de le définir dans .env.");
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(message);
+  }
+  console.warn(message);
+}
+
+// Identifiants Google OAuth : on accepte volontairement LES DEUX conventions
+// de nommage (AUTH_GOOGLE_* de Auth.js et GOOGLE_CLIENT_* de Google/NextAuth v4)
+// pour tolérer toute configuration passée ou future, en local comme sur Vercel.
+// Un des deux jeux de variables suffit :
+//   AUTH_GOOGLE_ID   / AUTH_GOOGLE_SECRET   (recommandé, Auth.js v5)
+//   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET (convention NextAuth v4 / Google)
+const googleClientId =
+  process.env.AUTH_GOOGLE_ID || process.env.GOOGLE_CLIENT_ID;
+const googleClientSecret =
+  process.env.AUTH_GOOGLE_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+
+if (!googleClientId || !googleClientSecret) {
+  const message =
+    "[auth] Google OAuth incomplet — clientId/clientSecret manquants. " +
+    "La connexion Google échouera avec error=Configuration (l'échange du code OAuth " +
+    "échoue côté Google). Définissez sur Vercel : AUTH_GOOGLE_ID + AUTH_GOOGLE_SECRET " +
+    "(ou GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET).";
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(message);
+  }
+  console.warn(message);
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  // Secret partagé pour la signature des JWT de session.
-  // Garantit que getToken() dans src/proxy.ts et auth() utilisent exactement
-  // le même secret — un mismatch fait échouer la vérification JWT côté proxy
-  // tandis que auth() réussit, créant une boucle /login ↔ /dashboard sur Vercel.
-  // En production, ce secret doit être défini dans les variables d'environnement
-  // Vercel (AUTH_SECRET ou NEXTAUTH_SECRET).
-  secret:
-    process.env.AUTH_SECRET ||
-    process.env.NEXTAUTH_SECRET ||
-    "fallback-secret-for-production-build",
+  // Secret partagé pour la signature des JWT de session (voir ci-dessus).
+  secret: authSecret,
 
   // Stratégie JWT obligatoire avec CredentialsProvider (pas de sessions base de données).
   session: {
@@ -116,8 +165,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
     Google({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      clientId: googleClientId ?? "",
+      clientSecret: googleClientSecret ?? "",
+      // Permet de lier automatiquement un compte existant ayant le même email
+      // Google (sinon Auth.js refuse la connexion avec OAuthAccountNotLinked).
       allowDangerousEmailAccountLinking: true,
     }),
   ],
@@ -237,11 +288,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
           return true;
         } catch (error) {
+          // DIAGNOSTIC : log détaillé pour identifier la cause racine dans les
+          // logs de déploiement (Vercel → Functions). Les erreurs typiques sont
+          // - DATABASE_URL manquant → PrismaClientInitializationError
+          // - Pooler Supabase (pgBouncer) → P2024 timeout / transaction cancelled
+          // - Client Prisma non généré → PrismaClientConstructorNotFound
+          //
+          // On ne retourne PAS `false` : dans Auth.js v5, un `signIn` qui retourne
+          // `false` → AccessDenied, et une erreur non-AuthError levée ici
+          // (ex: TypeError/timeout Prisma) → error=Configuration. Ni l'un ni
+          // l'autre n'aide l'utilisateur. On redirige plutôt vers /login avec un
+          // code d'erreur explicite que le LoginForm affiche en langage clair.
+          const isDbError =
+            error instanceof Error &&
+            /prisma|database|connection|timeout|pooler|pgbouncer/i.test(
+              error.message
+            );
+          const errorCode = isDbError ? "OnboardingDbError" : "OnboardingFailed";
+
           console.error(
-            "[auth/signIn] Échec de l'onboarding Google :",
+            `[auth/signIn] Échec de l'onboarding Google (code=${errorCode}, email=${user.email}) :`,
             error
           );
-          return false;
+          return `/login?error=${errorCode}`;
         }
       }
       return true;

@@ -65,6 +65,29 @@ export function LoginForm() {
   const [isPending, setIsPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Affiche un message clair quand le callback `signIn` d'Auth.js redirige vers
+  // /login?error=<code> après un échec d'onboarding Google (ex: problème base
+  // de données, transaction Prisma échouée). Sans ce mapping, l'utilisateur ne
+  // verrait qu'une page d'erreur générique (error=Configuration / AccessDenied).
+  React.useEffect(() => {
+    const errorCode = searchParams.get("error");
+    if (!errorCode) return;
+
+    const messages: Record<string, string> = {
+      OnboardingDbError:
+        "La création de votre organisation a échoué (problème de base de données). Vérifiez la configuration DATABASE_URL puis réessayez.",
+      OnboardingFailed:
+        "La création de votre organisation a échoué. Veuillez réessayer ou contacter le support.",
+      OAuthAccountNotLinked:
+        "Un compte avec cet email existe déjà avec une autre méthode de connexion. Connectez-vous avec votre mot de passe.",
+      AccessDenied: "Vous n'avez pas l'autorisation de vous connecter.",
+      Configuration:
+        "Problème de configuration du serveur d'authentification. Vérifiez les variables d'environnement puis réessayez.",
+    };
+
+    setError(messages[errorCode] ?? "Une erreur est survenue. Veuillez réessayer.");
+  }, [searchParams]);
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
