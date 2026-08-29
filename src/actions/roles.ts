@@ -5,6 +5,14 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { ROLE_PERMISSIONS } from "@/lib/permissions";
+import type {
+  CustomRoleDTO,
+  RoleUserDTO,
+  RolesOverview,
+  RoleFormState,
+  MemberFormState,
+  MemberActionResult,
+} from "@/types/roles";
 
 // --------------------------------------
 // Rôles personnalisés (matrice de permissions)
@@ -19,47 +27,6 @@ import { ROLE_PERMISSIONS } from "@/lib/permissions";
 // Sécurité : toutes les mutations sont réservées aux administrateurs
 // (ADMIN / SUPER_ADMIN) et systématiquement bornées à l'organisation de
 // l'utilisateur connecté (isolation multi-tenant).
-
-// --------------------------------------
-// Types publics (contrat avec les composants clients)
-// --------------------------------------
-
-/** Rôle personnalisé tel qu'affiché dans l'interface de gestion. */
-export type CustomRoleDTO = {
-  id: string;
-  name: string;
-  description: string | null;
-  /** Clés de permissions accordées (catalogue `ROLE_PERMISSIONS`). */
-  permissions: string[];
-  /** Rôle pré-configuré : sa suppression est interdite. */
-  isSystem: boolean;
-  /** Nombre d'utilisateurs portant ce rôle. */
-  userCount: number;
-};
-
-/** Utilisateur éligible à l'attribution d'un rôle personnalisé. */
-export type RoleUserDTO = {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  /** Rôle applicatif de base (enum Prisma `Role`). */
-  role: string;
-  customRoleId: string | null;
-  customRoleName: string | null;
-};
-
-/** Données complètes de la page Rôles & Permissions. */
-export type RolesOverview = {
-  roles: CustomRoleDTO[];
-  users: RoleUserDTO[];
-};
-
-/** État sérialisable du formulaire de création / édition d'un rôle. */
-export type RoleFormState = {
-  status: "idle" | "success" | "error";
-  message?: string;
-};
 
 const ROLES_PATH = "/dashboard/settings/roles";
 const VALID_PERMISSION_KEYS = new Set(
@@ -368,6 +335,267 @@ export async function assignCustomRoleAction(
         error instanceof Error
           ? error.message
           : "Attribution impossible pour le moment.",
+    };
+  }
+}
+
+// --------------------------------------
+// Mutation : créer / éditer / supprimer un membre
+// --------------------------------------
+
+/**
+ * Crée un nouveau membre dans l'organisation avec un mot de passe initial.
+ */
+export async function createMemberAction(
+  _prevState: MemberFormState,
+  formData: FormData
+): Promise<MemberFormState> {
+  try {
+    const admin = await requireAdminContext();
+
+    const firstName = String(formData.get("firstName") ?? "").trim();
+    const lastName = String(formData.get("lastName") ?? "").trim();
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+    const role = String(formData.get("role") ?? "STAFF");
+    const customRoleId = String(formData.get("customRoleId") ?? "").trim();
+
+    const fieldErrors: MemberFormState["fieldErrors"] = {};
+
+    if (!firstName) fieldErrors.firstName = "Le prénom est obligatoire.";
+    if (!lastName) fieldErrors.lastName = "Le nom est obligatoire.";
+    if (!email) {
+      fieldErrors.email = "L'email est obligatoire.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      fieldErrors.email = "L'email n'est pas valide.";
+    }
+    if (!password || password.length < 6) {
+      fieldErrors.password =
+        "Le mot de passe doit contenir au moins 6 caractères.";
+    }
+    if (!["STAFF", "TEACHER", "ADMIN"].includes(role)) {
+      fieldErrors.role = "Rôle de base invalide.";
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      return { status: "error", fieldErrors, message: "Vérifiez les champs." };
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      return {
+        status: "error",
+        fieldErrors: { email: "Cet email est déjà utilisé." },
+        message: "Cet email est déjà utilisé.",
+      };
+    }
+
+    let assignedCustomRoleId: string | null = null;
+    if (customRoleId) {
+      const customRole = await prisma.customRole.findFirst({
+        where: { id: customRoleId, organizationId: admin.organizationId },
+        select: { id: true },
+      });
+      if (!customRole) {
+        return {
+          status: "error",
+          message: "Le rôle personnalisé sélectionné est introuvable.",
+        };
+      }
+      assignedCustomRoleId = customRoleId;
+    }
+
+    const bcrypt = await import("bcryptjs");
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await prisma.user.create({
+      data: {
+        organizationId: admin.organizationId,
+        firstName,
+        lastName,
+        email,
+        passwordHash,
+        role: role as "STAFF" | "TEACHER" | "ADMIN",
+        customRoleId: assignedCustomRoleId,
+        isActive: true,
+      },
+    });
+
+    revalidatePath(ROLES_PATH);
+    return {
+      status: "success",
+      message: `Membre « ${firstName} ${lastName} » créé avec succès.`,
+    };
+  } catch (error) {
+    console.error("[createMemberAction] Échec de création :", error);
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Création du membre impossible pour le moment.",
+    };
+  }
+}
+
+/**
+ * Met à jour les informations et/ou le rôle d'un membre existant.
+ */
+export async function updateMemberAction(
+  _prevState: MemberFormState,
+  formData: FormData
+): Promise<MemberFormState> {
+  try {
+    const admin = await requireAdminContext();
+
+    const userId = String(formData.get("userId") ?? "").trim();
+    const firstName = String(formData.get("firstName") ?? "").trim();
+    const lastName = String(formData.get("lastName") ?? "").trim();
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+    const role = String(formData.get("role") ?? "STAFF");
+    const customRoleId = String(formData.get("customRoleId") ?? "").trim();
+    const isActive = formData.get("isActive") === "on";
+
+    const fieldErrors: MemberFormState["fieldErrors"] = {};
+
+    if (!firstName) fieldErrors.firstName = "Le prénom est obligatoire.";
+    if (!lastName) fieldErrors.lastName = "Le nom est obligatoire.";
+    if (!email) {
+      fieldErrors.email = "L'email est obligatoire.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      fieldErrors.email = "L'email n'est pas valide.";
+    }
+    if (!["STAFF", "TEACHER", "ADMIN"].includes(role)) {
+      fieldErrors.role = "Rôle de base invalide.";
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      return { status: "error", fieldErrors, message: "Vérifiez les champs." };
+    }
+
+    const existingUser = await prisma.user.findFirst({
+      where: { id: userId, organizationId: admin.organizationId },
+    });
+    if (!existingUser) {
+      return {
+        status: "error",
+        message: "Membre introuvable ou appartenant à une autre organisation.",
+      };
+    }
+
+    const emailConflict = await prisma.user.findFirst({
+      where: { email, id: { not: userId } },
+    });
+    if (emailConflict) {
+      return {
+        status: "error",
+        fieldErrors: { email: "Cet email est déjà utilisé." },
+        message: "Cet email est déjà utilisé.",
+      };
+    }
+
+    let assignedCustomRoleId: string | null = null;
+    if (customRoleId) {
+      const customRole = await prisma.customRole.findFirst({
+        where: { id: customRoleId, organizationId: admin.organizationId },
+        select: { id: true },
+      });
+      if (!customRole) {
+        return {
+          status: "error",
+          message: "Le rôle personnalisé sélectionné est introuvable.",
+        };
+      }
+      assignedCustomRoleId = customRoleId;
+    }
+
+    const updateData: Record<string, unknown> = {
+      firstName,
+      lastName,
+      email,
+      role,
+      customRoleId: assignedCustomRoleId,
+      isActive,
+    };
+
+    if (password && password.length >= 6) {
+      const bcrypt = await import("bcryptjs");
+      updateData.passwordHash = await bcrypt.hash(password, 10);
+    } else if (password && password.length > 0 && password.length < 6) {
+      return {
+        status: "error",
+        fieldErrors: {
+          password: "Le mot de passe doit contenir au moins 6 caractères.",
+        },
+        message: "Mot de passe trop court.",
+      };
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
+
+    revalidatePath(ROLES_PATH);
+    return {
+      status: "success",
+      message: `Membre « ${firstName} ${lastName} » mis à jour.`,
+    };
+  } catch (error) {
+    console.error("[updateMemberAction] Échec de mise à jour :", error);
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Mise à jour impossible pour le moment.",
+    };
+  }
+}
+
+/**
+ * Supprime (désactive) un membre de l'organisation.
+ */
+export async function deleteMemberAction(
+  userId: string
+): Promise<MemberActionResult> {
+  try {
+    const admin = await requireAdminContext();
+
+    const target = await prisma.user.findFirst({
+      where: { id: userId, organizationId: admin.organizationId },
+      select: { firstName: true, lastName: true, role: true },
+    });
+
+    if (!target) {
+      return { ok: false, message: "Membre introuvable." };
+    }
+    if (target.role === "SUPER_ADMIN") {
+      return {
+        ok: false,
+        message: "Impossible de supprimer le Super Administrateur.",
+      };
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { isActive: false },
+    });
+
+    revalidatePath(ROLES_PATH);
+    return {
+      ok: true,
+      message: `Accès révoqué pour « ${target.firstName} ${target.lastName} ».`,
+    };
+  } catch (error) {
+    console.error("[deleteMemberAction] Échec de suppression :", error);
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Suppression impossible pour le moment.",
     };
   }
 }

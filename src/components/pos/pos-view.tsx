@@ -7,6 +7,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CopyIcon,
+  FilterIcon,
   HistoryIcon,
   LanguagesIcon,
   Loader2Icon,
@@ -15,6 +16,7 @@ import {
   PrinterIcon,
   ReceiptTextIcon,
   RefreshCwIcon,
+  Settings2Icon,
   ShoppingCartIcon,
   Trash2Icon,
   UserRoundIcon,
@@ -27,8 +29,10 @@ import {
   createSaleAction,
   getSaleReceiptData,
   getSalesHistory,
+  type DateRangeFilter,
   type PosClientOption,
   type PosStatsDTO,
+  type ProductCategoryDTO,
   type ProductServiceDTO,
   type SaleHistoryDTO,
   type SaleReceiptData,
@@ -61,7 +65,12 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { CategoryManagerDialog } from "@/components/pos/category-manager-dialog";
 import { SaleReceiptDialog } from "@/components/pos/sale-receipt-dialog";
+import {
+  CreateProductDialog,
+  type CreatedProduct,
+} from "@/components/pos/create-product-dialog";
 import { getPaymentMethodLabel } from "@/lib/payment-status";
 
 const amountFormatter = new Intl.NumberFormat("fr-FR", {
@@ -92,37 +101,78 @@ const PAYMENT_METHOD_OPTIONS = [
 
 const CATEGORY_FILTERS = [
   { value: "ALL", label: "Tout" },
-  { value: "BOOK", label: "Livres" },
-  { value: "TRANSLATION", label: "Traduction" },
-  { value: "COPY_SERVICE", label: "Photocopie" },
+  { value: "UNCATEGORIZED", label: "Sans catégorie" },
 ] as const;
 
-type CategoryFilter = (typeof CATEGORY_FILTERS)[number]["value"];
+type CategoryFilter = (typeof CATEGORY_FILTERS)[number]["value"] | string;
 
-/** Métadonnées d'affichage par catégorie de produit. */
-const CATEGORY_META: Record<
-  ProductServiceDTO["category"],
-  { label: string; icon: React.ComponentType<{ className?: string }>; classes: string }
-> = {
-  BOOK: {
-    label: "Livre",
-    icon: BookOpenIcon,
-    classes:
-      "border-indigo-200/60 bg-indigo-50 text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-400",
-  },
-  TRANSLATION: {
-    label: "Traduction",
-    icon: LanguagesIcon,
-    classes:
-      "border-sky-200/60 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400",
-  },
-  COPY_SERVICE: {
-    label: "Photocopie",
-    icon: CopyIcon,
-    classes:
-      "border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400",
-  },
-};
+/** Périodes prédéfinies pour le filtre de date du POS. */
+const DATE_FILTER_PRESETS = [
+  { value: "today", label: "Aujourd'hui" },
+  { value: "7days", label: "7 derniers jours" },
+  { value: "month", label: "Ce mois" },
+  { value: "custom", label: "Personnalisé" },
+] as const;
+
+type DateFilterPreset = (typeof DATE_FILTER_PRESETS)[number]["value"];
+
+/**
+ * Calcule la plage de dates correspondant à un préréglage.
+ * Retourne null pour "custom" (l'utilisateur saisit ses propres dates).
+ */
+function resolveDateRange(
+  preset: DateFilterPreset,
+  customStart?: string,
+  customEnd?: string
+): DateRangeFilter | undefined {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  switch (preset) {
+    case "today":
+      return {
+        startDate: today,
+        endDate: new Date(today.getTime() + 86_400_000 - 1), // Fin de journée
+      };
+    case "7days":
+      return {
+        startDate: new Date(today.getTime() - 6 * 86_400_000),
+        endDate: new Date(today.getTime() + 86_400_000 - 1),
+      };
+    case "month":
+      return {
+        startDate: new Date(now.getFullYear(), now.getMonth(), 1),
+        endDate: new Date(today.getTime() + 86_400_000 - 1),
+      };
+    case "custom":
+      if (customStart && customEnd) {
+        return {
+          startDate: new Date(customStart),
+          endDate: new Date(new Date(customEnd).getTime() + 86_400_000 - 1),
+        };
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** Pastilles de couleur déterministes pour les catégories dynamiques. */
+const CATEGORY_BADGE_STYLES = [
+  "border-indigo-200/60 bg-indigo-50 text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-400",
+  "border-sky-200/60 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400",
+  "border-amber-200/60 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400",
+  "border-emerald-200/60 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400",
+  "border-rose-200/60 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-400",
+  "border-violet-200/60 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-400",
+];
+
+const UNCATEGORIZED_BADGE =
+  "border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400";
+
+function categoryBadgeStyle(index: number): string {
+  return CATEGORY_BADGE_STYLES[index % CATEGORY_BADGE_STYLES.length];
+}
 
 type CartLine = {
   id: string;
@@ -181,17 +231,18 @@ function SalesHistoryPanel({
     null
   );
 
+  // Date filter state
+  const [datePreset, setDatePreset] = React.useState<DateFilterPreset>("today");
+  const [customStartDate, setCustomStartDate] = React.useState("");
+  const [customEndDate, setCustomEndDate] = React.useState("");
+
   /**
    * Charge une page donnée de l'historique.
-   *
-   * Aucun setState synchrone : indispensable car la fonction est invoquée
-   * depuis un effet au montage de l'onglet (règle react-hooks
-   * set-state-in-effect). Le retour visuel « chargement » est déclenché par
-   * les handlers utilisateurs via `beginLoad`.
    */
   const loadPage = React.useCallback(async (targetPage: number) => {
     try {
-      const result = await getSalesHistory(targetPage, SALES_HISTORY_PAGE_SIZE);
+      const dateRange = resolveDateRange(datePreset, customStartDate, customEndDate);
+      const result = await getSalesHistory(targetPage, SALES_HISTORY_PAGE_SIZE, dateRange);
       setData(result);
       setPage(result.page);
       setError(null);
@@ -202,7 +253,7 @@ function SalesHistoryPanel({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [datePreset, customStartDate, customEndDate]);
 
   /** Déclenche un chargement avec retour visuel immédiat (clic utilisateur). */
   const beginLoad = (targetPage: number) => {
@@ -211,12 +262,6 @@ function SalesHistoryPanel({
   };
 
   React.useEffect(() => {
-    // Chargement initial à l'ouverture de l'onglet : motif légitime de
-    // synchronisation avec un système externe (server action). Tous les
-    // setState n'interviennent qu'APRÈS la résolution de la promesse ;
-    // la règle est désactivée car l'analyseur statique ne remonte pas
-    // au-delà de l'appel de fonction asynchrone.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPage(1);
   }, [loadPage]);
 
@@ -256,18 +301,87 @@ function SalesHistoryPanel({
             Toutes les ventes comptoir, de la plus récente à la plus ancienne.
           </p>
         </div>
-        {hasSales ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={isLoading}
-            onClick={() => beginLoad(page)}
+        <div className="flex items-center gap-2">
+          {hasSales ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isLoading}
+              onClick={() => beginLoad(page)}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              Actualiser
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Filtre par date */}
+      <div className="flex flex-wrap items-end gap-3 border-b px-4 py-3 bg-muted/20">
+        <div className="grid gap-1">
+          <Label htmlFor="date-preset" className="text-xs text-muted-foreground">
+            Période
+          </Label>
+          <Select
+            value={datePreset}
+            onValueChange={(value) => setDatePreset(value as DateFilterPreset)}
           >
-            <RefreshCwIcon data-icon="inline-start" />
-            Actualiser
-          </Button>
+            <SelectTrigger id="date-preset" className="w-[180px] h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_FILTER_PRESETS.map((preset) => (
+                <SelectItem key={preset.value} value={preset.value}>
+                  {preset.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {datePreset === "custom" ? (
+          <>
+            <div className="grid gap-1">
+              <Label htmlFor="custom-start" className="text-xs text-muted-foreground">
+                Du
+              </Label>
+              <Input
+                id="custom-start"
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="h-8 w-[150px]"
+              />
+            </div>
+            <div className="grid gap-1">
+              <Label htmlFor="custom-end" className="text-xs text-muted-foreground">
+                Au
+              </Label>
+              <Input
+                id="custom-end"
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="h-8 w-[150px]"
+              />
+            </div>
+          </>
         ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => beginLoad(1)}
+          disabled={isLoading}
+          className="h-8"
+        >
+          {isLoading ? (
+            <Loader2Icon data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <FilterIcon data-icon="inline-start" />
+          )}
+          Filtrer
+        </Button>
       </div>
 
       {error ? (
@@ -415,16 +529,29 @@ function SalesHistoryPanel({
 
 export function PosView({
   products,
+  categories,
   clients,
   stats,
   organization,
 }: {
   products: ProductServiceDTO[];
+  categories: ProductCategoryDTO[];
   clients: PosClientOption[];
   stats: PosStatsDTO;
   organization: OrganizationProfileDTO;
 }) {
   const router = useRouter();
+
+  // Catalogue local : recopié des props serveur, enrichi instantanément lors
+  // des créations d'articles (le rafraîchissement serveur resynchronise les
+  // indicateurs « Articles au catalogue »).
+  const [catalog, setCatalog] = React.useState(products);
+  // Catégories locales (synchronisées avec le dialogue « Gérer les catégories »).
+  const [localCategories, setLocalCategories] = React.useState(categories);
+  const [isCreateProductOpen, setIsCreateProductOpen] =
+    React.useState(false);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] =
+    React.useState(false);
 
   const [categoryFilter, setCategoryFilter] =
     React.useState<CategoryFilter>("ALL");
@@ -437,11 +564,23 @@ export function PosView({
   const [lastSale, setLastSale] = React.useState<SaleReceiptData | null>(null);
   const [receiptOpen, setReceiptOpen] = React.useState(false);
 
-  /** Articles filtrés par catégorie sélectionnée. */
+  /** Index de catégorie par identifiant (pour les pastilles colorées). */
+  const categoryIndexById = React.useMemo(() => {
+    const map = new Map<string, number>();
+    localCategories.forEach((category, index) => {
+      map.set(category.id, index);
+    });
+    return map;
+  }, [localCategories]);
+
+  /** Articles filtrés par catégorie sélectionnée (Tout / catégorie / Sans catégorie). */
   const filteredProducts = React.useMemo(() => {
-    if (categoryFilter === "ALL") return products;
-    return products.filter((product) => product.category === categoryFilter);
-  }, [products, categoryFilter]);
+    if (categoryFilter === "ALL") return catalog;
+    if (categoryFilter === "UNCATEGORIZED") {
+      return catalog.filter((product) => product.categoryId === null);
+    }
+    return catalog.filter((product) => product.categoryId === categoryFilter);
+  }, [catalog, categoryFilter]);
 
   /** Regroupement des clients pour le Select (étudiants / candidats voyage). */
   const studentClients = React.useMemo(
@@ -557,15 +696,60 @@ export function PosView({
     }
   };
 
+  /** Ajoute au catalogue local l'article créé via la modale. */
+  const handleProductCreated = (product: CreatedProduct) => {
+    // La grille n'affiche que les articles disponibles (isActive) — même
+    // règle que getProductServices côté serveur.
+    if (product.isActive) {
+      setCatalog((prev) => [...prev, product]);
+    }
+    router.refresh();
+  };
+
+  /** Synchronise les catégories locales après mutation via le dialogue dédié. */
+  const handleCategoriesChange = (nextCategories: ProductCategoryDTO[]) => {
+    setLocalCategories(nextCategories);
+    // Si la catégorie filtrée vient d'être supprimée, revient à « Tout ».
+    setCategoryFilter((current) => {
+      if (current === "ALL" || current === "UNCATEGORIZED") return current;
+      const stillExists = nextCategories.some((category) => category.id === current);
+      return stillExists ? current : "ALL";
+    });
+    router.refresh();
+  };
+
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
       {/* En-tête */}
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight">Caisse / POS</h2>
-        <p className="text-base text-muted-foreground">
-          Ventes rapides au comptoir : livres, traductions assermentées,
-          photocopies et services annexes.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">Caisse / POS</h2>
+          <p className="text-base text-muted-foreground">
+            Ventes rapides au comptoir : livres, traductions assermentées,
+            photocopies et services annexes.
+          </p>
+        </div>
+
+        {/* Actions catalogue (réservées aux administrateurs) */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setIsCategoryManagerOpen(true)}
+            title="Ajouter, renommer ou supprimer vos catégories"
+          >
+            <Settings2Icon data-icon="inline-start" />
+            Gérer les catégories
+          </Button>
+          <Button
+            type="button"
+            onClick={() => setIsCreateProductOpen(true)}
+            title="Ajouter un article au catalogue de la caisse"
+          >
+            <PlusIcon data-icon="inline-start" />
+            Ajouter un article
+          </Button>
+        </div>
       </div>
 
       {/* Onglets : Nouvelle vente / Historique des ventes */}
@@ -622,12 +806,24 @@ export function PosView({
               <Button
                 key={filter.value}
                 type="button"
-                variant={categoryFilter === filter.value ? "secondary" : "ghost"}
+                variant="pill"
                 size="sm"
                 aria-pressed={categoryFilter === filter.value}
                 onClick={() => setCategoryFilter(filter.value)}
               >
                 {filter.label}
+              </Button>
+            ))}
+            {localCategories.map((category) => (
+              <Button
+                key={category.id}
+                type="button"
+                variant="pill"
+                size="sm"
+                aria-pressed={categoryFilter === category.id}
+                onClick={() => setCategoryFilter(category.id)}
+              >
+                {category.name}
               </Button>
             ))}
           </div>
@@ -637,14 +833,22 @@ export function PosView({
               <BookOpenIcon className="size-8 text-muted-foreground/50" />
               <p className="font-medium">Aucun article dans cette catégorie</p>
               <p className="max-w-sm text-sm text-muted-foreground">
-                Les produits et services sont gérés depuis le catalogue de
-                l’organisation.
+                Créez votre premier article avec le bouton « Ajouter un
+                article » pour le rendre encaissable au comptoir.
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-4">
               {filteredProducts.map((product) => {
-                const meta = CATEGORY_META[product.category];
+                const isUncategorized = product.categoryId === null;
+                const categoryLabel = isUncategorized
+                  ? "Sans catégorie"
+                  : product.categoryName ?? "Sans catégorie";
+                const badgeClasses = isUncategorized
+                  ? UNCATEGORIZED_BADGE
+                  : categoryBadgeStyle(
+                      categoryIndexById.get(product.categoryId ?? "") ?? 0
+                    );
 
                 return (
                   <button
@@ -655,9 +859,10 @@ export function PosView({
                     aria-label={`Ajouter ${product.name} au panier`}
                   >
                     <div className="flex w-full items-start justify-between gap-2">
-                      <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">
-                        <meta.icon className="size-3" />
-                        {meta.label}
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${badgeClasses}`}
+                      >
+                        {categoryLabel}
                       </span>
                       <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary opacity-60 transition-opacity group-hover:opacity-100">
                         <PlusIcon className="size-3.5" />
@@ -920,6 +1125,25 @@ export function PosView({
           <SalesHistoryPanel organization={organization} />
         </TabsContent>
       </Tabs>
+
+      {/* Modale de création d'article du catalogue */}
+      <CreateProductDialog
+        open={isCreateProductOpen}
+        onOpenChange={setIsCreateProductOpen}
+        onCreated={handleProductCreated}
+        categories={localCategories}
+        onCategoryCreated={(category) =>
+          handleCategoriesChange([...localCategories, category])
+        }
+      />
+
+      {/* Dialogue de gestion des catégories personnalisées */}
+      <CategoryManagerDialog
+        open={isCategoryManagerOpen}
+        onOpenChange={setIsCategoryManagerOpen}
+        categories={localCategories}
+        onChange={handleCategoriesChange}
+      />
 
       {/* Facturette après encaissement */}
       <SaleReceiptDialog

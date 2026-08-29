@@ -19,9 +19,21 @@ import {
 export type ProductServiceDTO = {
   id: string;
   name: string;
-  category: "BOOK" | "TRANSLATION" | "COPY_SERVICE";
+  /** Catégorie personnalisée (null = produit sans catégorie). */
+  categoryId: string | null;
+  /** Libellé de la catégorie personnalisée (null = produit sans catégorie). */
+  categoryName: string | null;
   unitPrice: number;
   description: string | null;
+};
+
+/**
+ * Catégorie personnalisée du catalogue, créée et gérée par l'organisation
+ * (modèle `ProductCategory`) — aucune catégorie système figée.
+ */
+export type ProductCategoryDTO = {
+  id: string;
+  name: string;
 };
 
 export type PosClientOption =
@@ -71,7 +83,8 @@ export type SaleReceiptData = {
   cashierName: string;
   items: Array<{
     name: string;
-    category: string;
+    /** Libellé de la catégorie personnalisée (null = produit sans catégorie). */
+    category: string | null;
     quantity: number;
     unitPrice: number;
     subtotal: number;
@@ -83,6 +96,10 @@ export type CreateSaleResult =
   | { ok: false; message: string };
 
 export type PosStatsDTO = {
+  /** Nombre de ventes enregistrées sur la période. */
+  periodSalesCount: number;
+  /** Montant net encaissé sur la période (recettes caisse). */
+  periodRevenue: number;
   /** Nombre de ventes enregistrées aujourd'hui. */
   todaySalesCount: number;
   /** Montant net encaissé aujourd'hui (recettes caisse). */
@@ -91,6 +108,12 @@ export type PosStatsDTO = {
   monthRevenue: number;
   /** Nombre d'articles/services actifs au catalogue. */
   activeProductsCount: number;
+};
+
+/** Plage de dates optionnelle pour le filtre POS. */
+export type DateRangeFilter = {
+  startDate: Date;
+  endDate: Date;
 };
 
 /** Ligne du tableau « Historique des ventes » du POS. */
@@ -141,24 +164,58 @@ function isPaymentMethod(value: string): value is PaymentMethodValue {
 // --------------------------------------
 
 /**
+ * Récupère les catégories personnalisées du catalogue de l'organisation
+ * (créées via « Gérer les catégories »), triées par libellé.
+ */
+export async function getProductCategories(): Promise<ProductCategoryDTO[]> {
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    return await prisma.productCategory.findMany({
+      where: { organizationId },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getProductCategories] Échec de lecture :", error);
+
+    // Dégradation gracieuse : aucune catégorie plutôt que crash serveur.
+    return [];
+  }
+}
+
+/**
  * Récupère le catalogue actif des articles/services de l'organisation,
- * trié par catégorie puis nom — alimente la grille POS.
+ * trié par catégorie puis nom — alimente la grille POS. Les produits sans
+ * catégorie sont inclus (filtre « Sans catégorie » côté interface).
  */
 export async function getProductServices(): Promise<ProductServiceDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
   try {
-    return await prisma.productService.findMany({
+    const products = await prisma.productService.findMany({
       where: { organizationId, isActive: true },
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
       select: {
         id: true,
         name: true,
-        category: true,
+        categoryId: true,
+        category: { select: { name: true } },
         unitPrice: true,
         description: true,
       },
     });
+
+    return products.map((product) => ({
+      id: product.id,
+      name: product.name,
+      categoryId: product.categoryId,
+      categoryName: product.category?.name ?? null,
+      unitPrice: product.unitPrice,
+      description: product.description,
+    }));
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
 
@@ -236,9 +293,10 @@ export async function getPosClientOptions(): Promise<PosClientOption[]> {
 
 /**
  * Indicateurs de la caisse : recettes du jour, du mois, nombre de ventes
- * du jour et taille du catalogue actif.
+ * sur la période et taille du catalogue actif.
+ * Accepte une plage de dates optionnelle pour filtrer les résultats.
  */
-export async function getPosStats(): Promise<PosStatsDTO> {
+export async function getPosStats(dateRange?: DateRangeFilter): Promise<PosStatsDTO> {
   const organizationId = await getCurrentOrganizationId();
 
   const now = new Date();
@@ -247,14 +305,24 @@ export async function getPosStats(): Promise<PosStatsDTO> {
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
   try {
-    const [todayAgg, monthAgg, todayCount, productsCount] = await Promise.all([
+    // Construction du filtre de date pour la période personnalisée
+    const periodWhere: Record<string, unknown> = {
+      organizationId,
+      status: "COMPLETED",
+    };
+    if (dateRange) {
+      periodWhere.createdAt = { gte: dateRange.startDate, lte: dateRange.endDate };
+    } else {
+      periodWhere.createdAt = { gte: dayStart };
+    }
+
+    const [periodAgg, periodCount, monthAgg, productsCount, todayCount] = await Promise.all([
       prisma.sale.aggregate({
-        where: {
-          organizationId,
-          status: "COMPLETED",
-          createdAt: { gte: dayStart },
-        },
+        where: periodWhere,
         _sum: { netAmount: true },
+      }),
+      prisma.sale.count({
+        where: periodWhere,
       }),
       prisma.sale.aggregate({
         where: {
@@ -264,17 +332,23 @@ export async function getPosStats(): Promise<PosStatsDTO> {
         },
         _sum: { netAmount: true },
       }),
-      prisma.sale.count({
-        where: { organizationId, createdAt: { gte: dayStart } },
-      }),
       prisma.productService.count({
         where: { organizationId, isActive: true },
+      }),
+      prisma.sale.count({
+        where: {
+          organizationId,
+          status: "COMPLETED",
+          createdAt: { gte: dayStart },
+        },
       }),
     ]);
 
     return {
+      periodSalesCount: periodCount,
+      periodRevenue: periodAgg._sum.netAmount ?? 0,
       todaySalesCount: todayCount,
-      todayRevenue: todayAgg._sum.netAmount ?? 0,
+      todayRevenue: periodAgg._sum.netAmount ?? 0,
       monthRevenue: monthAgg._sum.netAmount ?? 0,
       activeProductsCount: productsCount,
     };
@@ -285,6 +359,8 @@ export async function getPosStats(): Promise<PosStatsDTO> {
 
     // Dégradation gracieuse : indicateurs à zéro plutôt que crash serveur.
     return {
+      periodSalesCount: 0,
+      periodRevenue: 0,
       todaySalesCount: 0,
       todayRevenue: 0,
       monthRevenue: 0,
@@ -331,17 +407,25 @@ function resolveSaleClientName(client: {
  */
 export async function getSalesHistory(
   page = 1,
-  pageSize = 10
+  pageSize = 10,
+  dateRange?: DateRangeFilter
 ): Promise<SalesHistoryPageDTO> {
   const organizationId = await getCurrentOrganizationId();
 
   const safePage = Math.max(1, Math.trunc(Number(page)) || 1);
   const safePageSize = Math.min(50, Math.max(1, Math.trunc(Number(pageSize)) || 10));
 
+  // Construction du filtre de date
+  const dateFilter: Record<string, unknown> = {};
+  if (dateRange) {
+    dateFilter.gte = dateRange.startDate;
+    dateFilter.lte = dateRange.endDate;
+  }
+
   try {
     const [rows, total] = await Promise.all([
       prisma.sale.findMany({
-        where: { organizationId },
+        where: { organizationId, createdAt: dateFilter },
         orderBy: { createdAt: "desc" },
         skip: (safePage - 1) * safePageSize,
         take: safePageSize,
@@ -362,7 +446,7 @@ export async function getSalesHistory(
           _count: { select: { items: true } },
         },
       }),
-      prisma.sale.count({ where: { organizationId } }),
+      prisma.sale.count({ where: { organizationId, createdAt: dateFilter } }),
     ]);
 
     return {
@@ -441,7 +525,9 @@ export async function getSaleReceiptData(
             quantity: true,
             unitPrice: true,
             subtotal: true,
-            productService: { select: { name: true, category: true } },
+            productService: {
+              select: { name: true, category: { select: { name: true } } },
+            },
           },
         },
       },
@@ -472,7 +558,7 @@ export async function getSaleReceiptData(
         cashierName: `${sale.cashier.firstName} ${sale.cashier.lastName}`,
         items: sale.items.map((item) => ({
           name: item.productService.name,
-          category: item.productService.category,
+          category: item.productService.category?.name ?? null,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           subtotal: item.subtotal,
@@ -488,6 +574,311 @@ export async function getSaleReceiptData(
       ok: false,
       message:
         "Impossible de charger la facturette pour le moment. Réessayez.",
+    };
+  }
+}
+
+// --------------------------------------
+// Mutation : création d'un article du catalogue POS
+// --------------------------------------
+
+/** Longueur maximale du libellé d'un article. */
+const MAX_PRODUCT_NAME_LENGTH = 120;
+
+/** Longueur maximale du libellé d'une catégorie personnalisée. */
+const MAX_CATEGORY_NAME_LENGTH = 60;
+
+/** Entrée de création d'un article du catalogue de la caisse. */
+export type CreateProductServiceInput = {
+  name: string;
+  /** Catégorie personnalisée (null/absent = produit sans catégorie). */
+  categoryId: string | null;
+  /** Prix unitaire en FCFA (source de vérité serveur). */
+  unitPrice: number;
+  /** Disponibilité à la vente (article actif dans le catalogue). */
+  isActive: boolean;
+};
+
+/** Article du catalogue tel que renvoyé après création (avec disponibilité). */
+export type CreatedProductDTO = ProductServiceDTO & { isActive: boolean };
+
+export type CreateProductServiceResult =
+  | { ok: true; product: CreatedProductDTO }
+  | { ok: false; message: string };
+
+/**
+ * Crée un nouvel article (produit/service) dans le catalogue de la caisse
+ * de l'organisation active.
+ *
+ * Réservée aux administrateurs (ADMIN / SUPER_ADMIN). Validation stricte
+ * côté serveur : libellé non vide, catégorie connue, prix numérique ≥ 0,
+ * et refus des doublons (même libellé, insensible à la casse).
+ */
+export async function createProductServiceAction(
+  input: CreateProductServiceInput
+): Promise<CreateProductServiceResult> {
+  const user = await getCurrentSessionUser();
+
+  // Action réservée aux administrateurs de l'établissement.
+  if (user.role !== "ADMIN" && user.role !== "SUPER_ADMIN") {
+    return {
+      ok: false,
+      message: "Action réservée aux administrateurs de l'établissement.",
+    };
+  }
+
+  const name = String(input.name ?? "").trim();
+  if (name.length < 2 || name.length > MAX_PRODUCT_NAME_LENGTH) {
+    return {
+      ok: false,
+      message: `Le libellé doit contenir entre 2 et ${MAX_PRODUCT_NAME_LENGTH} caractères.`,
+    };
+  }
+
+  const categoryId = input.categoryId ? String(input.categoryId).trim() : null;
+
+  if (categoryId) {
+    // La catégorie doit exister ET appartenir à l'organisation active
+    // (isolation multi-tenant).
+    const category = await prisma.productCategory.findFirst({
+      where: { id: categoryId, organizationId: user.organizationId },
+      select: { id: true },
+    });
+
+    if (!category) {
+      return { ok: false, message: "Catégorie d'article invalide." };
+    }
+  }
+
+  const unitPrice = Number(input.unitPrice);
+  if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+    return {
+      ok: false,
+      message: "Le prix doit être un nombre positif (en FCFA).",
+    };
+  }
+
+  try {
+    // Refus des doublons : un même libellé ne doit pas figurer deux fois
+    // dans le catalogue de l'organisation (insensible à la casse).
+    const existing = await prisma.productService.findFirst({
+      where: {
+        organizationId: user.organizationId,
+        name: { equals: name, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return {
+        ok: false,
+        message: `Un article « ${name} » existe déjà dans le catalogue.`,
+      };
+    }
+
+    const created = await prisma.productService.create({
+      data: {
+        organizationId: user.organizationId,
+        name,
+        categoryId,
+        unitPrice,
+        isActive: input.isActive !== false,
+      },
+      select: {
+        id: true,
+        name: true,
+        categoryId: true,
+        category: { select: { name: true } },
+        unitPrice: true,
+        description: true,
+        isActive: true,
+      },
+    });
+
+    revalidatePath("/dashboard/pos");
+    revalidatePath("/dashboard");
+
+    return {
+      ok: true,
+      product: {
+        id: created.id,
+        name: created.name,
+        categoryId: created.categoryId,
+        categoryName: created.category?.name ?? null,
+        unitPrice: created.unitPrice,
+        description: created.description,
+        isActive: created.isActive,
+      },
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[createProductServiceAction] Échec de création :", error);
+    return {
+      ok: false,
+      message: "Une erreur est survenue lors de la création de l'article.",
+    };
+  }
+}
+
+// --------------------------------------
+// Mutations : catégories personnalisées du catalogue
+// --------------------------------------
+
+/** Entrée de création / renommage d'une catégorie personnalisée. */
+export type SaveProductCategoryInput = {
+  /** Présent = renommage de la catégorie ; absent ou null = création. */
+  id?: string | null;
+  name: string;
+};
+
+export type SaveProductCategoryResult =
+  | { ok: true; category: ProductCategoryDTO }
+  | { ok: false; message: string };
+
+/**
+ * Crée ou renomme une catégorie personnalisée du catalogue (modèle
+ * `ProductCategory`). Réservée aux administrateurs.
+ */
+export async function saveProductCategoryAction(
+  input: SaveProductCategoryInput
+): Promise<SaveProductCategoryResult> {
+  try {
+    const user = await getCurrentSessionUser();
+
+    if (user.role !== "ADMIN" && user.role !== "SUPER_ADMIN") {
+      return {
+        ok: false,
+        message: "Action réservée aux administrateurs de l'établissement.",
+      };
+    }
+
+    const name = String(input.name ?? "").trim();
+    if (name.length < 2 || name.length > MAX_CATEGORY_NAME_LENGTH) {
+      return {
+        ok: false,
+        message: `Le libellé doit contenir entre 2 et ${MAX_CATEGORY_NAME_LENGTH} caractères.`,
+      };
+    }
+
+    if (input.id) {
+      // Renommage : la catégorie doit appartenir à l'organisation active.
+      const existing = await prisma.productCategory.findFirst({
+        where: { id: input.id, organizationId: user.organizationId },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return { ok: false, message: "Catégorie introuvable." };
+      }
+
+      const duplicate = await prisma.productCategory.findFirst({
+        where: {
+          organizationId: user.organizationId,
+          name: { equals: name, mode: "insensitive" },
+          id: { not: existing.id },
+        },
+        select: { id: true },
+      });
+
+      if (duplicate) {
+        return {
+          ok: false,
+          message: `Une catégorie « ${name} » existe déjà.`,
+        };
+      }
+
+      const renamed = await prisma.productCategory.update({
+        where: { id: existing.id },
+        data: { name },
+        select: { id: true, name: true },
+      });
+
+      revalidatePath("/dashboard/pos");
+
+      return { ok: true, category: renamed };
+    }
+
+    // Création : refus des doublons (insensible à la casse).
+    const duplicate = await prisma.productCategory.findFirst({
+      where: {
+        organizationId: user.organizationId,
+        name: { equals: name, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+
+    if (duplicate) {
+      return {
+        ok: false,
+        message: `Une catégorie « ${name} » existe déjà.`,
+      };
+    }
+
+    const created = await prisma.productCategory.create({
+      data: { organizationId: user.organizationId, name },
+      select: { id: true, name: true },
+    });
+
+    revalidatePath("/dashboard/pos");
+
+    return { ok: true, category: created };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[saveProductCategoryAction] Échec :", error);
+    return {
+      ok: false,
+      message: "Une erreur est survenue lors de l'enregistrement de la catégorie.",
+    };
+  }
+}
+
+/**
+ * Supprime une catégorie personnalisée. Les produits rattachés restent
+ * intacts : ils deviennent simplement « sans catégorie » (`onDelete: SetNull`).
+ * Réservée aux administrateurs.
+ */
+export async function deleteProductCategoryAction(
+  categoryId: string
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const user = await getCurrentSessionUser();
+
+    if (user.role !== "ADMIN" && user.role !== "SUPER_ADMIN") {
+      return {
+        ok: false,
+        message: "Action réservée aux administrateurs de l'établissement.",
+      };
+    }
+
+    const existing = await prisma.productCategory.findFirst({
+      where: { id: categoryId, organizationId: user.organizationId },
+      select: { id: true, name: true },
+    });
+
+    if (!existing) {
+      return {
+        ok: false,
+        message: "Catégorie introuvable ou appartenant à une autre organisation.",
+      };
+    }
+
+    await prisma.productCategory.delete({ where: { id: existing.id } });
+
+    revalidatePath("/dashboard/pos");
+
+    return {
+      ok: true,
+      message: `Catégorie « ${existing.name} » supprimée. Ses articles sont désormais sans catégorie.`,
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[deleteProductCategoryAction] Échec de suppression :", error);
+    return {
+      ok: false,
+      message: "Une erreur est survenue lors de la suppression de la catégorie.",
     };
   }
 }
@@ -591,7 +982,12 @@ export async function createSaleAction(
     const productIds = [...new Set(items.map((item) => item.productServiceId))];
     const products = await prisma.productService.findMany({
       where: { organizationId, id: { in: productIds }, isActive: true },
-      select: { id: true, name: true, category: true, unitPrice: true },
+      select: {
+        id: true,
+        name: true,
+        category: { select: { name: true } },
+        unitPrice: true,
+      },
     });
 
     const productsById = new Map(products.map((p) => [p.id, p]));
@@ -675,7 +1071,7 @@ export async function createSaleAction(
           const product = productsById.get(item.productServiceId)!;
           return {
             name: product.name,
-            category: product.category,
+            category: product.category?.name ?? null,
             quantity: item.quantity,
             unitPrice: product.unitPrice,
             subtotal: product.unitPrice * item.quantity,

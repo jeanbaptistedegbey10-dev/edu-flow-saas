@@ -221,7 +221,8 @@ async function submitRegistration(actionId, form) {
 /**
  * 5. Vérification en base de données : l'organisation doit exister et
  *    contenir les données de démonstration (élèves, cours, dépenses,
- *    paiements, comptes Secrétaire / Enseignant).
+ *    paiements, produits/services du catalogue POS, comptes Secrétaire /
+ *    Enseignant).
  */
 async function verifyDemoSeed(adminEmail) {
   const deadline = Date.now() + 30_000;
@@ -234,18 +235,28 @@ async function verifyDemoSeed(adminEmail) {
 
     if (admin?.organization) {
       const organizationId = admin.organizationId;
-      const [students, courses, expenses, payments, demoUsers] =
+            const [students, courses, expenses, payments, products, demoCategories, demoUsers] =
         await Promise.all([
           prisma.student.count({ where: { organizationId } }),
           prisma.course.count({ where: { organizationId } }),
           prisma.expense.count({ where: { organizationId } }),
           prisma.payment.count({ where: { organizationId } }),
+          prisma.productService.findMany({
+            where: { organizationId },
+            select: { name: true, categoryId: true },
+            orderBy: { name: "asc" },
+          }),
+          prisma.productCategory.findMany({
+            where: { organizationId },
+            select: { name: true },
+            orderBy: { name: "asc" },
+          }),
           prisma.user.findMany({
             where: {
               organizationId,
               role: { in: ["STAFF", "TEACHER"] },
             },
-            select: { email: true, role: true },
+            select: { email: true, role: true, firstName: true, lastName: true },
           }),
         ]);
 
@@ -255,6 +266,12 @@ async function verifyDemoSeed(adminEmail) {
         courses,
         expenses,
         payments,
+        products,
+        productNames: products.map((product) => product.name),
+        // produits démonstration sans catégorie (optionnel sur un Article)
+        productsWithoutCategory: products.filter((p) => p.categoryId === null),
+        categories: demoCategories,
+        categoryNames: demoCategories.map((c) => c.name),
         demoUsers,
       };
     }
@@ -297,8 +314,19 @@ async function main() {
   );
 
   const result = await verifyDemoSeed(adminEmail);
-  const { organization, students, courses, expenses, payments, demoUsers } =
-    result;
+    const {
+    organization,
+    students,
+    courses,
+    expenses,
+    payments,
+    products,
+    productNames,
+    productsWithoutCategory,
+    categories,
+    categoryNames,
+    demoUsers,
+  } = result;
 
   // --- Critères de réussite (jeu de démonstration complet et non vide) ---
   const problems = [];
@@ -311,8 +339,37 @@ async function main() {
   if (expenses < 3) {
     problems.push(`dépenses insuffisantes (${expenses}/3 attendues)`);
   }
+  if (products.length < 3) {
+    problems.push(
+      `produits/services du catalogue caisse insuffisants (${products.length}/6 attendus)`
+    );
+  }
+  if (productsWithoutCategory.length === 0) {
+    problems.push(`aucun produit démonstration sans catégorie (optionnel sur un Article)`);
+  }
+  if (
+    !categoryNames.includes("Livres & Fascicules") ||
+    !categoryNames.includes("Services Assermentés")
+  ) {
+    problems.push(
+      `catégories personnalisées démo manquantes (attendues : Livres & Fascicules, Services Assermentés)`
+    );
+  }
   if (demoUsers.length < 2) {
     problems.push(`comptes de démonstration absents (${demoUsers.length}/2)`);
+  }
+  // Membres d'équipe démo attendus
+  const secretaire = demoUsers.find(
+    (u) => u.firstName === "Claire" && u.lastName === "Okou"
+  );
+  const enseignant = demoUsers.find(
+    (u) => u.firstName === "Marc" && u.lastName === "Gnamien"
+  );
+  if (!secretaire || secretaire.role !== "STAFF") {
+    problems.push(`membre secrétaire Claire Okou (STAFF) absent`);
+  }
+  if (!enseignant || enseignant.role !== "TEACHER") {
+    problems.push(`membre enseignant Marc Gnamien (TEACHER) absent`);
   }
 
   if (problems.length > 0) {
@@ -325,7 +382,7 @@ async function main() {
   }
 
   console.log(
-    `✅ TEST REUSSI : L'organisation a été créée et contient ${students} élèves, ${courses} cours et ${expenses} dépenses fictives.`
+    `✅ TEST REUSSI : L'organisation a été créée et contient ${students} élèves, ${courses} cours, ${expenses} dépenses fictives et ${products.length} articles au catalogue caisse.`
   );
   console.log(`   Organisation : « ${organization.name} » (slug : ${organization.slug})`);
   console.log(`   Identifiant  : ${organization.id}`);
@@ -334,6 +391,15 @@ async function main() {
     console.log(`   Compte démo  : ${demoUser.email} (${demoUser.role}, mot de passe : demo12345)`);
   }
   console.log(`   Paiements    : ${payments} écritures fictives enregistrées`);
+    console.log(`   Catalogue POS : ${products.length} articles/services de démonstration :`);
+  for (const productName of productNames) {
+    console.log(`     • ${productName}`);
+  }
+  console.log(`   Produits sans catégorie : ${productsWithoutCategory.length}`);
+  console.log(`   Catégories personnalisées : ${categories.length}`);
+  for (const categoryName of categoryNames) {
+    console.log(`     • ${categoryName}`);
+  }
 
   if (process.env.CLEANUP === "1") {
     // Suppression en cascade (onDelete: Cascade sur l'ensemble des modèles).

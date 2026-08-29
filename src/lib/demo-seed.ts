@@ -9,9 +9,10 @@ import { prisma } from "@/lib/prisma";
 //
 // À l'inscription d'une nouvelle organisation, ce module crée un jeu de
 // données réaliste et cohérent : cours, classes, étudiants, paiements,
-// procédures voyage, logements, évaluations, assiduité, dépenses et tâches,
-// ainsi que les comptes de démonstration (Secrétaire et Enseignant —
-// l'Administrateur fondateur existe déjà au moment de l'appel).
+// procédures voyage, logements, évaluations, assiduité, dépenses, tâches,
+// le catalogue de produits/services de la caisse (POS), ainsi que les
+// comptes de démonstration (Secrétaire et Enseignant — l'Administrateur
+// fondateur existe déjà au moment de l'appel).
 //
 // Garanties :
 // - Isolation multi-tenant : tout est rattaché à l'organisation fraîchement
@@ -91,6 +92,62 @@ const DEMO_STUDENTS: Array<{
   },
 ];
 
+/** Catalogue de démonstration des catégories personnalisées du POS. */
+const DEMO_PRODUCT_CATEGORIES = ["Livres & Fascicules", "Services Assermentés"] as const;
+
+/**
+ * Catalogue de démonstration de la caisse (POS) : produits/services vendus
+ * au comptoir dès la création de l'organisation, afin que le module Caisse
+ * soit immédiatement utilisable (ventes de livres, traductions assermentées,
+ * photocopies et services annexes). Certains produits sont volontairement
+ * SANS catégorie pour illustrer le filtre « Sans catégorie ».
+ */
+const DEMO_PRODUCTS: Array<{
+  name: string;
+  /** Nom de la catégorie personnalisée (null = produit sans catégorie). */
+  categoryName: string | null;
+  unitPrice: number;
+  description: string;
+}> = [
+  {
+    name: "Livre d'apprentissage B1",
+    categoryName: "Livres & Fascicules",
+    unitPrice: 12_000,
+    description: "Manuel d'apprentissage niveau B1 (support pédagogique).",
+  },
+  {
+    name: "Livre d'exercices A1",
+    categoryName: "Livres & Fascicules",
+    unitPrice: 8_000,
+    description: "Cahier d'exercices niveau A1 (support pédagogique).",
+  },
+  {
+    name: "Traduction assermentée de diplôme",
+    categoryName: "Services Assermentés",
+    unitPrice: 25_000,
+    description: "Traduction assermentée d'un diplôme (page incluse).",
+  },
+  {
+    name: "Traduction assermentée de relevé de notes",
+    categoryName: "Services Assermentés",
+    unitPrice: 20_000,
+    description: "Traduction assermentée d'un relevé de notes.",
+  },
+  // Produits SANS catégorie — illustrent le filtre « Sans catégorie » du POS.
+  {
+    name: "Lot de photocopies / fascicule",
+    categoryName: null,
+    unitPrice: 1_500,
+    description: "Fascicule photocopié et relié (lot de 20 pages).",
+  },
+  {
+    name: "Photocopie A4 (page)",
+    categoryName: null,
+    unitPrice: 100,
+    description: "Photocopie noir & blanc par page.",
+  },
+];
+
 /** Équivalent TypeScript de l'enum Prisma DiscountType (évite l'import). */
 type DiscountTypeValue = "PERCENTAGE" | "FIXED";
 
@@ -105,12 +162,24 @@ export type DemoSeedSummary = {
     courses: number;
     expenses: number;
     payments: number;
+    /** Articles du catalogue POS créés. */
+    products: number;
+    /** Catégories personnalisées créées. */
+    categories: number;
     demoAccounts: number;
   };
 };
 
 function emptyCounts(): DemoSeedSummary["counts"] {
-  return { students: 0, courses: 0, expenses: 0, payments: 0, demoAccounts: 0 };
+  return {
+    students: 0,
+    courses: 0,
+    expenses: 0,
+    payments: 0,
+    products: 0,
+    categories: 0,
+    demoAccounts: 0,
+  };
 }
 
 /**
@@ -255,6 +324,23 @@ async function runDemoSeedTransaction(
   await tx.user.update({
     where: { id: secretary.id },
     data: { customRoleId: secretaryRole.id },
+  });
+
+  // 2bis. Deuxième rôle personnalisé de démonstration : « Professeur Principal »
+  //       (évaluations + présences), assigné à l'enseignant de démonstration.
+  const teacherRole = await tx.customRole.create({
+    data: {
+      organizationId,
+      name: "Professeur Principal",
+      description:
+        "Encadre les enseignants : évaluations, présences et cours.",
+      permissions: ["evaluations", "attendance"],
+      isSystem: true,
+    },
+  });
+  await tx.user.update({
+    where: { id: teacher.id },
+    data: { customRoleId: teacherRole.id },
   });
 
   // 3. Catalogue : trois formations réalistes.
@@ -692,11 +778,38 @@ async function runDemoSeedTransaction(
     },
   });
 
+  // 13. Catalogue de la caisse (POS) : catégories personnalisées puis
+  //     produits/services vendus au comptoir (livres, traductions assermentées,
+  //     photocopies). Certains produits sont volontairement SANS catégorie.
+  //     Sans contrainte d'unicité : aucune collision P2002 possible.
+  const demoCategoryIds = new Map<string, string>();
+  for (const categoryName of DEMO_PRODUCT_CATEGORIES) {
+    const category = await tx.productCategory.create({
+      data: { organizationId, name: categoryName },
+    });
+    demoCategoryIds.set(categoryName, category.id);
+  }
+
+  await tx.productService.createMany({
+    data: DEMO_PRODUCTS.map((product) => ({
+      organizationId,
+      name: product.name,
+      categoryId: product.categoryName
+        ? demoCategoryIds.get(product.categoryName) ?? null
+        : null,
+      unitPrice: product.unitPrice,
+      description: product.description,
+      isActive: true,
+    })),
+  });
+
   return {
     students: createdStudents.length,
     courses: 3,
     expenses: 3,
     payments: paymentCount,
+    products: DEMO_PRODUCTS.length,
+    categories: DEMO_PRODUCT_CATEGORIES.length,
     demoAccounts: 2,
   };
 }
@@ -740,12 +853,14 @@ export async function seedDemoDataForOrganization(
   const firstEmails = demoAccountEmails(
     demoMailboxToken(organization.slug, organizationId, 1)
   );
-  const [
+    const [
     existingDemoAccounts,
     existingStudents,
     existingCourses,
     existingExpenses,
     existingPayments,
+    existingProducts,
+    existingCategories,
   ] = await Promise.all([
     prisma.user.count({
       where: {
@@ -757,6 +872,8 @@ export async function seedDemoDataForOrganization(
     prisma.course.count({ where: { organizationId } }),
     prisma.expense.count({ where: { organizationId } }),
     prisma.payment.count({ where: { organizationId } }),
+    prisma.productService.count({ where: { organizationId } }),
+    prisma.productCategory.count({ where: { organizationId } }),
   ]);
 
   if (existingDemoAccounts > 0 || existingStudents > 0) {
@@ -768,6 +885,8 @@ export async function seedDemoDataForOrganization(
         courses: existingCourses,
         expenses: existingExpenses,
         payments: existingPayments,
+        products: existingProducts,
+        categories: existingCategories,
         demoAccounts: existingDemoAccounts,
       },
     };

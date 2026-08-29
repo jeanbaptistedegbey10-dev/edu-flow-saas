@@ -531,13 +531,23 @@ async function main() {
   });
 
   // --------------------------------------
+  // Catégories personnalisées du catalogue (POS)
+  // --------------------------------------
+  const booksCategory = await prisma.productCategory.create({
+    data: { organizationId: org1.id, name: "Livres & Fascicules" },
+  });
+  const servicesCategory = await prisma.productCategory.create({
+    data: { organizationId: org1.id, name: "Services Assermentés" },
+  });
+
+  // --------------------------------------
   // Product Services (POS)
   // --------------------------------------
   await prisma.productService.create({
     data: {
       organizationId: org1.id,
       name: "Manuel Anglais B1",
-      category: "BOOK",
+      categoryId: booksCategory.id,
       unitPrice: 15000,
       description: "Manuel d'anglais professionnel niveau B1",
     },
@@ -547,7 +557,7 @@ async function main() {
     data: {
       organizationId: org1.id,
       name: "Livre Allemand B1",
-      category: "BOOK",
+      categoryId: booksCategory.id,
       unitPrice: 18000,
       description: "Méthode d'allemand niveau B1",
     },
@@ -557,17 +567,18 @@ async function main() {
     data: {
       organizationId: org1.id,
       name: "Traduction de documents",
-      category: "TRANSLATION",
+      categoryId: servicesCategory.id,
       unitPrice: 5000,
       description: "Tarif par page traduite (FR/DE/EN)",
     },
   });
 
+  // Article SANS catégorie (apparaît sous le filtre « Sans catégorie » du POS).
   await prisma.productService.create({
     data: {
       organizationId: org1.id,
       name: "Photocopies (page)",
-      category: "COPY_SERVICE",
+      categoryId: null,
       unitPrice: 100,
       description: "Photocopie noir & blanc par page",
     },
@@ -577,7 +588,7 @@ async function main() {
     data: {
       organizationId: org1.id,
       name: "Certificat de langue",
-      category: "TRANSLATION",
+      categoryId: servicesCategory.id,
       unitPrice: 20000,
       description: "Délivrance de certificat de langue",
     },

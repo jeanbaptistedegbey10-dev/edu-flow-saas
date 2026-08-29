@@ -451,7 +451,7 @@ export function TravelsView({
       >
         <Button
           type="button"
-          variant={tab === "dossiers" ? "secondary" : "ghost"}
+          variant="pill"
           size="sm"
           aria-pressed={tab === "dossiers"}
           onClick={() => setTab("dossiers")}
@@ -464,7 +464,7 @@ export function TravelsView({
         </Button>
         <Button
           type="button"
-          variant={tab === "workflows" ? "secondary" : "ghost"}
+          variant="pill"
           size="sm"
           aria-pressed={tab === "workflows"}
           onClick={() => setTab("workflows")}

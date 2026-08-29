@@ -169,7 +169,7 @@ export function StudentsView({
                   <Button
                     key={filter.value}
                     type="button"
-                    variant={isActive ? "secondary" : "ghost"}
+                    variant="pill"
                     size="sm"
                     aria-pressed={isActive}
                     onClick={() => setStatusFilter(filter.value)}

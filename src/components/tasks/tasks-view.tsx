@@ -543,7 +543,7 @@ export function TasksView({
                   <Button
                     key={filter.value}
                     type="button"
-                    variant={isActive ? "secondary" : "ghost"}
+                    variant="pill"
                     size="sm"
                     aria-pressed={isActive}
                     onClick={() =>
@@ -591,7 +591,7 @@ export function TasksView({
             >
               <Button
                 type="button"
-                variant={view === "kanban" ? "secondary" : "ghost"}
+                variant="pill"
                 size="sm"
                 aria-pressed={view === "kanban"}
                 onClick={() => setView("kanban")}
@@ -601,7 +601,7 @@ export function TasksView({
               </Button>
               <Button
                 type="button"
-                variant={view === "list" ? "secondary" : "ghost"}
+                variant="pill"
                 size="sm"
                 aria-pressed={view === "list"}
                 onClick={() => setView("list")}

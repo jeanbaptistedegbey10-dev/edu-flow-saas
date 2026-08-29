@@ -4,11 +4,8 @@ import * as React from "react";
 import { useActionState, useEffect } from "react";
 import { Loader2Icon, ShieldCheckIcon } from "lucide-react";
 
-import {
-  saveCustomRoleAction,
-  type CustomRoleDTO,
-  type RoleFormState,
-} from "@/actions/roles";
+import { saveCustomRoleAction } from "@/actions/roles";
+import type { CustomRoleDTO, RoleFormState } from "@/types/roles";
 import { ROLE_PERMISSIONS } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import {

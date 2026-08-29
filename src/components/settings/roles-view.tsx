@@ -10,17 +10,22 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
   UsersRoundIcon,
+  UserPlusIcon,
 } from "lucide-react";
 
 import {
   assignCustomRoleAction,
   deleteCustomRoleAction,
-  type CustomRoleDTO,
-  type RoleUserDTO,
-  type RolesOverview,
+  deleteMemberAction,
 } from "@/actions/roles";
+import type {
+  CustomRoleDTO,
+  RoleUserDTO,
+  RolesOverview,
+} from "@/types/roles";
 import { getPermissionLabel } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/role";
+import { MemberFormDialog } from "@/components/settings/member-form-dialog";
 import { RoleFormDialog } from "@/components/settings/role-form-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,6 +64,24 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
   } | null>(null);
   const [isPending, startTransition] = React.useTransition();
 
+  // Member dialog state
+  const [memberDialogOpen, setMemberDialogOpen] = React.useState(false);
+  const [editingMember, setEditingMember] = React.useState<{
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    role: string;
+    customRoleId: string | null;
+  } | null>(null);
+  const [confirmingMemberId, setConfirmingMemberId] = React.useState<
+    string | null
+  >(null);
+  const [memberFeedback, setMemberFeedback] = React.useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+
   function openCreate() {
     setEditingRole(null);
     setFeedback(null);
@@ -86,6 +109,34 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
         roleId === "none" ? null : roleId
       );
       setFeedback(result);
+    });
+  }
+
+  // Member handlers
+  function openCreateMember() {
+    setEditingMember(null);
+    setMemberFeedback(null);
+    setMemberDialogOpen(true);
+  }
+
+  function openEditMember(user: RoleUserDTO) {
+    setEditingMember({
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role,
+      customRoleId: user.customRoleId,
+    });
+    setMemberFeedback(null);
+    setMemberDialogOpen(true);
+  }
+
+  function handleDeleteMember(userId: string) {
+    startTransition(async () => {
+      const result = await deleteMemberAction(userId);
+      setMemberFeedback(result);
+      setConfirmingMemberId(null);
     });
   }
 
@@ -278,17 +329,47 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
         </div>
       )}
 
+      {/* Feedback pour les membres */}
+      {memberFeedback ? (
+        <div
+          role="alert"
+          className={cn(
+            "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+            memberFeedback.ok
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+              : "border-destructive/30 bg-destructive/10 text-destructive"
+          )}
+        >
+          {memberFeedback.ok ? (
+            <CheckCircle2Icon className="size-4 shrink-0" />
+          ) : (
+            <TriangleAlertIcon className="size-4 shrink-0" />
+          )}
+          <p>{memberFeedback.message}</p>
+        </div>
+      ) : null}
+
       {/* Attribution des rôles personnalisés aux membres de l'équipe */}
       <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
-        <div className="border-b px-4 py-3">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <UsersRoundIcon className="size-4 text-muted-foreground" />
-            Attribution aux utilisateurs
-          </h3>
-          <p className="text-xs text-muted-foreground">
-            Sélectionnez le rôle personnalisé de chaque membre (les
-            administrateurs ont déjà tous les accès).
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <UsersRoundIcon className="size-4 text-muted-foreground" />
+              Attribution aux utilisateurs
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Sélectionnez le rôle personnalisé de chaque membre (les
+              administrateurs ont déjà tous les accès).
+            </p>
+          </div>
+          <Button
+            onClick={openCreateMember}
+            size="sm"
+            className="bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            <UserPlusIcon className="size-4" />
+            Ajouter un membre
+          </Button>
         </div>
         <Table>
           <TableHeader>
@@ -296,13 +377,14 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
               <TableHead>Membre</TableHead>
               <TableHead>Rôle de base</TableHead>
               <TableHead>Rôle personnalisé</TableHead>
+              <TableHead className="w-[120px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {users.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={3}
+                  colSpan={4}
                   className="py-6 text-center text-sm text-muted-foreground"
                 >
                   Aucun membre éligible (comptes Secrétaire / Enseignant).
@@ -344,6 +426,63 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
                       </SelectContent>
                     </Select>
                   </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        onClick={() => openEditMember(user)}
+                        disabled={isPending}
+                        title="Modifier"
+                      >
+                        <PencilIcon className="size-3.5" />
+                      </Button>
+                      {confirmingMemberId === user.id ? (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteMember(user.id)}
+                            disabled={isPending}
+                            title="Confirmer la suppression"
+                          >
+                            {isPending ? (
+                              <Loader2Icon className="size-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2Icon className="size-3.5" />
+                            )}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8"
+                            onClick={() => setConfirmingMemberId(null)}
+                            disabled={isPending}
+                            title="Annuler"
+                          >
+                            <span className="text-xs">✕</span>
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-destructive/70 hover:text-destructive"
+                          onClick={() => setConfirmingMemberId(user.id)}
+                          disabled={isPending}
+                          title="Supprimer"
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))
             )}
@@ -357,6 +496,15 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         role={editingRole}
+      />
+
+      {/* Dialogue ajout / édition d'un membre */}
+      <MemberFormDialog
+        key={editingMember?.id ?? "new-member"}
+        open={memberDialogOpen}
+        onOpenChange={setMemberDialogOpen}
+        member={editingMember}
+        roles={roles}
       />
     </div>
   );

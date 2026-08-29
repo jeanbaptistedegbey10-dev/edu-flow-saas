@@ -91,12 +91,6 @@ enum AttendanceStatus {
   EXCUSED
 }
 
-enum ProductCategory {
-  BOOK
-  TRANSLATION
-  COPY_SERVICE
-}
-
 enum SaleStatus {
   COMPLETED
   PENDING
@@ -171,6 +165,7 @@ model Organization {
   workflows        Workflow[]
   workflowStages   WorkflowStage[]
   productServices  ProductService[]
+  productCategories ProductCategory[]
   sales            Sale[]
   attendances      Attendance[]
   courseLogs       CourseLog[]
@@ -563,18 +558,42 @@ model Payroll {
 // --------------------------------------
 
 model ProductService {
-  id             String          @id @default(cuid())
+  id             String           @id @default(cuid())
   organizationId String
   name           String
-  category       ProductCategory @default(BOOK)
+  /// Catégorie personnalisée (facultative) : un produit peut exister sans
+  /// catégorie et apparaît alors sous le filtre « Sans catégorie » du POS.
+  categoryId     String?
   unitPrice      Float
   description    String?
-  isActive       Boolean         @default(true)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     ProductCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   saleItems    SaleItem[]
+
+  @@index([organizationId])
+  @@index([categoryId])
+}
+
+/// Catégorie de produits/services créée par l'organisation (dynamique :
+/// l'utilisateur ajoute, renomme ou supprime ses propres catégories — aucune
+/// catégorie système figée). La suppression d'une catégorie rend simplement
+/// ses produits « sans catégorie » (`onDelete: SetNull`).
+model ProductCategory {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products     ProductService[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
 }
 
 model Sale {

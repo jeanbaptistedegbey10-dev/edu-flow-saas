@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import Google from "next-auth/providers/google";
 
 import { prisma } from "@/lib/prisma";
 
@@ -109,6 +110,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         };
       },
     }),
+    Google({
+      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      allowDangerousEmailAccountLinking: true,
+    }),
   ],
 
   callbacks: {
@@ -117,6 +123,38 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // est protégée par un garde-fou (`if (user)`, `if (session.user && token)`)
     // et chaque écriture emploie un défaut sûr (`?? null`) pour éviter les
     // états `undefined` dans le JWT/session.
+
+    /**
+     * Gère la connexion via OAuth (Google) :
+     * - Si l'utilisateur existe déjà (même email), on le connecte.
+     * - Sinon, on peut créer un compte (optionnel, selon la configuration).
+     * `allowDangerousEmailAccountLinking: true` permet de lier automatiquement
+     * un compte existant avec le même email.
+     */
+    async signIn({ user, account, profile }) {
+      if (account?.provider === "google" && user.email) {
+        // Vérifie si un utilisateur avec cet email existe déjà
+        const existingUser = await prisma.user.findUnique({
+          where: { email: user.email },
+        });
+
+        if (existingUser) {
+          // L'utilisateur existe : on met à jour l'avatar si nécessaire
+          if (!existingUser.avatarUrl && user.image) {
+            await prisma.user.update({
+              where: { id: existingUser.id },
+              data: { avatarUrl: user.image },
+            });
+          }
+          return true; // Autorise la connexion
+        }
+
+        // Aucun compte existant : on refuse la connexion Google
+        // (l'utilisateur doit d'abord s'inscrire via /register)
+        return false;
+      }
+      return true;
+    },
 
     /**
      * Au moment de la connexion (`user` présent), copie les informations

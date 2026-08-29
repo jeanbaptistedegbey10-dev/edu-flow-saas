@@ -250,9 +250,10 @@ function AddDocumentForm({
         <div className="flex gap-1 rounded-md bg-muted/60 p-1">
           <Button
             type="button"
-            variant={mode === "link" ? "secondary" : "ghost"}
+            variant="pill"
             size="sm"
             className="flex-1"
+            aria-pressed={mode === "link"}
             onClick={() => setMode("link")}
           >
             <PaperclipIcon className="size-4" />
@@ -260,9 +261,10 @@ function AddDocumentForm({
           </Button>
           <Button
             type="button"
-            variant={mode === "upload" ? "secondary" : "ghost"}
+            variant="pill"
             size="sm"
             className="flex-1"
+            aria-pressed={mode === "upload"}
             onClick={() => setMode("upload")}
           >
             <UploadCloudIcon className="size-4" />
