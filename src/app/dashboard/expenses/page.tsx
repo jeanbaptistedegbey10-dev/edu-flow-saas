@@ -1,4 +1,4 @@
-import { getExpenses } from "@/actions/expenses";
+import { getExpenses, getStaffMembers } from "@/actions/expenses";
 import { ExpensesView } from "@/components/expenses/expenses-view";
 
 export const metadata = {
@@ -8,7 +8,12 @@ export const metadata = {
 };
 
 export default async function ExpensesPage() {
-  const expenses = await getExpenses();
+  // Requêtes indépendantes exécutées en parallèle : les dépenses et les
+  // membres actifs (bénéficiaires potentiels des versements de salaire).
+  const [expenses, members] = await Promise.all([
+    getExpenses(),
+    getStaffMembers(),
+  ]);
 
-  return <ExpensesView expenses={expenses} />;
+  return <ExpensesView expenses={expenses} members={members} />;
 }

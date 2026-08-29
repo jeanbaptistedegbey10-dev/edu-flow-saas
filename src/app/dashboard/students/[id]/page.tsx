@@ -12,6 +12,10 @@ import {
   WalletIcon,
 } from "lucide-react";
 
+import {
+  getStudentAttendanceHistory,
+  type StudentAttendanceEntryDTO,
+} from "@/actions/attendance";
 import { getStudentDetail } from "@/actions/students";
 import { getStudentAcademicRecord } from "@/actions/evaluations";
 import { getCurrentOrganizationProfile } from "@/actions/payments";
@@ -19,6 +23,7 @@ import {
   getDocumentsByOwner,
 } from "@/actions/documents";
 import { DocumentsTab } from "@/components/documents/documents-tab";
+import { PaymentReceiptButton } from "@/components/payments/payment-receipt-button";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -30,6 +35,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { StudentAcademicTab } from "@/components/students/student-academic-tab";
+import { StudentAttendanceTab } from "@/components/students/student-attendance-tab";
 import {
   getPaymentMethodLabel,
   getPaymentStatusBadgeClass,
@@ -109,15 +115,19 @@ export default async function StudentDetailPage({
   let academicRecord;
   let organization;
   let documents;
+  let attendanceEntries: StudentAttendanceEntryDTO[] = [];
 
   try {
-    [student, academicRecord, organization, documents] = await Promise.all([
-      getStudentDetail(id),
-      getStudentAcademicRecord(id),
-      getCurrentOrganizationProfile(),
-      // Pièces jointes rattachées à l'étudiant (isolation multi-tenant).
-      getDocumentsByOwner({ studentId: id }),
-    ]);
+    [student, academicRecord, organization, documents, attendanceEntries] =
+      await Promise.all([
+        getStudentDetail(id),
+        getStudentAcademicRecord(id),
+        getCurrentOrganizationProfile(),
+        // Pièces jointes rattachées à l'étudiant (isolation multi-tenant).
+        getDocumentsByOwner({ studentId: id }),
+        // Historique des émargements (onglet « Assiduité »).
+        getStudentAttendanceHistory(id),
+      ]);
   } catch {
     notFound();
   }
@@ -187,6 +197,7 @@ export default async function StudentDetailPage({
       <Tabs defaultValue="overview" className="gap-4">
         <TabsList>
           <TabsTrigger value="overview">Vue d’ensemble</TabsTrigger>
+          <TabsTrigger value="attendance">Assiduité</TabsTrigger>
           <TabsTrigger value="academics">Évaluations & Notes</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
@@ -292,6 +303,7 @@ export default async function StudentDetailPage({
                       <TableHead>Moyen</TableHead>
                       <TableHead>Référence</TableHead>
                       <TableHead>Statut</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -322,6 +334,18 @@ export default async function StudentDetailPage({
                             {getPaymentStatusLabel(payment.status as PaymentStatus)}
                           </span>
                         </TableCell>
+                        <TableCell className="text-right">
+                          <PaymentReceiptButton
+                            payment={payment}
+                            student={{
+                              id: student.id,
+                              studentCode: student.studentCode,
+                              firstName: student.firstName,
+                              lastName: student.lastName,
+                            }}
+                            organization={organization}
+                          />
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -331,7 +355,12 @@ export default async function StudentDetailPage({
           </div>
         </TabsContent>
 
-        {/* Onglet 2 : évaluations internes, progression et bulletins */}
+        {/* Onglet 2 : assiduité (présences / absences) */}
+        <TabsContent value="attendance" className="mt-2">
+          <StudentAttendanceTab entries={attendanceEntries} />
+        </TabsContent>
+
+        {/* Onglet 3 : évaluations internes, progression et bulletins */}
         <TabsContent value="academics" className="mt-2">
           <StudentAcademicTab
             record={academicRecord}
@@ -343,7 +372,7 @@ export default async function StudentDetailPage({
           />
         </TabsContent>
 
-        {/* Onglet 3 : pièces jointes (liens externes / stockage cloud) */}
+        {/* Onglet 4 : pièces jointes (liens externes / stockage cloud) */}
         <TabsContent value="documents" className="mt-2">
           <DocumentsTab
             owner={{ studentId: student.id }}

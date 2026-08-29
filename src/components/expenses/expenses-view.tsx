@@ -3,7 +3,11 @@
 import * as React from "react";
 import { ReceiptTextIcon, SearchIcon, WalletIcon } from "lucide-react";
 
-import { deleteExpenseAction, type ExpenseDTO } from "@/actions/expenses";
+import {
+  deleteExpenseAction,
+  type ExpenseDTO,
+  type StaffMemberDTO,
+} from "@/actions/expenses";
 import { AddExpenseDialog } from "@/components/expenses/add-expense-dialog";
 import { EditExpenseDialog } from "@/components/expenses/edit-expense-dialog";
 import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
@@ -53,7 +57,14 @@ function formatAmount(amount: number): string {
   return `${numberFormatter.format(amount)} FCFA`;
 }
 
-export function ExpensesView({ expenses }: { expenses: ExpenseDTO[] }) {
+export function ExpensesView({
+  expenses,
+  members,
+}: {
+  expenses: ExpenseDTO[];
+  /** Membres actifs de l'organisation (bénéficiaires potentiels de salaires). */
+  members: StaffMemberDTO[];
+}) {
   const [search, setSearch] = React.useState("");
   const [editingExpense, setEditingExpense] =
     React.useState<ExpenseDTO | null>(null);
@@ -68,6 +79,11 @@ export function ExpensesView({ expenses }: { expenses: ExpenseDTO[] }) {
         expense.title.toLowerCase().includes(query) ||
         expense.category.toLowerCase().includes(query) ||
         (expense.notes?.toLowerCase().includes(query) ?? false) ||
+        (expense.recipient
+          ? `${expense.recipient.firstName} ${expense.recipient.lastName}`
+              .toLowerCase()
+              .includes(query)
+          : false) ||
         `${expense.createdBy.firstName} ${expense.createdBy.lastName}`
           .toLowerCase()
           .includes(query)
@@ -93,7 +109,7 @@ export function ExpensesView({ expenses }: { expenses: ExpenseDTO[] }) {
             Suivez et gérez les dépenses de votre organisation.
           </p>
         </div>
-        <AddExpenseDialog />
+        <AddExpenseDialog members={members} />
       </div>
 
       {/* Cartes de synthèse */}
@@ -167,6 +183,7 @@ export function ExpensesView({ expenses }: { expenses: ExpenseDTO[] }) {
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Intitulé</TableHead>
                   <TableHead>Catégorie</TableHead>
+                  <TableHead>Bénéficiaire</TableHead>
                   <TableHead>Montant</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Enregistré par</TableHead>
@@ -194,6 +211,11 @@ export function ExpensesView({ expenses }: { expenses: ExpenseDTO[] }) {
                       >
                         {expense.category}
                       </span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {expense.recipient
+                        ? `${expense.recipient.firstName} ${expense.recipient.lastName}`
+                        : "—"}
                     </TableCell>
                     <TableCell className="font-medium">
                       {formatAmount(expense.amount)}
@@ -248,6 +270,7 @@ export function ExpensesView({ expenses }: { expenses: ExpenseDTO[] }) {
       {/* Modale d'édition pré-remplie */}
       <EditExpenseDialog
         expense={editingExpense}
+        members={members}
         open={editingExpense !== null}
         onOpenChange={(open) => {
           if (!open) setEditingExpense(null);

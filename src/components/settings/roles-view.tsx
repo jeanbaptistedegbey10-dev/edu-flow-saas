@@ -3,6 +3,7 @@
 import * as React from "react";
 import {
   CheckCircle2Icon,
+  BanknoteIcon,
   Loader2Icon,
   PencilIcon,
   PlusIcon,
@@ -26,6 +27,10 @@ import type {
 import { getPermissionLabel } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/role";
 import { MemberFormDialog } from "@/components/settings/member-form-dialog";
+import {
+  MemberSalaryHistoryDialog,
+  type SalaryHistoryMember,
+} from "@/components/settings/member-salary-history-dialog";
 import { RoleFormDialog } from "@/components/settings/role-form-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,6 +86,10 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
     ok: boolean;
     message: string;
   } | null>(null);
+
+  // Volet « Historique des versements / Salaires » d'un membre.
+  const [salaryHistoryMember, setSalaryHistoryMember] =
+    React.useState<SalaryHistoryMember | null>(null);
 
   function openCreate() {
     setEditingRole(null);
@@ -377,7 +386,7 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
               <TableHead>Membre</TableHead>
               <TableHead>Rôle de base</TableHead>
               <TableHead>Rôle personnalisé</TableHead>
-              <TableHead className="w-[120px]">Actions</TableHead>
+              <TableHead className="w-[150px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -428,6 +437,22 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        onClick={() =>
+                          setSalaryHistoryMember({
+                            id: user.id,
+                            firstName: user.firstName,
+                            lastName: user.lastName,
+                          })
+                        }
+                        title="Historique des versements / Salaires"
+                      >
+                        <BanknoteIcon className="size-3.5" />
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
@@ -505,6 +530,15 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
         onOpenChange={setMemberDialogOpen}
         member={editingMember}
         roles={roles}
+      />
+
+      {/* Volet historique des versements / salaires d'un membre */}
+      <MemberSalaryHistoryDialog
+        member={salaryHistoryMember}
+        open={salaryHistoryMember !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setSalaryHistoryMember(null);
+        }}
       />
     </div>
   );

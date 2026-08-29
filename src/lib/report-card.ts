@@ -111,7 +111,35 @@ export type InternalAttestationInput = {
   overallAverage: number | null;
   /** Taux de validation des modules notés, en pourcentage (null si aucune note). */
   validationRate: number | null;
+  /**
+   * Message principal rédigé par l'administration avant impression. Si absent
+   * ou vide, le texte par défaut (`buildDefaultAttestationMessage`) est
+   * utilisé.
+   */
+  customMessage?: string;
 };
+
+/**
+ * Message par défaut du corps de l'attestation de formation : phrase
+ * d'attestation d'inscription / de suivi, réutilisable telle quelle dans la
+ * zone de texte éditable avant impression.
+ */
+export function buildDefaultAttestationMessage(
+  data: Pick<
+    InternalAttestationInput,
+    "studentName" | "studentCode" | "className" | "courseTitle"
+  >,
+  organizationName: string
+): string {
+  const formation = data.courseTitle
+    ? `la formation ${data.courseTitle}`
+    : "sa formation de langues";
+  const cohort = data.className
+    ? ` au sein de la cohorte « ${data.className} »`
+    : "";
+
+  return `La direction de ${organizationName} atteste que ${data.studentName} (code étudiant ${data.studentCode}) est inscrit·e et suit ${formation}${cohort} dispensée par l'établissement.`;
+}
 
 // --------------------------------------
 // Helpers métier : mentions & appréciations
@@ -198,6 +226,12 @@ const BASE_STYLES = `
   }
   @page { size: A4; margin: 12mm; }
   @media print {
+    /* Marges @page réduites à l'impression : la zone de marge étant trop
+       étroite pour les accueillir, les navigateurs (Chrome, Edge, Safari,
+       Firefox) masquent leurs en-têtes/pieds natifs (date du jour, titre de
+       la page, URL du document) en haut et en bas de chaque feuille. */
+    @page { margin: 8mm; }
+    html, body { width: 100%; }
     body { background: #ffffff; }
     .sheet { margin: 0 auto; border: none; border-radius: 0; max-width: none; padding: 0; }
   }
@@ -217,26 +251,28 @@ const BASE_STYLES = `
     gap: 14px;
     min-width: 0;
   }
+  /* Logo : aucun conteneur carré rigide — le visuel conserve son ratio
+     d'aspect d'origine (object-contain) pour s'adapter aux formats
+     rectangulaires comme carrés, sans compression ni déformation.
+     Dimensions généreuses (84px de haut, 260px de large) pour une
+     visibilité optimale des logos rectangulaires (bandeaux, enseignes). */
   .logo-box {
-    width: 64px;
-    height: 64px;
-    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    background: #f9fafb;
+    flex-shrink: 0;
+    min-width: 64px;
   }
   .logo-box .logo-img {
-    width: 100%;
-    height: 100%;
+    max-height: 84px;
+    max-width: 260px;
+    width: auto;
+    height: auto;
     object-fit: contain;
   }
   .logo-box .logo-fallback {
-    width: 100%;
-    height: 100%;
+    width: 64px;
+    height: 64px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -244,6 +280,7 @@ const BASE_STYLES = `
     font-weight: 700;
     color: #3730a3;
     background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+    border-radius: 12px;
   }
   .org-info h1 {
     margin: 0 0 4px;
@@ -514,6 +551,14 @@ function buildOrganizationHeader(
     organization.website
       ? `Site web : ${escapeHtml(organization.website)}`
       : null,
+    // Mentions légales reprises dans l'en-tête officiel (NIF / RCCM),
+    // en complément du pied de page légal.
+    organization.rccm
+      ? `N° RCCM : ${escapeHtml(organization.rccm)}`
+      : null,
+    organization.ifu
+      ? `N° IFU / NIF : ${escapeHtml(organization.ifu)}`
+      : null,
   ].filter(Boolean);
 
   return `<header class="doc-header">
@@ -662,11 +707,18 @@ export function buildReportCardDocument(
   const gradeRows: string[] = [];
 
   for (const evaluation of byEvaluation.values()) {
+    // Exclusion des examens non notés : une session dont aucun module ne
+    // porte de note (examen programmé mais non évalué) n'apparaît pas sur
+    // le bulletin et n'impacte pas les moyennes.
+    const gradedRows = evaluation.rows.filter((row) => row.score !== null);
+
+    if (gradedRows.length === 0) continue;
+
     gradeRows.push(`<tr class="evaluation-row">
           <td colspan="6">${escapeHtml(evaluation.title)} — ${dateFormatter.format(evaluation.date)}</td>
         </tr>`);
 
-    for (const row of evaluation.rows) {
+    for (const row of gradedRows) {
       const normalized =
         row.score === null || row.maxScore <= 0
           ? null
@@ -799,6 +851,14 @@ export function buildInternalAttestationDocument(
 ): string {
   const docNumber = formatAttestationNumber(data.studentCode, new Date());
 
+  // Message principal : texte rédigé par l'administration si fourni, sinon
+  // la formulation par défaut. Rendu avec `white-space: pre-wrap` pour
+  // conserver les sauts de ligne saisis dans la zone d'édition.
+  const mainMessage =
+    data.customMessage && data.customMessage.trim().length > 0
+      ? data.customMessage.trim()
+      : buildDefaultAttestationMessage(data, organization.name);
+
   const resultsParagraph =
     data.overallAverage !== null
       ? `<p>Au terme des évaluations internes organisées par l'établissement, l'étudiant·e obtient une <strong>moyenne générale de ${numberFormatter.format(data.overallAverage)} / 100</strong>${data.validationRate !== null ? `, avec un taux de validation des modules de <strong>${numberFormatter.format(data.validationRate)} %</strong>` : ""}. Mention : <strong>${escapeHtml(getGradeMention(data.overallAverage))}</strong>.</p>`
@@ -819,7 +879,7 @@ export function buildInternalAttestationDocument(
     ${buildStudentDetails(data)}
 
     <div class="attestation-body">
-      <p>La direction de <strong>${escapeHtml(organization.name)}</strong> atteste que <strong>${escapeHtml(data.studentName)}</strong> (code étudiant <span style="font-family: Consolas, 'Courier New', monospace;">${escapeHtml(data.studentCode)}</span>) est inscrit·e et suit la formation <strong>${data.courseTitle ? escapeHtml(data.courseTitle) : "de langues"}${data.className ? ` au sein de la cohorte « ${escapeHtml(data.className)} »` : ""}</strong> dispensée par l'établissement.</p>
+      <p style="white-space: pre-wrap;">${escapeHtml(mainMessage)}</p>
       ${resultsParagraph}
       <p>La présente attestation est délivrée à l'intéressé·e pour servir et valoir ce que de droit, à la demande de celui-ci / celle-ci, afin de justifier de son parcours pédagogique auprès de tout organisme compétent.</p>
     </div>

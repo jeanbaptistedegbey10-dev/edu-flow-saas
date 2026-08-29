@@ -112,6 +112,12 @@ const BASE_STYLES = `
   .sheet.narrow { max-width: 560px; }
   @page { size: A4; margin: 12mm; }
   @media print {
+    /* Marges @page réduites à l'impression : la zone de marge étant trop
+       étroite pour les accueillir, les navigateurs (Chrome, Edge, Safari,
+       Firefox) masquent leurs en-têtes/pieds natifs (date du jour, titre de
+       la page, URL du document) en haut et en bas de chaque feuille. */
+    @page { margin: 8mm; }
+    html, body { width: 100%; }
     body { background: #ffffff; }
     .sheet { margin: 0 auto; border: none; border-radius: 0; max-width: none; padding: 0; }
   }
@@ -131,26 +137,28 @@ const BASE_STYLES = `
     gap: 14px;
     min-width: 0;
   }
+  /* Logo : aucun conteneur carré rigide — le visuel conserve son ratio
+     d'aspect d'origine (object-contain) pour s'adapter aux formats
+     rectangulaires comme carrés, sans compression ni déformation.
+     Dimensions généreuses (84px de haut, 260px de large) pour une
+     visibilité optimale des logos rectangulaires (bandeaux, enseignes). */
   .logo-box {
-    width: 64px;
-    height: 64px;
-    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    background: #f9fafb;
+    flex-shrink: 0;
+    min-width: 64px;
   }
   .logo-box .logo-img {
-    width: 100%;
-    height: 100%;
+    max-height: 84px;
+    max-width: 260px;
+    width: auto;
+    height: auto;
     object-fit: contain;
   }
   .logo-box .logo-fallback {
-    width: 100%;
-    height: 100%;
+    width: 64px;
+    height: 64px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -158,6 +166,7 @@ const BASE_STYLES = `
     font-weight: 700;
     color: #3730a3;
     background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+    border-radius: 12px;
   }
   .org-info h1 {
     margin: 0 0 4px;

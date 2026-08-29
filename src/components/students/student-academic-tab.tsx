@@ -10,15 +10,6 @@ import {
   ScrollTextIcon,
   TrendingUpIcon,
 } from "lucide-react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 import type {
   StudentAcademicRecordDTO,
@@ -36,8 +27,10 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { StudentPerformanceChart } from "@/components/students/student-performance-chart";
 import {
   buildDefaultAppreciation,
+  buildDefaultAttestationMessage,
   buildInternalAttestationDocument,
   buildReportCardDocument,
   getGradeMention,
@@ -242,30 +235,22 @@ export function StudentAcademicTab({
 }) {
   const hasGrades = record.stats.overallAverage !== null;
 
-  // Données du graphique : évolution de la moyenne (/100) au fil des examens.
-  const chartData = React.useMemo(
-    () =>
-      record.evaluations
-        .filter((evaluation) => evaluation.averageOn100 !== null)
-        .map((evaluation) => ({
-          label: evaluation.title,
-          moyenne: evaluation.averageOn100 as number,
-        })),
-    [record.evaluations]
-  );
-
-  // Lignes aplaties pour le bulletin de notes.
+  // Lignes aplaties pour le bulletin de notes. Seuls les examens réellement
+  // notés y figurent : un module programmé dont la note n'a pas été saisie
+  // (score null) est exclu du bulletin et n'impacte pas les moyennes.
   const reportRows: ReportCardModuleRow[] = React.useMemo(
     () =>
       record.evaluations.flatMap((evaluation) =>
-        evaluation.modules.map((moduleItem) => ({
-          evaluationTitle: evaluation.title,
-          evaluationDate: evaluation.date,
-          moduleName: moduleItem.moduleName,
-          score: moduleItem.score,
-          maxScore: moduleItem.maxScore,
-          passingScore: moduleItem.passingScore,
-        }))
+        evaluation.modules
+          .filter((moduleItem) => moduleItem.score !== null)
+          .map((moduleItem) => ({
+            evaluationTitle: evaluation.title,
+            evaluationDate: evaluation.date,
+            moduleName: moduleItem.moduleName,
+            score: moduleItem.score,
+            maxScore: moduleItem.maxScore,
+            passingScore: moduleItem.passingScore,
+          }))
       ),
     [record.evaluations]
   );
@@ -319,6 +304,18 @@ export function StudentAcademicTab({
     React.useState<string | null>(null);
   const appreciation = appreciationDraft ?? defaultAppreciation;
 
+  // Message de l'attestation éditable avant impression (attestation
+  // « sur-mesure »). État dérivé : brouillon saisi par l'administration
+  // (`null` tant qu'il n'a rien modifié), sinon texte par défaut.
+  const defaultAttestationMessage = React.useMemo(
+    () => buildDefaultAttestationMessage(attestationInput, organization.name),
+    [attestationInput, organization.name]
+  );
+  const [attestationMessageDraft, setAttestationMessageDraft] =
+    React.useState<string | null>(null);
+  const attestationMessage =
+    attestationMessageDraft ?? defaultAttestationMessage;
+
   // Documents HTML mémoïsés (génération paresseuse à l'ouverture uniquement).
   const bulletinHtml = React.useMemo(
     () =>
@@ -330,8 +327,12 @@ export function StudentAcademicTab({
   );
 
   const attestationHtml = React.useMemo(
-    () => buildInternalAttestationDocument(attestationInput, organization),
-    [attestationInput, organization]
+    () =>
+      buildInternalAttestationDocument(
+        { ...attestationInput, customMessage: attestationMessage },
+        organization
+      ),
+    [attestationInput, attestationMessage, organization]
   );
 
   // Modales de documents.
@@ -406,74 +407,19 @@ export function StudentAcademicTab({
         </h3>
         <p className="mb-3 text-xs text-muted-foreground">
           Moyenne de l’étudiant par session, normalisée sur 100 (pondérée par
-          les barèmes).
+          les barèmes). La ligne pointillée orange matérialise le seuil de
+          validation (60/100) ; survolez un point pour voir les modules
+          validés de la session.
         </p>
 
-        {chartData.length >= 2 ? (
-          <div className="h-[280px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={chartData}
-                margin={{ top: 12, right: 24, bottom: 8, left: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 11 }}
-                  interval={0}
-                  angle={-14}
-                  textAnchor="end"
-                  height={56}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  tick={{ fontSize: 11 }}
-                  width={36}
-                />
-                <Tooltip
-                  formatter={(value) => [
-                    `${numberFormatter.format(Number(value))} / 100`,
-                    "Moyenne",
-                  ]}
-                  contentStyle={{
-                    borderRadius: 8,
-                    border: "1px solid var(--border)",
-                    background: "var(--card)",
-                    color: "var(--card-foreground)",
-                    fontSize: 12,
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="moyenne"
-                  name="Moyenne /100"
-                  stroke="#4f46e5"
-                  strokeWidth={2}
-                  dot={{ r: 4, fill: "#4f46e5" }}
-                  activeDot={{ r: 6 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ) : chartData.length === 1 ? (
-          <p className="rounded-md bg-muted/60 px-3 py-6 text-center text-sm text-muted-foreground">
-            Une seule évaluation notée pour l’instant (moyenne :{" "}
-            {numberFormatter.format(chartData[0].moyenne)} / 100). La courbe
-            apparaîtra dès la deuxième session notée.
-          </p>
-        ) : (
-          <p className="rounded-md bg-muted/60 px-3 py-6 text-center text-sm text-muted-foreground">
-            Aucune note enregistrée pour cet étudiant. La courbe de progression
-            apparaîtra après la saisie des premières notes.
-          </p>
-        )}
+        <StudentPerformanceChart evaluations={record.evaluations} />
       </section>
 
       {/* Boutons de documents officiels */}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           onClick={() => setBulletinOpen(true)}
-          disabled={!hasGrades && reportRows.length === 0}
+          disabled={reportRows.length === 0}
         >
           <FileDownIcon data-icon="inline-start" />
           Télécharger Bulletin de Notes
@@ -572,13 +518,35 @@ export function StudentAcademicTab({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="rounded-md border bg-muted/40 p-3">
-            <iframe
-              title="Aperçu de l'attestation interne"
-              srcDoc={attestationHtml}
-              onLoad={handlePreviewLoad}
-              className="h-[420px] w-full rounded-md border bg-white"
-            />
+          <div className="grid gap-3">
+            <div className="grid gap-2">
+              <Label htmlFor="attestation-message">
+                Message de l’attestation (modifiable)
+              </Label>
+              <Textarea
+                id="attestation-message"
+                value={attestationMessage}
+                onChange={(event) =>
+                  setAttestationMessageDraft(event.target.value)
+                }
+                rows={4}
+                maxLength={2000}
+              />
+              <p className="text-xs text-muted-foreground">
+                Personnalisez le texte par défaut de l’attestation avant
+                impression. Le champ est pré-rempli avec la formulation
+                officielle de l’établissement.
+              </p>
+            </div>
+
+            <div className="rounded-md border bg-muted/40 p-3">
+              <iframe
+                title="Aperçu de l'attestation interne"
+                srcDoc={attestationHtml}
+                onLoad={handlePreviewLoad}
+                className="h-[420px] w-full rounded-md border bg-white"
+              />
+            </div>
           </div>
 
           <DialogFooter>

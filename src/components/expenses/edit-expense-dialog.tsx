@@ -8,8 +8,9 @@ import {
   updateExpenseAction,
   type ExpenseDTO,
   type ExpenseFormState,
+  type StaffMemberDTO,
 } from "@/actions/expenses";
-import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
+import { EXPENSE_CATEGORIES, isSalaryCategory } from "@/lib/expense-categories";
 import {
   Select,
   SelectContent,
@@ -48,10 +49,13 @@ function toDateInputValue(date: Date): string {
 
 export function EditExpenseDialog({
   expense,
+  members,
   open,
   onOpenChange,
 }: {
   expense: ExpenseDTO | null;
+  /** Membres actifs de l'organisation (bénéficiaires potentiels de salaires). */
+  members: StaffMemberDTO[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -69,6 +73,15 @@ export function EditExpenseDialog({
   );
 
   const fieldErrors = state.fieldErrors ?? {};
+
+  // Catégorie suivie : pilote l'affichage du menu « Bénéficiaire », requis
+  // uniquement pour les versements de salaire / rémunération.
+  const [category, setCategory] = React.useState(expense?.category ?? "");
+
+  // Réinitialise la catégorie suivie lorsque la dépense éditée change.
+  React.useEffect(() => {
+    setCategory(expense?.category ?? "");
+  }, [expense]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -110,7 +123,11 @@ export function EditExpenseDialog({
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="edit-category">Catégorie *</Label>
-                <Select name="category" defaultValue={expense.category}>
+                <Select
+                  name="category"
+                  defaultValue={expense.category}
+                  onValueChange={setCategory}
+                >
                   <SelectTrigger
                     id="edit-category"
                     className="w-full"
@@ -142,6 +159,36 @@ export function EditExpenseDialog({
                 <FieldError message={fieldErrors.expenseDate} />
               </div>
             </div>
+
+            {isSalaryCategory(category) ? (
+              <div className="grid gap-2">
+                <Label htmlFor="edit-recipientId">Membre bénéficiaire *</Label>
+                <Select
+                  name="recipientId"
+                  defaultValue={expense.recipient?.id ?? undefined}
+                >
+                  <SelectTrigger
+                    id="edit-recipientId"
+                    className="w-full"
+                    aria-invalid={Boolean(fieldErrors.recipientId)}
+                  >
+                    <SelectValue placeholder="Sélectionner le membre" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {members.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.firstName} {member.lastName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Le versement sera rattaché à ce membre dans son historique
+                  des salaires.
+                </p>
+                <FieldError message={fieldErrors.recipientId} />
+              </div>
+            ) : null}
 
             <div className="grid gap-2">
               <Label htmlFor="edit-amount">Montant (FCFA) *</Label>

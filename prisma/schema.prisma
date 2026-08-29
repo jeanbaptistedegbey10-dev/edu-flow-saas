@@ -195,6 +195,8 @@ model User {
   taughtCourses   Course[]          @relation("TeacherCourses")
   taughtClasses   Class[]           @relation("TeacherClasses")
   createdExpenses Expense[]         @relation("ExpenseCreator")
+  /// Versements reçus (dépenses de salaire dont ce membre est bénéficiaire).
+  receivedExpenses Expense[]        @relation("ExpenseRecipient")
   payrolls        Payroll[]
   assignedTasks   Task[]            @relation("TaskAssignee")
   createdTasks    Task[]            @relation("TaskCreator")
@@ -533,6 +535,12 @@ model Expense {
   receiptUrl     String?
   notes          String?
   createdAt      DateTime @default(now())
+
+  /// Membre bénéficiaire du versement (optionnel) : utilisé notamment pour
+  /// les dépenses de catégorie « Salaires » afin de rattacher chaque versement
+  /// à un membre de l'équipe (User) et d'en conserver l'historique.
+  recipientId String?
+  recipient   User?    @relation("ExpenseRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdBy    User         @relation("ExpenseCreator", fields: [createdById], references: [id])

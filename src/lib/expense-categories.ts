@@ -20,3 +20,15 @@ export const EXPENSE_CATEGORIES = [
 
 /** Type union des catégories valides (dérivé de la liste). */
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+/**
+ * Catégories correspondant à un versement de salaire / rémunération d'un
+ * membre de l'équipe. Pour ces catégories, le formulaire de dépense affiche
+ * un menu déroulant permettant de désigner le bénéficiaire du versement.
+ */
+export const SALARY_CATEGORIES = ["Salaires"] as const;
+
+/** Indique si la catégorie donnée est un versement de salaire / rémunération. */
+export function isSalaryCategory(category: string): boolean {
+  return (SALARY_CATEGORIES as readonly string[]).includes(category);
+}

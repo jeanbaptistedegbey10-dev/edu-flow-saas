@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isSalaryCategory, SALARY_CATEGORIES } from "@/lib/expense-categories";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
 
 // --------------------------------------
@@ -24,6 +25,23 @@ export type ExpenseDTO = {
     firstName: string;
     lastName: string;
   };
+  /**
+   * Bénéficiaire du versement (membre de l'équipe) pour les dépenses de
+   * type salaire / rémunération ; `null` pour une dépense sans bénéficiaire.
+   */
+  recipient: {
+    id: string;
+    firstName: string;
+    lastName: string;
+  } | null;
+};
+
+/** Membre de l'organisation (compte utilisateur actif) éligible à un versement. */
+export type StaffMemberDTO = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  role: string;
 };
 
 export type ExpenseFormField =
@@ -31,7 +49,8 @@ export type ExpenseFormField =
   | "category"
   | "amount"
   | "expenseDate"
-  | "notes";
+  | "notes"
+  | "recipientId";
 
 export type ExpenseFormState = {
   status: "idle" | "success" | "error";
@@ -63,6 +82,8 @@ type ParsedExpenseInput =
         amount: number;
         expenseDate: Date;
         notes: string | null;
+        /** Identifiant du membre bénéficiaire (salaires), sinon `null`. */
+        recipientId: string | null;
       };
     }
   | { ok: false; fieldErrors: Partial<Record<ExpenseFormField, string>> };
@@ -73,6 +94,7 @@ function parseExpenseForm(formData: FormData): ParsedExpenseInput {
   const rawAmount = String(formData.get("amount") ?? "").trim();
   const rawExpenseDate = String(formData.get("expenseDate") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
+  const rawRecipientId = String(formData.get("recipientId") ?? "").trim();
 
   const fieldErrors: Partial<Record<ExpenseFormField, string>> = {};
 
@@ -113,6 +135,17 @@ function parseExpenseForm(formData: FormData): ParsedExpenseInput {
     fieldErrors.notes = "Les notes ne doivent pas dépasser 500 caractères.";
   }
 
+  // Bénéficiaire : optionnel pour une dépense classique, mais requis dès lors
+  // que la catégorie correspond à un versement de salaire / rémunération.
+  if (isSalaryCategory(category)) {
+    if (!rawRecipientId) {
+      fieldErrors.recipientId =
+        "Sélectionnez le membre bénéficiaire du salaire.";
+    } else if (rawRecipientId.length > 50) {
+      fieldErrors.recipientId = "Identifiant du bénéficiaire invalide.";
+    }
+  }
+
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, fieldErrors };
   }
@@ -125,6 +158,9 @@ function parseExpenseForm(formData: FormData): ParsedExpenseInput {
       amount,
       expenseDate: expenseDate as Date,
       notes: notes || null,
+      // Le bénéficiaire n'est conservé que pour les versements de salaire.
+      recipientId:
+        isSalaryCategory(category) && rawRecipientId ? rawRecipientId : null,
     },
   };
 }
@@ -155,6 +191,13 @@ export async function getExpenses(): Promise<ExpenseDTO[]> {
         notes: true,
         createdAt: true,
         createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        recipient: {
           select: {
             id: true,
             firstName: true,
@@ -205,6 +248,26 @@ export async function createExpenseAction(
     };
   }
 
+  // Le bénéficiaire éventuel doit appartenir à l'organisation active
+  // (isolation multi-tenant : impossible de rattacher un versement à un
+  // compte d'une autre organisation).
+  if (parsed.data.recipientId) {
+    const recipientExists = await prisma.user.findFirst({
+      where: { id: parsed.data.recipientId, organizationId },
+      select: { id: true },
+    });
+
+    if (!recipientExists) {
+      return {
+        status: "error",
+        message: "Veuillez corriger les champs indiqués.",
+        fieldErrors: {
+          recipientId: "Bénéficiaire introuvable dans votre organisation.",
+        },
+      };
+    }
+  }
+
   try {
     await prisma.expense.create({
       data: {
@@ -215,6 +278,7 @@ export async function createExpenseAction(
         amount: parsed.data.amount,
         expenseDate: parsed.data.expenseDate,
         notes: parsed.data.notes,
+        recipientId: parsed.data.recipientId,
       },
     });
 
@@ -279,6 +343,26 @@ export async function updateExpenseAction(
       };
     }
 
+    // Le bénéficiaire éventuel doit appartenir à l'organisation active
+    // (isolation multi-tenant). `null` détache un bénéficiaire existant
+    // (ex : changement de catégorie Salaires → Loyer).
+    if (parsed.data.recipientId) {
+      const recipientExists = await prisma.user.findFirst({
+        where: { id: parsed.data.recipientId, organizationId },
+        select: { id: true },
+      });
+
+      if (!recipientExists) {
+        return {
+          status: "error",
+          message: "Veuillez corriger les champs indiqués.",
+          fieldErrors: {
+            recipientId: "Bénéficiaire introuvable dans votre organisation.",
+          },
+        };
+      }
+    }
+
     await prisma.expense.update({
       where: { id: expenseId },
       data: {
@@ -287,6 +371,7 @@ export async function updateExpenseAction(
         amount: parsed.data.amount,
         expenseDate: parsed.data.expenseDate,
         notes: parsed.data.notes,
+        recipientId: parsed.data.recipientId,
       },
     });
 
@@ -348,5 +433,101 @@ export async function deleteExpenseAction(
       ok: false,
       message: "Une erreur est survenue lors de la suppression de la dépense.",
     };
+  }
+}
+
+// --------------------------------------
+// Salaires : membres bénéficiaires & historique des versements
+// --------------------------------------
+
+/**
+ * Liste les membres de l'organisation active (comptes utilisateurs actifs)
+ * pour alimenter le menu déroulant « Bénéficiaire » des dépenses de salaire.
+ */
+export async function getStaffMembers(): Promise<StaffMemberDTO[]> {
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    const members = await prisma.user.findMany({
+      where: { organizationId, isActive: true },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+      },
+    });
+
+    // Le rôle est un enum Prisma : converti en chaîne pour le contrat client.
+    return members.map((member) => ({
+      id: member.id,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      role: String(member.role),
+    }));
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getStaffMembers] Échec de lecture :", error);
+
+    return [];
+  }
+}
+
+/**
+ * Historique des versements de salaire d'un membre : toutes les dépenses de
+ * catégorie « Salaires » dont il est le bénéficiaire, triées par date
+ * décroissante. Utilisé par le volet « Historique des versements » de la
+ * fiche membre (Rôles & Permissions).
+ */
+export async function getMemberSalaryHistory(
+  memberId: string
+): Promise<ExpenseDTO[]> {
+  if (!memberId) {
+    return [];
+  }
+
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    return await prisma.expense.findMany({
+      where: {
+        organizationId,
+        category: { in: [...SALARY_CATEGORIES] },
+        recipientId: memberId,
+      },
+      orderBy: [{ expenseDate: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        amount: true,
+        currency: true,
+        expenseDate: true,
+        notes: true,
+        createdAt: true,
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        recipient: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getMemberSalaryHistory] Échec de lecture :", error);
+
+    return [];
   }
 }

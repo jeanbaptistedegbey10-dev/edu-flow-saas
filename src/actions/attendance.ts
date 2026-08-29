@@ -4,7 +4,11 @@ import type { AttendanceStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
+import {
+  getCurrentOrganizationId,
+  getCurrentSessionUser,
+  isNextRedirectError,
+} from "@/lib/session";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -867,5 +871,77 @@ export async function createCourseLogAction(
       message:
         "Une erreur est survenue lors de l'ajout de l'entrée au cahier de texte.",
     };
+  }
+}
+
+// --------------------------------------
+// Lecture : historique d'assiduité d'un étudiant (fiche étudiant)
+// --------------------------------------
+
+/** Entrée d'assiduité d'un étudiant, telle qu'affichée dans sa fiche. */
+export type StudentAttendanceEntryDTO = {
+  id: string;
+  date: Date;
+  status: AttendanceStatus;
+  notes: string | null;
+  /** Intitulé du cours émargé. */
+  courseTitle: string;
+  /** Classe / cohorte concernée (null si l'émargement n'est pas rattaché). */
+  className: string | null;
+};
+
+/**
+ * Récupère l'historique complet des émargements d'un étudiant (toutes
+ * classes et tous cours confondus, isolation multi-tenant), trié du plus
+ * récent au plus ancien.
+ */
+export async function getStudentAttendanceHistory(
+  studentId: string
+): Promise<StudentAttendanceEntryDTO[]> {
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    // Isolation multi-tenant : l'étudiant doit appartenir à l'organisation active.
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, organizationId },
+      select: { id: true },
+    });
+
+    if (!student) {
+      throw new Error("Étudiant introuvable dans votre organisation.");
+    }
+
+    const records = await prisma.attendance.findMany({
+      where: { studentId, organizationId },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        date: true,
+        status: true,
+        notes: true,
+        course: { select: { title: true } },
+        class: { select: { name: true } },
+      },
+    });
+
+    return records.map((record) => ({
+      id: record.id,
+      date: record.date,
+      status: record.status,
+      notes: record.notes,
+      courseTitle: record.course.title,
+      className: record.class?.name ?? null,
+    }));
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error(
+      "[getStudentAttendanceHistory] Échec de lecture :",
+      error
+    );
+
+    throw new Error(
+      "Impossible de charger l'assiduité de l'étudiant pour le moment."
+    );
   }
 }

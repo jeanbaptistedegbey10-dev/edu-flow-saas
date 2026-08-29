@@ -352,9 +352,12 @@ export function GradeSheet({
                               aria-label={`Note de ${student.firstName} ${student.lastName} — ${moduleItem.name}`}
                               aria-invalid={isBelowThreshold}
                               className={cn(
-                                "w-24 tabular-nums",
+                                // Champs immédiatement visibles : bordure
+                                // nette (`border-input`) et fond légèrement
+                                // grisé, sans attendre un survol ou un focus.
+                                "w-24 border border-input bg-muted/50 text-center tabular-nums shadow-xs dark:bg-input/30",
                                 isBelowThreshold &&
-                                  "border-red-500 text-red-600 focus-visible:ring-red-500/40 dark:text-red-400"
+                                  "border-red-500 bg-red-50 text-red-600 focus-visible:ring-red-500/40 dark:bg-red-500/10 dark:text-red-400"
                               )}
                             />
                             {isBelowThreshold ? (

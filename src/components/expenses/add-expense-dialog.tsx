@@ -7,8 +7,9 @@ import { Loader2Icon, PlusIcon, ReceiptTextIcon } from "lucide-react";
 import {
   createExpenseAction,
   type ExpenseFormState,
+  type StaffMemberDTO,
 } from "@/actions/expenses";
-import { EXPENSE_CATEGORIES } from "@/lib/expense-categories";
+import { EXPENSE_CATEGORIES, isSalaryCategory } from "@/lib/expense-categories";
 import {
   Select,
   SelectContent,
@@ -41,8 +42,12 @@ function FieldError({ message }: { message?: string }) {
   );
 }
 
-export function AddExpenseDialog() {
+export function AddExpenseDialog({ members }: { members: StaffMemberDTO[] }) {
   const [open, setOpen] = React.useState(false);
+
+  // Catégorie sélectionnée : pilote l'affichage du menu « Bénéficiaire »,
+  // requis uniquement pour les versements de salaire / rémunération.
+  const [category, setCategory] = React.useState("");
 
   // Enveloppe l'action serveur pour fermer la modale dès que la création réussit.
   const [state, formAction, pending] = useActionState(
@@ -104,7 +109,7 @@ export function AddExpenseDialog() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="category">Catégorie *</Label>
-              <Select name="category">
+              <Select name="category" onValueChange={setCategory}>
                 <SelectTrigger
                   id="category"
                   className="w-full"
@@ -135,6 +140,33 @@ export function AddExpenseDialog() {
               <FieldError message={fieldErrors.expenseDate} />
             </div>
           </div>
+
+          {isSalaryCategory(category) ? (
+            <div className="grid gap-2">
+              <Label htmlFor="recipientId">Membre bénéficiaire *</Label>
+              <Select name="recipientId">
+                <SelectTrigger
+                  id="recipientId"
+                  className="w-full"
+                  aria-invalid={Boolean(fieldErrors.recipientId)}
+                >
+                  <SelectValue placeholder="Sélectionner le membre" />
+                </SelectTrigger>
+                <SelectContent>
+                  {members.map((member) => (
+                    <SelectItem key={member.id} value={member.id}>
+                      {member.firstName} {member.lastName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Le versement sera rattaché à ce membre dans son historique des
+                salaires.
+              </p>
+              <FieldError message={fieldErrors.recipientId} />
+            </div>
+          ) : null}
 
           <div className="grid gap-2">
             <Label htmlFor="amount">Montant (FCFA) *</Label>
