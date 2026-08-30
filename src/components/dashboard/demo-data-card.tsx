@@ -25,6 +25,11 @@ const INITIAL_STATE: DemoDataActionState = { status: "idle" };
  * - « Injecter la démo » : crée un jeu de données réaliste (classes, élèves,
  *   reçus) pour tester l'application immédiatement ;
  * - « Réinitialiser »   : supprime toutes les données métier de l'organisation.
+ *
+ * Utilise `useActionState` (React) pour suivre l'état de chaque Server Action
+ * et désactiver les boutons pendant l'exécution. Toute erreur serveur est
+ * capturée côté serveur et retournée sous forme d'état `{ status, message }`
+ * — jamais propagée vers le client sous forme d'exception non gérée.
  */
 export function DemoDataCard({ isAdmin }: { isAdmin: boolean }) {
   const [injectState, injectFormAction, injectPending] = useActionState(
@@ -37,9 +42,18 @@ export function DemoDataCard({ isAdmin }: { isAdmin: boolean }) {
   );
 
   const pending = injectPending || resetPending;
+
+  // Sélectionne le message à afficher : priorité au message actuel de l'action
+  // en cours, sinon au message de la dernière action exécutée.
   const message = injectState.message ?? resetState.message;
   const success =
     injectState.status === "success" || resetState.status === "success";
+  const isError =
+    injectState.status === "error" || resetState.status === "error";
+
+  // Pendant l'exécution, on masque le message précédent pour éviter l'affichage
+  // d'un état obsolète (ex: succès de l'injection puis clic sur « Réinitialiser »).
+  const showMessage = message && !pending;
 
   return (
     <section className="rounded-xl border border-dashed bg-background p-5 shadow-sm">
@@ -53,13 +67,15 @@ export function DemoDataCard({ isAdmin }: { isAdmin: boolean }) {
       </p>
 
       <div className="mt-4 grid gap-3">
-        {message ? (
+        {showMessage ? (
           <p
             role="status"
             className={
               success
                 ? "rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-                : "rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                : isError
+                  ? "rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                  : "rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700"
             }
           >
             {message}
@@ -67,7 +83,16 @@ export function DemoDataCard({ isAdmin }: { isAdmin: boolean }) {
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <form action={injectFormAction}>
+          <form
+            action={injectFormAction}
+            // Empêche la double soumission : pendant l'exécution, le formulaire
+            // est désactivé côté client via l'attribut `disabled` du bouton.
+            onSubmit={(event) => {
+              if (pending) {
+                event.preventDefault();
+              }
+            }}
+          >
             <Button
               type="submit"
               size="sm"
@@ -83,7 +108,14 @@ export function DemoDataCard({ isAdmin }: { isAdmin: boolean }) {
             </Button>
           </form>
 
-          <form action={resetFormAction}>
+          <form
+            action={resetFormAction}
+            onSubmit={(event) => {
+              if (pending) {
+                event.preventDefault();
+              }
+            }}
+          >
             <Button
               type="submit"
               size="sm"

@@ -146,8 +146,10 @@ export async function resetOrganizationData(
       await tx.class.deleteMany({ where: { organizationId } });
       await tx.course.deleteMany({ where: { organizationId } });
 
-      // 3. Comptes de démonstration (non administrateurs). Les comptes
+      // 3. Comptes de d�monstration (non administrateurs). Les comptes
       //    ADMIN / SUPER_ADMIN sont conservés.
+      //    Les rôles utilisateurs référencent User via customRoleId (onDelete:
+      //    SetNull) — les supprimer APRÈS les users évite toute contrainte FK.
       counts.demoUsers = (
         await tx.user.deleteMany({
           where: {
@@ -156,6 +158,11 @@ export async function resetOrganizationData(
           },
         })
       ).count;
+
+      // 4. Rôles personnalisées (créées par le seeding ou par l'utilisateur).
+      //    Les ADMIN/SUPER_ADMIN sont conservés ; leurs éventuels customRole
+      //    sont dissociés via onDelete: SetNull au moment de l'étape 3.
+      await tx.customRole.deleteMany({ where: { organizationId } });
 
       return counts;
     });
