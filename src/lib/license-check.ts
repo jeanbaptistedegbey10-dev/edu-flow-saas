@@ -1,6 +1,14 @@
 import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
+import {
+  PLAN_STATUSES,
+  PLAN_TYPES,
+  PLAN_STATUS_LABELS,
+  PLAN_TYPE_LABELS,
+  type PlanStatus,
+  type PlanType,
+} from "@/lib/plan-labels";
 import { getValidatedSessionContext } from "@/lib/session";
 
 // --------------------------------------
@@ -24,21 +32,16 @@ import { getValidatedSessionContext } from "@/lib/session";
 // - par le layout du tableau de bord (bannière d'essai) ;
 // - par la page /billing (état détaillé de l'abonnement).
 
-/** Types de plans commerciaux supportés (colonne `Organization.planType`). */
-export const PLAN_TYPES = [
-  "TRIAL",
-  "SAAS_MONTHLY",
-  "SAAS_YEARLY",
-  "SELF_HOSTED",
-  "OFFLINE",
-] as const;
-
-export type PlanType = (typeof PLAN_TYPES)[number];
-
-/** Statuts possibles d'un plan (colonne `Organization.planStatus`). */
-export const PLAN_STATUSES = ["ACTIVE", "EXPIRED", "CANCELLED"] as const;
-
-export type PlanStatus = (typeof PLAN_STATUSES)[number];
+// Les types & constantes de plans vivent dans `@/lib/plan-labels.ts`
+// (module « client-safe », sans dépendance serveur) ; ils sont ré-exportés
+// ici pour préserver l'API publique historique de ce module.
+export {
+  PLAN_STATUSES,
+  PLAN_TYPES,
+  PLAN_STATUS_LABELS,
+  PLAN_TYPE_LABELS,
+};
+export type { PlanStatus, PlanType };
 
 /** Raisons possibles de restriction d'accès en écriture. */
 export type LicenseRestrictionReason =
@@ -80,21 +83,8 @@ export const DAY_MS = 86_400_000;
 /** Fenêtre d'affichage de la bannière « essai bientôt terminé » (jours). */
 const TRIAL_WARNING_WINDOW_DAYS = 7;
 
-/** Libellés français des types de plans (UI). */
-export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
-  TRIAL: "Essai gratuit",
-  SAAS_MONTHLY: "SaaS mensuel",
-  SAAS_YEARLY: "SaaS annuel",
-  SELF_HOSTED: "Licence auto-hébergée",
-  OFFLINE: "Licence hors-ligne",
-};
-
-/** Libellés français des statuts de plan (UI). */
-export const PLAN_STATUS_LABELS: Record<PlanStatus, string> = {
-  ACTIVE: "Actif",
-  EXPIRED: "Expiré",
-  CANCELLED: "Annulé",
-};
+// Les libellés PLAN_TYPE_LABELS / PLAN_STATUS_LABELS sont importés puis
+// ré-exportés depuis `@/lib/plan-labels.ts` (voir imports en tête de fichier).
 
 /** Messages explicatifs affichés sur la page /billing et les bannières. */
 export const RESTRICTION_REASON_MESSAGES: Record<

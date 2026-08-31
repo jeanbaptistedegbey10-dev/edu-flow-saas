@@ -43,42 +43,36 @@ export { INITIAL_ACTION_STATE };
 export async function injectDemoDataAction(
   _prevState: DemoDataActionState
 ): Promise<DemoDataActionState> {
-  // Vérification explicite de la session au tout début : si l'utilisateur
-  // n'est pas authentifié ou son organisation est absente du JWT, on retourne
-  // un état d'erreur plutôt que de laisser `redirect()` lever une exception
-  // non gérée (`NEXT_REDIRECT`) qui planterait la page via `useActionState`.
-  const session = await auth();
-  if (!session?.user?.organizationId || !session?.user?.id) {
-    return {
-      status: "error",
-      message: "Non autorisé ou organisation manquante.",
-    };
-  }
+  console.log("[demo-data] injectDemoDataAction — début");
 
-  // Garde d'écriture : session valide + abonnement/essai actif.
-  // `assertCanMutate` peut appeler `redirect()` (→ NEXT_REDIRECT). On l'entoure
-  // d'un try/catch pour relancer l'erreur de redirection intacte : Next.js la
-  // convertit ensuite en réponse HTTP de redirection conformément au contrat.
   try {
+    // 1. Vérification explicite de la session au tout début : si l'utilisateur
+    //    n'est pas authentifié ou son organisation est absente du JWT, on
+    //    retourne un état d'erreur plutôt que de laisser `redirect()` lever
+    //    une exception non gérée (`NEXT_REDIRECT`) qui planterait la page.
+    const session = await auth();
+    if (!session?.user?.organizationId || !session?.user?.id) {
+      return {
+        status: "error",
+        message: "Non autorisé ou organisation manquante.",
+      };
+    }
+
+    // 2. Garde d'écriture : session valide + abonnement/essai actif.
+    //    `assertCanMutate` peut appeler `redirect()` (→ NEXT_REDIRECT).
     await assertCanMutate();
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    return {
-      status: "error",
-      message: "Accès refusé. Veuillez vérifier votre abonnement.",
-    };
-  }
 
-  const context = await getValidatedSessionContext();
+    // 3. Contexte de session validé contre la base (source de vérité).
+    const context = await getValidatedSessionContext();
 
-  if (!context) {
-    return {
-      status: "error",
-      message: "Session invalide. Veuillez vous reconnecter.",
-    };
-  }
+    if (!context) {
+      return {
+        status: "error",
+        message: "Session invalide. Veuillez vous reconnecter.",
+      };
+    }
 
-  try {
+    // 4. Opérations de données — encapsulées dans le même try/catch global.
     const result = await injectDemoDataForOrganization(
       context.organizationId,
       context.id
@@ -104,7 +98,7 @@ export async function injectDemoDataAction(
       status: "success",
       message: `Jeu de démonstration injecté : ${result.counts.students} élèves, ${result.counts.courses} cours, ${result.counts.payments} reçus de paiement.`,
     };
-  } catch (error) {
+  } catch (error: any) {
     // Relance les erreurs de redirection (NEXT_REDIRECT) pour que Next.js
     // les transforme en réponse HTTP de redirection — jamais les convertir
     // en état d'erreur métier.
@@ -113,7 +107,9 @@ export async function injectDemoDataAction(
     console.error("[injectDemoDataAction] Échec de l'injection :", error);
     return {
       status: "error",
-      message: "Une erreur est survenue lors de l'injection de la démo.",
+      message:
+        error?.message ||
+        "Une erreur est survenue lors de l'injection de la démo.",
     };
   }
 }
@@ -127,50 +123,44 @@ export async function injectDemoDataAction(
 export async function resetDemoDataAction(
   _prevState: DemoDataActionState
 ): Promise<DemoDataActionState> {
-  // Vérification explicite de la session au tout début : si l'utilisateur
-  // n'est pas authentifié ou son organisation est absente du JWT, on retourne
-  // un état d'erreur plutôt que de laisser `redirect()` lever une exception
-  // non gérée (`NEXT_REDIRECT`) qui planterait la page via `useActionState`.
-  const session = await auth();
-  if (!session?.user?.organizationId || !session?.user?.id) {
-    return {
-      status: "error",
-      message: "Non autorisé ou organisation manquante.",
-    };
-  }
+  console.log("[demo-data] resetDemoDataAction — début");
 
-  // Garde d'écriture : session valide + abonnement/essai actif.
-  // `assertCanMutate` peut appeler `redirect()` (→ NEXT_REDIRECT). On l'entoure
-  // d'un try/catch pour relancer l'erreur de redirection intacte : Next.js la
-  // convertit ensuite en réponse HTTP de redirection conformément au contrat.
   try {
+    // 1. Vérification explicite de la session au tout début : si l'utilisateur
+    //    n'est pas authentifié ou son organisation est absente du JWT, on
+    //    retourne un état d'erreur plutôt que de laisser `redirect()` lever
+    //    une exception non gérée (`NEXT_REDIRECT`) qui planterait la page.
+    const session = await auth();
+    if (!session?.user?.organizationId || !session?.user?.id) {
+      return {
+        status: "error",
+        message: "Non autorisé ou organisation manquante.",
+      };
+    }
+
+    // 2. Garde d'écriture : session valide + abonnement/essai actif.
+    //    `assertCanMutate` peut appeler `redirect()` (NEXT_REDIRECT).
     await assertCanMutate();
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    return {
-      status: "error",
-      message: "Accès refusé. Veuillez vérifier votre abonnement.",
-    };
-  }
 
-  const context = await getValidatedSessionContext();
+    // 3. Contexte de session validé contre la base (source de vérité).
+    const context = await getValidatedSessionContext();
 
-  if (!context) {
-    return {
-      status: "error",
-      message: "Session invalide. Veuillez vous reconnecter.",
-    };
-  }
+    if (!context) {
+      return {
+        status: "error",
+        message: "Session invalide. Veuillez vous reconnecter.",
+      };
+    }
 
-  // La réinitialisation est réservée aux administrateurs de l'établissement.
-  if (context.role !== "ADMIN" && context.role !== "SUPER_ADMIN") {
-    return {
-      status: "error",
-      message: "Cette action est réservée aux administrateurs.",
-    };
-  }
+    // 4. La réinitialisation est réservée aux administrateurs de l'établissement.
+    if (context.role !== "ADMIN" && context.role !== "SUPER_ADMIN") {
+      return {
+        status: "error",
+        message: "Cette action est réservée aux administrateurs.",
+      };
+    }
 
-  try {
+    // 5. Opérations de données — encapsulées dans le même try/catch global.
     const result = await resetOrganizationData(context.organizationId);
 
     if (!result.ok) {
@@ -186,16 +176,21 @@ export async function resetDemoDataAction(
       status: "success",
       message: `Base réinitialisée : ${result.deleted.students} élèves, ${result.deleted.payments} paiements supprimés.`,
     };
-  } catch (error) {
+  } catch (error: any) {
     // Relance les erreurs de redirection (NEXT_REDIRECT) pour que Next.js
     // les transforme en réponse HTTP de redirection — jamais les convertir
     // en état d'erreur métier.
     if (isNextRedirectError(error)) throw error;
 
-    console.error("[resetDemoDataAction] Échec de la réinitialisation :", error);
+    console.error(
+      "[resetDemoDataAction] Échec de la réinitialisation :",
+      error
+    );
     return {
       status: "error",
-      message: "Une erreur est survenue lors de la réinitialisation.",
+      message:
+        error?.message ||
+        "Une erreur est survenue lors de la réinitialisation.",
     };
   }
 }

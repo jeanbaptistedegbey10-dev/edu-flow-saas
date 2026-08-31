@@ -195,6 +195,7 @@ model Organization {
   documents        Document[]
   customRoles      CustomRole[]
   housings         Housing[]
+  invoices         Invoice[]
 }
 
 model User {
@@ -581,6 +582,49 @@ model Payroll {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --------------------------------------
+// Facturation SaaS (abonnements de la plateforme)
+// --------------------------------------
+
+/// Facture / transaction d'abonnement EduFlow souscrite par une organisation
+/// via la passerelle de paiement (Mobile Money / Carte — Kkiapay ou Fedapay).
+///
+/// Distincte du modèle `Payment` : celui-ci trace les encaissements des écoles
+/// auprès de LEURS clients (étudiants, dossiers de voyage), tandis que
+/// `Invoice` trace les achats d'abonnement de la plateforme elle-même
+/// (SAAS_MONTHLY / SAAS_YEARLY). Conserver les deux tables séparées évite de
+/// polluer les analyses de revenus des centres de formation.
+model Invoice {
+  id             String    @id @default(cuid())
+  organizationId String
+  /// Plan souscrit : SAAS_MONTHLY ou SAAS_YEARLY.
+  planType       String
+  /// Montant payé (XOF / FCFA — pas de centimes).
+  amount         Float
+  currency       String    @default("XOF")
+  /// Agrégateur utilisé : « kkiapay » ou « fedapay ».
+  paymentProvider String?
+  /// Moyen de paiement signalé par la passerelle (mobile_money, card…).
+  paymentMethod  String?
+  /// Référence de transaction renvoyée par la passerelle.
+  /// Unique : garantit l'idempotence des webhooks (retries inclus).
+  transactionReference String? @unique
+  /// Statut de la facture : PENDING, COMPLETED ou FAILED.
+  status         String    @default("PENDING")
+  description    String?
+  /// Clé de licence Ed25519 émise lors de l'activation du paiement.
+  licenseKey     String?
+  /// Début et fin de la période d'abonnement couverte par le paiement.
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
 }
 
 // --------------------------------------

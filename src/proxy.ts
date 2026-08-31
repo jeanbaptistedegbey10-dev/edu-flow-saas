@@ -6,7 +6,8 @@ import { getToken } from "next-auth/jwt";
 // Protection des routes (ex-middleware, renommé « proxy » en Next.js 16)
 // --------------------------------------
 //
-// Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/:path*.
+// Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/:path* et
+// /super-admin/:path*.
 // Tout le reste (/, /login, /api, /_next, /favicon.ico, assets) est ignoré
 // par le middleware et passe directement en NextResponse.next() — le proxy
 // n'intervient JAMAIS ailleurs, sans AUCUNE redirection.
@@ -34,6 +35,7 @@ import { getToken } from "next-auth/jwt";
 
 const LOGIN_PATH = "/login";
 const DASHBOARD_PATH = "/dashboard";
+const SUPER_ADMIN_PATH = "/super-admin";
 
 /**
  * Noms des cookies de session émis par Auth.js v5 (NextAuth) :
@@ -150,7 +152,7 @@ export async function proxy(request: NextRequest) {
     // Utilisateur non authentifié tentant d'accéder au tableau de bord :
     // redirection vers la page de connexion en mémorisant la destination
     // initiale (callbackUrl) pour y revenir après connexion.
-    if (pathname.startsWith(DASHBOARD_PATH)) {
+    if (pathname.startsWith(DASHBOARD_PATH) || pathname.startsWith(SUPER_ADMIN_PATH)) {
       const loginUrl = new URL(LOGIN_PATH, request.url);
       loginUrl.searchParams.set("callbackUrl", `${pathname}${search}`);
 
@@ -164,6 +166,25 @@ export async function proxy(request: NextRequest) {
     // Le cookie invalide n'est détruit QUE lors de la redirection vers /login
     // (cas dashboard ci-dessus) — cela brise la boucle sans déconnecter
     // brutalement un utilisateur dont le cookie est temporairement illisible.
+    return NextResponse.next();
+  }
+
+  // --------------------------------------
+  // Back-office Super-Admin : réservé au rôle SUPER_ADMIN
+  // --------------------------------------
+  // Première barrière (JWT, sans accès base de données) : tout utilisateur
+  // authentifié qui n'est pas SUPER_ADMIN — en particulier les administrateurs
+  // d'écoles classiques — est renvoyé vers son tableau de bord sans qu'aucune
+  // information du back-office ne soit divulguée. La deuxième barrière
+  // (relecture du rôle en base) vit dans src/lib/super-admin.ts et dans
+  // chaque Server Action de src/actions/super-admin.ts.
+  if (pathname.startsWith(SUPER_ADMIN_PATH)) {
+    const role = typeof token.role === "string" ? token.role : null;
+
+    if (role !== "SUPER_ADMIN") {
+      return NextResponse.redirect(new URL(DASHBOARD_PATH, request.url));
+    }
+
     return NextResponse.next();
   }
 
@@ -213,5 +234,5 @@ export const config = {
   // /dashboard → /login → /dashboard → … (ERR_TOO_MANY_REDIRECTS), liée à un
   // désaccord entre getToken() (proxy) et auth() (page /login). La page /login
   // n'effectue plus, elle-même, aucune redirection serveur → /dashboard.
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/super-admin/:path*"],
 };

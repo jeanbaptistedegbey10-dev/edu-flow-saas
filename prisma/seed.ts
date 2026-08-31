@@ -100,6 +100,37 @@ async function main() {
   });
 
   // --------------------------------------
+  // Plateforme (back-office Super-Admin)
+  // --------------------------------------
+  // Organisation « porteuse » du compte Super-Admin : la relation
+  // Organization est obligatoire pour tout utilisateur. Cette organisation
+  // n'est pas un client — elle héberge uniquement le compte technique
+  // d'administration de la plateforme EduFlow (Phase 2).
+  const platformOrg = await prisma.organization.create({
+    data: {
+      name: "EduFlow Platform",
+      slug: "eduflow-platform",
+      email: "platform@eduflow.app",
+    },
+  });
+
+  const superAdmin = await prisma.user.create({
+    data: {
+      organizationId: platformOrg.id,
+      email: "superadmin@eduflow.app",
+      passwordHash: demoPasswordHash,
+      firstName: "EduFlow",
+      lastName: "Platform",
+      role: "SUPER_ADMIN",
+      // Statut « ACTIVE » : l'équivalent applicatif du statut actif est le
+      // booléen `isActive` (le modèle User n'a pas d'enum de statut). Explicité
+      // ici pour garantir un compte immédiatement opérationnel (connexion au
+      // back-office /super-admin) dès la fin du seed.
+      isActive: true,
+    },
+  });
+
+  // --------------------------------------
   // Students
   // --------------------------------------
   const student1 = await prisma.student.create({
@@ -824,6 +855,7 @@ async function main() {
   // Verify — les identifiants doivent réellement fonctionner en base
   // --------------------------------------
   const demoAccounts = [
+    { email: "superadmin@eduflow.app", role: "SUPER_ADMIN", organizationId: platformOrg.id },
     { email: "admin@excellence-formation.com", role: "ADMIN", organizationId: org1.id },
     { email: "teacher@excellence-formation.com", role: "TEACHER", organizationId: org1.id },
     { email: "staff@excellence-formation.com", role: "STAFF", organizationId: org1.id },
@@ -879,8 +911,13 @@ async function main() {
   // Summary
   // --------------------------------------
   console.log("✅ Seed completed successfully!");
-  console.log(`   Organizations: ${org1.name}, ${org2.name}`);
+  console.log(
+    `   Organizations: ${org1.name}, ${org2.name}, ${platformOrg.name} (système)`
+  );
   console.log(`   🔑 Comptes de démonstration (mot de passe : ${DEMO_PASSWORD}) :`);
+  console.log(
+    `      - ${superAdmin.email} (SUPER_ADMIN) — back-office /super-admin`
+  );
   console.log(`      - ${admin1.email} (ADMIN)`);
   console.log(`      - ${teacher1.email} (TEACHER)`);
   console.log(`      - ${staff1.email} (STAFF)`);

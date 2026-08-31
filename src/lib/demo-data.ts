@@ -146,7 +146,7 @@ export async function resetOrganizationData(
       await tx.class.deleteMany({ where: { organizationId } });
       await tx.course.deleteMany({ where: { organizationId } });
 
-      // 3. Comptes de d�monstration (non administrateurs). Les comptes
+      // 3. Comptes de démonstration (non administrateurs). Les comptes
       //    ADMIN / SUPER_ADMIN sont conservés.
       //    Les rôles utilisateurs référencent User via customRoleId (onDelete:
       //    SetNull) — les supprimer APRÈS les users évite toute contrainte FK.
