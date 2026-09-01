@@ -251,7 +251,9 @@ export async function assertCanMutate(): Promise<void> {
   const state = await getLicenseState(context.organizationId);
 
   if (!state.canWrite) {
-    redirect(`/billing?reason=${state.restrictionReason ?? "PLAN_INACTIVE"}`);
+    redirect(
+      `/dashboard/billing?reason=${state.restrictionReason ?? "PLAN_INACTIVE"}`
+    );
   }
 }
 
@@ -270,7 +272,9 @@ export async function requireActiveLicense(): Promise<LicenseState> {
   const state = await getLicenseState(context.organizationId);
 
   if (!state.canWrite) {
-    redirect(`/billing?reason=${state.restrictionReason ?? "PLAN_INACTIVE"}`);
+    redirect(
+      `/dashboard/billing?reason=${state.restrictionReason ?? "PLAN_INACTIVE"}`
+    );
   }
 
   return state;

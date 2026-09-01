@@ -35,7 +35,9 @@ yarn-error.log*
 .env*
 .env
 .env*.local
-
+.env.docker
+.env.docker.*
+!.env.docker.example
 
 # vercel
 .vercel
@@ -45,3 +47,18 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# Phase 4 — Docker self-hosted (fichiers générés par les scripts de setup)
+docker-entrypoint.sh.done
+
+# Phase 4 — Desktop Electron (artefacts de build)
+/desktop/runtime/
+/desktop/release/
+/desktop/dist/
+/desktop/node_modules/
+/desktop/package-lock.json
+/desktop/prisma-tools-src/package-lock.json
+/desktop/prisma-tools-src/node_modules/
+
+# Phase 4 — Desktop : clé publique générée au build (jamais versionnée)
+/desktop/electron/license-public-key.txt

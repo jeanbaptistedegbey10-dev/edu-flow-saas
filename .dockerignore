@@ -1,0 +1,42 @@
+# -----------------------------------------------------------------------------
+# Build context Docker — exclusions
+# -----------------------------------------------------------------------------
+node_modules
+.next
+.git
+.gitignore
+
+# Fichiers d'environnement & secrets (jamais dans l'image)
+.env
+.env.*
+!.env.docker.example
+
+# Journaux / artefacts de vérification
+*.log
+*.tsbuildinfo
+tsc_check.txt
+build_check.txt
+prisma-push.log
+prisma-generate.log
+test-run.log
+dev.log
+dev_stdout.log
+dev_stderr.log
+build_stdout.log
+build_stderr.log
+
+# Scripts de test ponctuels (racine)
+test-*.mjs
+test-*.ts
+
+# Desktop / IDE / CI
+desktop/runtime
+desktop/release
+desktop/dist
+desktop/node_modules
+desktop/package-lock.json
+.vercel
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store

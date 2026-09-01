@@ -1,0 +1,96 @@
+# =============================================================================
+# EduFlow — Stack Docker Self-Hosted (On-Premise)
+# =============================================================================
+#
+# Services :
+#   db      → PostgreSQL dédié (volume persistant)
+#   migrate → initialisation : `prisma migrate deploy` + seed UNIQUEMENT si la
+#             base est vide (premier démarrage) → conteneur jetable
+#   web     → serveur Next.js standalone (image `runner`)
+#
+# Démarrage rapide :
+#   cp .env.docker.example .env.docker
+#   docker compose --env-file .env.docker up -d --build
+#
+# Documentation : docs/SELF_HOSTED.md
+# =============================================================================
+
+name: eduflow
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eduflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eduflow_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-eduflow}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-eduflow} -d ${POSTGRES_DB:-eduflow}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [eduflow]
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    image: eduflow-migrate:latest
+    restart: "no"
+    environment: &db_env
+      # L'hôte « db » est le service PostgreSQL de cette même stack ;
+      # les DATABASE_URL / DIRECT_URL peuvent être surchargées via .env.docker.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-eduflow}:${POSTGRES_PASSWORD:-eduflow_change_me}@db:5432/${POSTGRES_DB:-eduflow}?schema=public}
+      DIRECT_URL: ${DIRECT_URL:-postgresql://${POSTGRES_USER:-eduflow}:${POSTGRES_PASSWORD:-eduflow_change_me}@db:5432/${POSTGRES_DB:-eduflow}}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [eduflow]
+
+  web:
+    build:
+      context: .
+      target: runner
+    image: eduflow-web:latest
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      # Base de données
+      <<: *db_env
+      # Application
+      NODE_ENV: production
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET est requis — voir .env.docker.example}
+      AUTH_TRUST_HOST: "true"
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:${APP_PORT:-3000}}
+      # Licence Ed25519 — clé PUBLIQUE de la plateforme (jamais la clé privée).
+      # Obligatoire pour activer les clés SELF_HOSTED/OFFLINE sur /dashboard/billing.
+      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
+      # Passerelle de paiement (optionnelle — laisser vide pour désactiver)
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-kkiapay}
+      PAYMENT_PUBLIC_KEY: ${PAYMENT_PUBLIC_KEY:-}
+      PAYMENT_SECRET_KEY: ${PAYMENT_SECRET_KEY:-}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
+      PAYMENT_SANDBOX: ${PAYMENT_SANDBOX:-true}
+      # E-mails transactionnels (optionnel)
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-EduFlow <onboarding@resend.dev>}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [eduflow]
+
+volumes:
+  postgres_data:
+
+networks:
+  eduflow:
+    driver: bridge

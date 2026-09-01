@@ -1,0 +1,21 @@
+{
+  "name": "eduflow-desktop",
+  "version": "0.1.0",
+  "description": "EduFlow Desktop — exécutable Windows standalone (offline). Embarque le serveur Next.js standalone + un PostgreSQL privé.",
+  "productName": "EduFlow Desktop",
+  "private": true,
+  "type": "commonjs",
+  "main": "electron/main.cjs",
+    "scripts": {
+    "build": "electron-builder --config electron-builder.json",
+    "pack": "electron-builder --dir --config electron-builder.json",
+    "dist": "electron-builder --config electron-builder.json"
+  },
+  "dependencies": {
+    "electron": "^31.0.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.0.0",
+    "@electron/packager": "^18.0.0"
+  }
+}

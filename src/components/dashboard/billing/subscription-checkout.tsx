@@ -176,12 +176,22 @@ export function SubscriptionCheckout({
           abonnement.
         </div>
       ) : (
-        <p className="mb-4 text-sm text-muted-foreground">
-          Passerelle : {providerLabel}
-          {sandbox ? " · Mode test (sandbox)" : ""}. Paiement sécurisé par
-          Mobile Money (Orange Money, MTN MoMo, Moov Money, Wave…) ou carte
-          bancaire.
-        </p>
+        <div className="mb-4 space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Passerelle : {providerLabel}. Paiement sécurisé par Mobile Money
+            (Orange Money, MTN MoMo, Moov Money, Wave…) ou carte bancaire.
+          </p>
+          {sandbox ? (
+            <p
+              role="note"
+              className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800"
+            >
+              Mode démo (sandbox) — aucune transaction réelle n&apos;est
+              débitée, vous pouvez tester l&apos;ouverture du widget de
+              paiement.
+            </p>
+          ) : null}
+        </div>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">

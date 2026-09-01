@@ -39,7 +39,7 @@ function LicenseBanner({
 
   return (
     <Link
-      href={isExpired ? "/billing?reason=TRIAL_EXPIRED" : "/billing"}
+      href={isExpired ? "/dashboard/billing?reason=TRIAL_EXPIRED" : "/dashboard/billing"}
       className={
         "flex items-center justify-center gap-2 px-4 py-2 text-center text-sm font-medium transition-colors " +
         (isExpired

@@ -102,12 +102,46 @@ export function formatXOF(amount: number): string {
 export type PaymentProvider = "fedapay" | "kkiapay";
 
 /**
+ * Clés de TEST (sandbox) utilisées PAR DÉFAUT dès qu'aucune clé réelle n'est
+ * renseignée dans l'environnement (donc tant que PAYMENT_SANDBOX n'est pas
+ * « false ») :
+ * - Kkiapay : le widget officiel s'ouvre côté navigateur avec la seule clé
+ *   publique sandbox (aucun appel server-to-server n'est nécessaire à
+ *   l'initiation) → idéal pour tester / démontrer le parcours de paiement.
+ * - Fedapay : valeurs de complément si l'intégrateur force « fedapay » en
+ *   sandbox (les appels réels échoueront tant que de vraies clés ne seront
+ *   pas configurées).
+ */
+const SANDBOX_TEST_KEYS: Record<
+  PaymentProvider,
+  { publicKey: string; secretKey: string; webhookSecret: string }
+> = {
+  kkiapay: {
+    publicKey: "public_key_sandbox_test",
+    secretKey: "secret_key_sandbox_test",
+    webhookSecret: "whsec_sandbox_test",
+  },
+  fedapay: {
+    publicKey: "pk_sandbox_test",
+    secretKey: "sk_sandbox_test",
+    webhookSecret: "whsec_sandbox_test",
+  },
+};
+
+/**
  * Lit la configuration de la passerelle depuis l'environnement :
- * - `PAYMENT_PROVIDER`       : « fedapay » (défaut) ou « kkiapay » ;
+ * - `PAYMENT_PROVIDER`       : « kkiapay » (défaut) ou « fedapay » ;
  * - `PAYMENT_PUBLIC_KEY`     : clé publique (widget Kkiapay / identification) ;
  * - `PAYMENT_SECRET_KEY`     : clé secrète (appels server-to-server) ;
  * - `PAYMENT_WEBHOOK_SECRET` : secret de vérification des webhooks ;
  * - `PAYMENT_SANDBOX`        : « true » (défaut) / « false ».
+ *
+ * Mode démo/sandbox par défaut : si `PAYMENT_SANDBOX` est « true » (défaut) et
+ * qu'AUCUNE clé réelle n'est fournie, la configuration retombe sur des clés
+ * de TEST et le fournisseur est forcé sur Kkiapay — le paiement en ligne
+ * reste donc testable (ouverture du widget sandbox) sur une instance vierge,
+ * au lieu de bloquer l'UI avec « Le paiement en ligne n'est pas encore
+ * disponible sur cette instance ».
  */
 export function getPaymentConfig(): {
   provider: PaymentProvider;
@@ -116,16 +150,36 @@ export function getPaymentConfig(): {
   webhookSecret: string;
   sandbox: boolean;
 } {
-  const providerRaw = (process.env.PAYMENT_PROVIDER ?? "fedapay").toLowerCase();
-  const provider: PaymentProvider =
-    providerRaw === "kkiapay" ? "kkiapay" : "fedapay";
+  const providerRaw = (process.env.PAYMENT_PROVIDER ?? "kkiapay").toLowerCase();
+  let provider: PaymentProvider =
+    providerRaw === "fedapay" ? "fedapay" : "kkiapay";
+
+  const sandbox =
+    (process.env.PAYMENT_SANDBOX ?? "true").toLowerCase() !== "false";
+
+  // Aucune clé réelle ? → mode démo : on force Kkiapay, le seul agrégateur
+  // dont le widget sandbox s'ouvre avec la seule clé publique (testable).
+  const hasRealKeys = Boolean(
+    process.env.PAYMENT_PUBLIC_KEY ||
+      process.env.PAYMENT_SECRET_KEY ||
+      process.env.PAYMENT_WEBHOOK_SECRET
+  );
+
+  if (sandbox && !hasRealKeys) {
+    provider = "kkiapay";
+  }
+
+  const fallback = sandbox ? SANDBOX_TEST_KEYS[provider] : null;
 
   return {
     provider,
-    publicKey: process.env.PAYMENT_PUBLIC_KEY ?? "",
-    secretKey: process.env.PAYMENT_SECRET_KEY ?? "",
-    webhookSecret: process.env.PAYMENT_WEBHOOK_SECRET ?? "",
-    sandbox: (process.env.PAYMENT_SANDBOX ?? "true").toLowerCase() !== "false",
+    publicKey:
+      process.env.PAYMENT_PUBLIC_KEY?.trim() || fallback?.publicKey || "",
+    secretKey:
+      process.env.PAYMENT_SECRET_KEY?.trim() || fallback?.secretKey || "",
+    webhookSecret:
+      process.env.PAYMENT_WEBHOOK_SECRET?.trim() || fallback?.webhookSecret || "",
+    sandbox,
   };
 }
 

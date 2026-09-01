@@ -17,6 +17,7 @@ import {
   UserCheck,
   ClipboardCheck,
   ShieldCheck,
+  CreditCard,
   type LucideIcon,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
@@ -132,6 +133,11 @@ const managementMenu: MenuItem[] = [
 ]
 
 const organizationMenu: MenuItem[] = [
+  {
+    title: "Abonnement / Licence",
+    url: "/dashboard/billing",
+    icon: CreditCard,
+  },
   {
     title: "Organisation",
     url: "/dashboard/organization",

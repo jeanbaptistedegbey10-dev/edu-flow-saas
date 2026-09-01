@@ -1,0 +1,53 @@
+{
+  "appId": "com.eduflow.desktop",
+  "productName": "EduFlow Desktop",
+  "directories": {
+    "output": "release",
+    "buildResources": "resources"
+  },
+    "files": [
+    "electron/**/*.cjs",
+    "runtime/web-standalone/**/*",
+    "runtime/prisma-tools/**/*",
+    "resources/postgres-embed/**/*",
+    {
+      "from": "electron/license-public-key.txt",
+      "to": ".",
+      "noMangle": true
+    },
+    "!**/*.map",
+    "!**/CHANGELOG.md",
+    "!**/README.md"
+  ],
+  "extraMetadata": {
+    "main": "electron/main.cjs"
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "resources/eduflow-icon.ico",
+    "verifyUpdateCodeSignature": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "EduFlow Desktop",
+    "include": "resources/nsis-include.nsh"
+  },
+  "portable": {
+    "artifactName": "EduFlow-Desktop-Portable-${version}-${arch}.exe"
+  },
+  "compression": "maximum",
+  "asar": false,
+  "npmRebuild": false
+}
