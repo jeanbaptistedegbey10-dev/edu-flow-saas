@@ -1,3 +1,5 @@
+import { connection } from "next/server";
+
 import { auth } from "@/auth";
 import { getCurrentOrganizationBranding } from "@/actions/organization";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
@@ -68,6 +70,14 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Rendu dynamique SSR garanti pour TOUTES les routes /dashboard/* :
+  // `connection()` interrompt le pré-rendu statique dès l'entrée du layout
+  // (les routes filles héritent du rendu à la demande). C'est la méthode
+  // préconisée par la doc locale Next.js 16 (02-route-segment-config) —
+  // les exports `export const dynamic` / `export const revalidate` ne sont
+  // plus utilisés dans ce projet.
+  await connection();
+
   // Session NextAuth résolue côté serveur puis transmise au composant
   // client `AppSidebar` (évite un SessionProvider dédié côté client).
   const session = await auth();

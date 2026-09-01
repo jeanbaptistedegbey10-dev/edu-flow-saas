@@ -1,3 +1,5 @@
+import { connection } from "next/server";
+
 import { getClassOptions } from "@/actions/classes";
 import { getDefaultRegistrationFee } from "@/actions/organization";
 import { getStudents } from "@/actions/students";
@@ -9,6 +11,12 @@ export const metadata = {
 };
 
 export default async function StudentsPage() {
+  // Rendu dynamique SSR garanti : `connection()` interrompt le pré-rendu
+  // statique (doc locale Next.js 16). L'export périmé
+  // `export const dynamic = "force-dynamic"` a été supprimé : les données
+  // dépendent de la session (auth() → cookies) via les server actions.
+  await connection();
+
   const [students, classes, registrationFee] = await Promise.all([
     getStudents(),
     getClassOptions(),
@@ -23,5 +31,3 @@ export default async function StudentsPage() {
     />
   );
 }
-
-export const dynamic = "force-dynamic";

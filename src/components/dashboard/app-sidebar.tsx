@@ -134,7 +134,7 @@ const managementMenu: MenuItem[] = [
 
 const organizationMenu: MenuItem[] = [
   {
-    title: "Abonnement / Licence",
+    title: "Abonnement",
     url: "/dashboard/billing",
     icon: CreditCard,
   },

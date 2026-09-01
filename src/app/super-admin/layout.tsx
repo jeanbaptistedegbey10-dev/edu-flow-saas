@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { ShieldCheckIcon } from "lucide-react";
 
 import { getSuperAdminContext } from "@/lib/super-admin";
@@ -36,6 +37,12 @@ export default async function SuperAdminLayout({
 }: {
   children: ReactNode;
 }) {
+  // Rendu dynamique SSR garanti pour tout /super-admin/* : `connection()`
+  // interrompt le pré-rendu statique (doc locale Next.js 16 — les exports de
+  // segment `dynamic`/`revalidate` ne sont plus utilisés dans ce projet).
+  // Le garde d'accès DB (getSuperAdminContext) reste la barrière n°2.
+  await connection();
+
   const admin = await getSuperAdminContext();
 
   if (!admin) {

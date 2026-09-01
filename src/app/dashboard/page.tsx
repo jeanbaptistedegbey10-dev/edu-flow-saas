@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
@@ -20,6 +21,12 @@ export const metadata = {
 };
 
 export default async function DashboardPage() {
+  // Rendu dynamique SSR garanti : `connection()` interrompt tout pré-rendu
+  // statique de la page (doc locale Next.js 16, à la place des exports de
+  // segment `dynamic`/`revalidate`). La page dépend de la session (cookies) :
+  // elle doit être servie à la demande, jamais générée au build.
+  await connection();
+
   const session = await auth();
   const role = session?.user?.role;
 
