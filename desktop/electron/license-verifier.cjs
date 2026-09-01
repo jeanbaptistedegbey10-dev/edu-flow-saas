@@ -30,6 +30,7 @@ const LICENSE_PLAN_TYPES = [
   "SAAS_YEARLY",
   "SELF_HOSTED",
   "OFFLINE",
+  "DESKTOP_LIFETIME",
 ];
 
 /**

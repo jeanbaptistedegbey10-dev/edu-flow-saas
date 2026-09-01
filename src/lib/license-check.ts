@@ -19,7 +19,8 @@ import { getValidatedSessionContext } from "@/lib/session";
 // - TRIAL        : essai gratuit de 30 jours (`trialEndsAt`) ;
 // - SAAS_*       : abonnement cloud, validité portée par `licenseEndsAt` ;
 // - SELF_HOSTED  : licence sur site (clé unique `licenseKey`) ;
-// - OFFLINE      : licence hors-ligne.
+// - OFFLINE      : licence hors-ligne ;
+// - DESKTOP_LIFETIME : desktop hors-ligne à vie (clé signée perpétuelle).
 //
 // Règle d'accès (Phase 1) :
 //   la lecture des données reste toujours possible, mais dès que la période

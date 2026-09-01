@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import {
   addMonths,
+  computePerpetualExpiry,
   generateLicenseKey,
   verifyLicenseKey,
   type LicensePayload,
@@ -37,7 +38,7 @@ export type SuperAdminOrganizationRow = {
   name: string;
   slug: string;
   email: string | null;
-  planType: "TRIAL" | "SAAS_MONTHLY" | "SAAS_YEARLY" | "SELF_HOSTED" | "OFFLINE";
+  planType: "TRIAL" | "SAAS_MONTHLY" | "SAAS_YEARLY" | "SELF_HOSTED" | "OFFLINE" | "DESKTOP_LIFETIME";
   planStatus: "ACTIVE" | "EXPIRED" | "CANCELLED";
   trialEndsAt: Date | null;
   licenseEndsAt: Date | null;
@@ -69,6 +70,33 @@ export type SuperAdminActionResult = {
   success: boolean;
   message: string;
 };
+
+/** Organisation cible du générateur de licences (liste légère pour le sélecteur. */
+export type LicenseTargetOrganization = {
+  id: string;
+  name: string;
+  slug: string;
+  planType: string;
+};
+
+/**
+ * Liste légère des organisations (id, nom, slug, plan) pour le sélecteur du
+ * générateur de licences. Réservé au rôle SUPER_ADMIN.
+ */
+export async function listLicenseTargetOrganizations(): Promise<LicenseTargetOrganization[]> {
+  const admin = await getSuperAdminContext();
+
+  if (!admin) {
+    redirect("/dashboard");
+  }
+
+  const organizations = await prisma.organization.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, slug: true, planType: true },
+  });
+
+  return organizations;
+}
 
 // --------------------------------------
 // Lecture : liste des organisations
@@ -198,10 +226,11 @@ export async function generateLicenseAction(
     };
   }
 
-  if (!Number.isInteger(durationMonths) || durationMonths < 1 || durationMonths > 120) {
+  if (!Number.isInteger(durationMonths) || durationMonths < 0 || durationMonths > 120) {
     return {
       status: "error",
-      message: "Durée invalide : entrez un nombre de mois entre 1 et 120.",
+      message:
+        "Durée invalide : entrez un nombre de mois entre 1 et 120 (0 = sans échéance / perpétuelle).",
     };
   }
 
@@ -244,7 +273,8 @@ export async function generateLicenseAction(
   }
 
   const now = new Date();
-  const expiresAt = addMonths(now, durationMonths);
+  const expiresAt =
+    durationMonths === 0 ? computePerpetualExpiry(now) : addMonths(now, durationMonths);
 
   const payload: LicensePayload = {
     organizationId,
@@ -307,6 +337,239 @@ export async function generateLicenseAction(
   };
 }
 
+// --------------------------------------
+// Générateur de licences (page /super-admin/licenses)
+// --------------------------------------
+
+/**
+ * Normalise une référence client saisie librement (mode « manuel » du
+ * générateur) en un identifiant stable qui sera embarqué dans la clé signée :
+ * minuscules, sans accents, espaces → tirets, caractères sûrs uniquement.
+ */
+function buildManualClientId(raw: string): string {
+  const slug = raw
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+
+  return slug.length > 0 ? `client-${slug}` : "client-manuel";
+}
+
+/**
+ * Générateur de licence autonome (page `/super-admin/licenses`) :
+ * - cible = organisation existante (la clé est alors attribuée en base,
+ *   plan ACTIVE, `licenseEndsAt` posée) OU référence client manuelle
+ *   (clé signée à remettre hors-ligne, sans écriture en base) ;
+ * - expiration = durée en mois (0 = perpétuelle) OU date explicite ;
+ * - réutilise `generateLicenseKey()` de `crypto-license.ts` (Ed25519).
+ * Compatible `useActionState`.
+ */
+export async function generateStandaloneLicenseAction(
+  _prevState: GenerateLicenseFormState,
+  formData: FormData
+): Promise<GenerateLicenseFormState> {
+  const admin = await getSuperAdminContext();
+
+  if (!admin) {
+    return {
+      status: "error",
+      message: "Accès refusé : rôle SUPER_ADMIN requis.",
+    };
+  }
+
+  const organizationId = String(formData.get("organizationId") ?? "").trim();
+  const clientRef = String(formData.get("clientRef") ?? "").trim();
+  const planType = String(formData.get("planType") ?? "").trim() as LicensePlanType;
+  let expiryMode = String(formData.get("expiryMode") ?? "duration").trim();
+
+  // Le plan « Desktop hors-ligne — à vie » est TOUJOURS perpétuel, quel que
+  // soit le mode d'expiration renvoyé par le formulaire.
+  if (planType === "DESKTOP_LIFETIME") {
+    expiryMode = "perpetual";
+  }
+  const durationMonths = Number(formData.get("durationMonths"));
+  const expiresAtRaw = String(formData.get("expiresAt") ?? "").trim();
+  const maxStudentsRaw = String(formData.get("maxStudents") ?? "").trim();
+  const maxUsersRaw = String(formData.get("maxUsers") ?? "").trim();
+
+  if (!organizationId && !clientRef) {
+    return {
+      status: "error",
+      message:
+        "Veuillez sélectionner une organisation ou saisir le nom / ID d'un client.",
+    };
+  }
+
+  if (!(LICENSE_PLAN_TYPES as readonly string[]).includes(planType)) {
+    return {
+      status: "error",
+      message: "Type de plan invalide.",
+    };
+  }
+
+  let maxStudents: number | undefined;
+  let maxUsers: number | undefined;
+
+  if (maxStudentsRaw) {
+    const parsed = Number(maxStudentsRaw);
+
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      return {
+        status: "error",
+        message: "Plafond étudiants invalide (entier positif).",
+      };
+    }
+
+    maxStudents = parsed;
+  }
+
+  if (maxUsersRaw) {
+    const parsed = Number(maxUsersRaw);
+
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      return {
+        status: "error",
+        message: "Plafond utilisateurs invalide (entier positif).",
+      };
+    }
+
+    maxUsers = parsed;
+  }
+
+  // -------------------------------
+  // Calcul de la date d'expiration
+  // -------------------------------
+  const now = new Date();
+  let expiresAt: Date;
+
+  if (expiryMode === "perpetual") {
+    expiresAt = computePerpetualExpiry(now);
+  } else if (expiryMode === "date") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresAtRaw)) {
+      return {
+        status: "error",
+        message: "Date d'expiration invalide (format AAAA-MM-JJ).",
+      };
+    }
+
+    // Fin de journée (UTC) pour ne pas déclencher une expiration anticipée.
+    const parsed = new Date(`${expiresAtRaw}T23:59:59.999Z`);
+
+    if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= now.getTime()) {
+      return {
+        status: "error",
+        message: "La date d'expiration doit être dans le futur.",
+      };
+    }
+
+    expiresAt = parsed;
+  } else {
+    // Mode « durée en mois » (défaut).
+    if (
+      !Number.isInteger(durationMonths) ||
+      durationMonths < 0 ||
+      durationMonths > 120
+    ) {
+      return {
+        status: "error",
+        message:
+          "Durée invalide : entrez un nombre de mois entre 1 et 120 (0 = sans échéance / perpétuelle).",
+      };
+    }
+
+    expiresAt =
+      durationMonths === 0
+        ? computePerpetualExpiry(now)
+        : addMonths(now, durationMonths);
+  }
+
+  // -------------------------------
+  // Cible : organisation existante ou client manuel
+  // -------------------------------
+  let organization: { id: string; name: string } | null = null;
+
+  if (organizationId) {
+    organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true, name: true },
+    });
+
+    if (!organization) {
+      return { status: "error", message: "Organisation introuvable." };
+    }
+  }
+
+  const payloadOrganizationId = organization?.id ?? buildManualClientId(clientRef);
+
+  const payload: LicensePayload = {
+    organizationId: payloadOrganizationId,
+    planType,
+    expiresAt: expiresAt.toISOString(),
+    ...(maxStudents !== undefined ? { maxStudents } : {}),
+    ...(maxUsers !== undefined ? { maxUsers } : {}),
+  };
+
+  let licenseKey: string;
+
+  try {
+    // Signature Ed25519 via LICENSE_PRIVATE_KEY (env serveur).
+    licenseKey = generateLicenseKey(payload);
+  } catch (error) {
+    console.error(
+      "[super-admin] Échec de génération de licence :",
+      error instanceof Error ? error.message : error
+    );
+    return {
+      status: "error",
+      message:
+        "Échec de signature : vérifiez LICENSE_PRIVATE_KEY côté serveur.",
+    };
+  }
+
+  // Auto-contrôle : la clé émise doit repasser la vérification hors-ligne.
+  const selfCheck = verifyLicenseKey(licenseKey);
+
+  if (!selfCheck.valid) {
+    console.error(
+      `[super-admin] Auto-contrôle échoué (${selfCheck.reason}) pour ${payloadOrganizationId}.`
+    );
+    return {
+      status: "error",
+      message:
+        "La clé générée ne passe pas la vérification interne. Contactez le support technique.",
+    };
+  }
+
+  // Organisation existante → la clé est attribuée et le plan activé.
+  if (organization) {
+    await prisma.organization.update({
+      where: { id: organization.id },
+      data: {
+        planType,
+        planStatus: "ACTIVE",
+        licenseKey,
+        licenseEndsAt: expiresAt,
+        trialEndsAt: null,
+      },
+    });
+
+    revalidatePath("/super-admin");
+    revalidatePath("/dashboard/billing");
+  }
+
+  const displayName = organization?.name ?? clientRef.trim();
+
+  return {
+    status: "success",
+    message: `Licence ${planType} générée pour « ${displayName} » — expire le ${expiresAt.toLocaleDateString("fr-FR")}.${organization ? " Le plan de l'organisation a été activé." : " Transmettez la clé ci-dessous au client (hors-ligne / desktop)."}`,
+    licenseKey,
+    organizationName: displayName,
+  };
+}
 // --------------------------------------
 // Action « Prolonger l'Essai » (+15 / +30 jours)
 // --------------------------------------
@@ -435,6 +698,98 @@ export async function setOrganizationStatusAction(
     success: true,
     message: `« ${organization.name} » ${effect}`,
   };
+}
+
+// --------------------------------------
+// Factures & Paiements SaaS (vue Super-Admin)
+// --------------------------------------
+
+/** Ligne de facture SaaS affichée dans le back-office Super-Admin. */
+export type SuperAdminInvoiceRow = {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  planType: string;
+  amount: number;
+  currency: string;
+  paymentProvider: string | null;
+  paymentMethod: string | null;
+  transactionReference: string | null;
+  status: string;
+  description: string | null;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  paidAt: Date | null;
+  createdAt: Date;
+};
+
+/** Indicateurs agrégés du tableau « Factures & Paiements SaaS ». */
+export type SuperAdminInvoiceStats = {
+  total: number;
+  completed: number;
+  pending: number;
+  failed: number;
+  /** Revenu cumulé des factures COMPLETED (XOF). */
+  revenueXOF: number;
+};
+
+/**
+ * Liste transversale des factures d'abonnement SaaS de TOUTES les
+ * organisations (avec le nom de l'organisation cliente). Réservé SUPER_ADMIN.
+ */
+export async function listInvoicesForSuperAdmin(
+  limit = 200
+): Promise<{ invoices: SuperAdminInvoiceRow[]; stats: SuperAdminInvoiceStats }> {
+  const admin = await getSuperAdminContext();
+
+  if (!admin) {
+    redirect("/dashboard");
+  }
+
+  const invoices = await prisma.invoice.findMany({
+    orderBy: { createdAt: "desc" },
+    take: Math.min(Math.max(limit, 1), 500),
+    include: { organization: { select: { name: true } } },
+  });
+
+  const stats: SuperAdminInvoiceStats = {
+    total: invoices.length,
+    completed: 0,
+    pending: 0,
+    failed: 0,
+    revenueXOF: 0,
+  };
+
+  const rows: SuperAdminInvoiceRow[] = invoices.map((invoice) => {
+    if (invoice.status === "COMPLETED") {
+      stats.completed += 1;
+      stats.revenueXOF += invoice.amount;
+    } else if (invoice.status === "PENDING") {
+      stats.pending += 1;
+    } else if (invoice.status === "FAILED") {
+      stats.failed += 1;
+    }
+
+    return {
+      id: invoice.id,
+      organizationId: invoice.organizationId,
+      organizationName: invoice.organization.name,
+      planType: invoice.planType,
+      amount: invoice.amount,
+      currency: invoice.currency,
+      paymentProvider: invoice.paymentProvider,
+      paymentMethod: invoice.paymentMethod,
+      transactionReference: invoice.transactionReference,
+      status: invoice.status,
+      description: invoice.description,
+      periodStart: invoice.periodStart,
+      periodEnd: invoice.periodEnd,
+      paidAt: invoice.paidAt,
+      createdAt: invoice.createdAt,
+    };
+  });
+
+  return { invoices: rows, stats };
 }
 
 

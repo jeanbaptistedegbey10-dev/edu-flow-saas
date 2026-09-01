@@ -18,6 +18,7 @@ export const PLAN_TYPES = [
   "SAAS_YEARLY",
   "SELF_HOSTED",
   "OFFLINE",
+  "DESKTOP_LIFETIME",
 ] as const;
 
 export type PlanType = (typeof PLAN_TYPES)[number];
@@ -31,6 +32,7 @@ export const LICENSE_PLAN_TYPES = [
   "SAAS_YEARLY",
   "SELF_HOSTED",
   "OFFLINE",
+  "DESKTOP_LIFETIME",
 ] as const;
 
 export type LicensePlanType = (typeof LICENSE_PLAN_TYPES)[number];
@@ -47,6 +49,7 @@ export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
   SAAS_YEARLY: "SaaS annuel",
   SELF_HOSTED: "Licence auto-hébergée",
   OFFLINE: "Licence hors-ligne",
+  DESKTOP_LIFETIME: "Desktop hors-ligne — à vie",
 };
 
 /** Libellés français des statuts de plan (UI). */
@@ -68,6 +71,8 @@ export const PLAN_TYPE_BADGE_CLASSES: Record<PlanType, string> = {
     "border border-emerald-200/60 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400",
   OFFLINE:
     "border border-violet-200/60 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-400",
+  DESKTOP_LIFETIME:
+    "border border-fuchsia-200/60 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-500/20 dark:bg-fuchsia-500/10 dark:text-fuchsia-400",
 };
 
 /** Classes Tailwind des badges de statut de plan. */

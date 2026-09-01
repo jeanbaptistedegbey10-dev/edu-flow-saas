@@ -34,6 +34,7 @@ import { getToken } from "next-auth/jwt";
 // sans accès base de données : le fichier reste léger et rapide.
 
 const LOGIN_PATH = "/login";
+const HOME_PATH = "/";
 const DASHBOARD_PATH = "/dashboard";
 const SUPER_ADMIN_PATH = "/super-admin";
 
@@ -170,6 +171,22 @@ export async function proxy(request: NextRequest) {
   }
 
   // --------------------------------------
+  // Super-Admin : espace de travail = /super-admin
+  // --------------------------------------
+  // Un utilisateur ayant le rôle SUPER_ADMIN ne doit JAMAIS atterrir sur
+  // l'accueil (`/`) ni sur le tableau de bord d'un centre de formation
+  // client (/dashboard*) : il est renvoyé vers son back-office /super-admin.
+  // Aucun risque de boucle : on ne redirige QUE depuis `/` et `/dashboard`.
+  const role = typeof token.role === "string" ? token.role : null;
+
+  if (
+    role === "SUPER_ADMIN" &&
+    (pathname === HOME_PATH || pathname.startsWith(DASHBOARD_PATH))
+  ) {
+    return NextResponse.redirect(new URL(SUPER_ADMIN_PATH, request.url));
+  }
+
+  // --------------------------------------
   // Back-office Super-Admin : réservé au rôle SUPER_ADMIN
   // --------------------------------------
   // Première barrière (JWT, sans accès base de données) : tout utilisateur
@@ -179,8 +196,6 @@ export async function proxy(request: NextRequest) {
   // (relecture du rôle en base) vit dans src/lib/super-admin.ts et dans
   // chaque Server Action de src/actions/super-admin.ts.
   if (pathname.startsWith(SUPER_ADMIN_PATH)) {
-    const role = typeof token.role === "string" ? token.role : null;
-
     if (role !== "SUPER_ADMIN") {
       return NextResponse.redirect(new URL(DASHBOARD_PATH, request.url));
     }
@@ -199,7 +214,6 @@ export async function proxy(request: NextRequest) {
 
   // Contrôle d'accès par rôle sur /dashboard
   if (pathname.startsWith(DASHBOARD_PATH)) {
-    const role = typeof token.role === "string" ? token.role : null;
 
     // AUCUN accès au tableau de bord pour les étudiants :
     // ils ne disposent d'aucun compte dans cette application.
@@ -226,13 +240,16 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/*.
-  // Tout le reste (/, /login, /api, /_next, /favicon.ico, assets) est ignoré
+  // Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/* et
+  // /super-admin/*, plus l'accueil `/` (intercepté uniquement pour la
+  // redirection Super-Admin → /super-admin ; les non-connectés y sont
+  // laissés tels quels, la page / les renvoie ensuite vers /dashboard).
+  // Tout le reste (/login, /api, /_next, /favicon.ico, assets) est ignoré
   // par le middleware et passe directement en NextResponse.next() — le proxy
   // n'intervient JAMAIS ailleurs, sans AUCUNE redirection. Cette exclusion
   // stricte de /login casse la boucle infinie sur Vercel :
   // /dashboard → /login → /dashboard → … (ERR_TOO_MANY_REDIRECTS), liée à un
   // désaccord entre getToken() (proxy) et auth() (page /login). La page /login
   // n'effectue plus, elle-même, aucune redirection serveur → /dashboard.
-  matcher: ["/dashboard/:path*", "/super-admin/:path*"],
+  matcher: ["/", "/dashboard/:path*", "/super-admin/:path*"],
 };
