@@ -27,6 +27,7 @@ const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 // Doit correspondre exactement à `LICENSE_PLAN_TYPES` de src/lib/plan-labels.ts.
 const LICENSE_PLAN_TYPES = [
   "SAAS_MONTHLY",
+  "SAAS_HALF_YEAR",
   "SAAS_YEARLY",
   "SELF_HOSTED",
   "OFFLINE",

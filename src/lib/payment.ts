@@ -27,72 +27,206 @@ import {
   verifyLicenseKey,
   type LicensePayload,
 } from "@/lib/crypto-license";
+import {
+  DEFAULT_PLAN_PRICING,
+  PRICING_PLAN_LABELS,
+  PRICING_PLAN_TAGLINES,
+  PRICING_PLAN_TYPES,
+  SUBSCRIPTION_PRICE_KIND_LABELS,
+  getLicensePlanTypeFor,
+  isBillingDuration,
+  isPricingPlanType,
+  type BillingDuration,
+  type PlanPricingValues,
+  type PricingPlanType,
+  type SubscriptionPriceKind,
+} from "@/lib/plan-pricing";
 import { prisma } from "@/lib/prisma";
 
 // --------------------------------------
-// Tarification des offres SaaS (XOF / FCFA)
+// Tarification dynamique (modèle commercial hybride)
 // --------------------------------------
+//
+// La grille tarifaire n'est PLUS une constante : elle vit dans la table
+// `PlanPricing`, éditable en direct par le Super-Admin
+// (/super-admin/pricing → Server Action `updatePlanPricingAction`).
+//
+// `calculateSubscriptionPrice` applique le modèle « Acquisition +
+// Renouvellement » en contrôlant l'HISTORIQUE DE FACTURATION de
+// l'organisation :
+//   - AUCUNE facture COMPLETED        → `initialPrice` (1ʳᵉ année / licence +
+//     logiciel) ;
+//   - au moins une facture COMPLETED  → tarif de renouvellement selon la
+//     durée souscrite : `renewalAnnualPrice` (12 mois) ou
+//     `renewalHalfYearPrice` (6 mois).
 
-/** Offres d'abonnement achetables en ligne via la passerelle. */
-export type SaasPlanType = "SAAS_MONTHLY" | "SAAS_YEARLY";
+/** Ligne de la grille tarifaire (base ou repli par défaut). */
+export type PlanPricingRow = PlanPricingValues & {
+  planType: PricingPlanType;
+  currency: string;
+  /** Dernière modification en base (absente en mode repli). */
+  updatedAt?: Date;
+};
 
-export const SAAS_PLAN_TYPES: readonly SaasPlanType[] = [
-  "SAAS_MONTHLY",
-  "SAAS_YEARLY",
-] as const;
-
-/** Définition d'une offre commerciale (source de vérité des prix). */
-export type SaasPlanDefinition = {
-  planType: SaasPlanType;
-  /** Libellé commercial affiché dans l'UI. */
+/** Résultat du calcul dynamique du tarif d'un abonnement. */
+export type SubscriptionPrice = {
+  planType: PricingPlanType;
+  /** Durée souscrite : 12 ou 6 mois. */
+  durationMonths: BillingDuration;
+  /** Montant à facturer (XOF / FCFA — pas de centimes en zone UEMOA). */
+  amount: number;
+  currency: string;
+  /** Prix appliqué : première souscription ou renouvellement. */
+  kind: SubscriptionPriceKind;
+  /** `true` si première souscription (aucune facture COMPLETED). */
+  isInitial: boolean;
+  /** Libellé commercial complet (ex : « SaaS Cloud — Renouvellement 12 mois »). */
   label: string;
-  /** Prix en XOF (FCFA) — pas de centimes dans la zone UEMOA. */
-  amountXOF: number;
-  /** Durée de validité de la licence générée. */
-  periodMonths: number;
-  /** Accroche marketing affichée sous le prix. */
-  tagline: string;
 };
 
 /**
- * Grille tarifaire du SaaS :
- * - Mensuel  : 15 000 XOF / mois ;
- * - Annuel   : 150 000 XOF / an (soit 2 mois offerts vs. le mensuel).
+ * Grille tarifaire par défaut — miroir du seed de la migration
+ * `20260901000000_add_plan_pricing` :
+ * - SaaS Cloud      : 80 000 (1ʳᵉ année) / 50 000 (12 mois) / 30 000 (6 mois) ;
+ * - Self-Hosted     : 160 000 / 80 000 / 45 000 ;
+ * - Desktop Offline : 160 000 / 80 000 / 45 000.
+ * Utilisée en repli si une ligne `PlanPricing` est absente de la base.
  */
-export const SAAS_PLAN_PRICES: Record<SaasPlanType, SaasPlanDefinition> = {
-  SAAS_MONTHLY: {
-    planType: "SAAS_MONTHLY",
-    label: "Abonnement mensuel",
-    amountXOF: 15_000,
-    periodMonths: 1,
-    tagline: "Flexibilité totale, sans engagement.",
-  },
-  SAAS_YEARLY: {
-    planType: "SAAS_YEARLY",
-    label: "Abonnement annuel",
-    amountXOF: 150_000,
-    periodMonths: 12,
-    tagline: "2 mois offerts par rapport au mensuel.",
-  },
+/**
+ * Retourne la grille tarifaire complète (une ligne par formule commerciale).
+ * Les formules absentes de la base retombent sur `DEFAULT_PLAN_PRICING` :
+ * aucune page de paiement ne casse si le seed n'a pas encore été joué.
+ */
+export async function getPlanPricingGrid(): Promise<
+  Record<PricingPlanType, PlanPricingRow>
+> {
+  const rows = await prisma.planPricing.findMany();
+
+  const grid = {} as Record<PricingPlanType, PlanPricingRow>;
+
+  for (const planType of PRICING_PLAN_TYPES) {
+    const row = rows.find((candidate) => candidate.planType === planType);
+
+    grid[planType] = row
+      ? {
+          planType,
+          initialPrice: row.initialPrice,
+          renewalAnnualPrice: row.renewalAnnualPrice,
+          renewalHalfYearPrice: row.renewalHalfYearPrice,
+          currency: row.currency,
+          updatedAt: row.updatedAt,
+        }
+      : {
+          planType,
+          ...DEFAULT_PLAN_PRICING[planType],
+          currency: "XOF",
+        };
+  }
+
+  return grid;
+}
+
+/** Nombre de factures réglées (COMPLETED) d'une organisation. */
+async function countCompletedInvoices(organizationId: string): Promise<number> {
+  return prisma.invoice.count({
+    where: { organizationId, status: "COMPLETED" },
+  });
+}
+
+/**
+ * Calcule DYNAMIQUEMENT le tarif applicable à une organisation pour une
+ * formule et une durée données (modèle hybride Acquisition + Renouvellement).
+ *
+ * Contrôle effectué sur la table `Invoice` :
+ *   1. aucune facture COMPLETED → `initialPrice` (durée 12 mois : 1ʳᵉ année) ;
+ *   2. au moins une facture COMPLETED → `renewalAnnualPrice` (12 mois) ou
+ *      `renewalHalfYearPrice` (6 mois).
+ *
+ * @param organizationId Organisation cliente (contexte serveur résolu).
+ * @param planType       Formule commerciale (SAAS_CLOUD | SELF_HOSTED | DESKTOP_OFFLINE).
+ * @param durationMonths Durée souscrite (12 ou 6 mois).
+ */
+export async function calculateSubscriptionPrice(
+  organizationId: string,
+  planType: PricingPlanType,
+  durationMonths: BillingDuration
+): Promise<SubscriptionPrice> {
+  if (!isPricingPlanType(planType)) {
+    throw new Error(
+      `[pricing] Formule commerciale inconnue : ${String(planType)}.`
+    );
+  }
+
+  if (!isBillingDuration(durationMonths)) {
+    throw new Error(
+      `[pricing] Durée de facturation non supportée : ${String(durationMonths)} (12 ou 6 mois attendus).`
+    );
+  }
+
+  const [completedInvoices, grid] = await Promise.all([
+    countCompletedInvoices(organizationId),
+    getPlanPricingGrid(),
+  ]);
+
+  const pricing = grid[planType];
+  const isInitial = completedInvoices === 0;
+  const kind: SubscriptionPriceKind = isInitial
+    ? "INITIAL"
+    : durationMonths === 12
+      ? "RENEWAL_ANNUAL"
+      : "RENEWAL_HALF_YEAR";
+
+  const amount = isInitial
+    ? pricing.initialPrice
+    : durationMonths === 12
+      ? pricing.renewalAnnualPrice
+      : pricing.renewalHalfYearPrice;
+
+  return {
+    planType,
+    durationMonths,
+    amount,
+    currency: pricing.currency,
+    kind,
+    isInitial,
+    label: `${PRICING_PLAN_LABELS[planType]} — ${SUBSCRIPTION_PRICE_KIND_LABELS[kind]}`,
+  };
+}
+
+/** Entrée du catalogue tarifaire affiché sur /dashboard/billing. */
+export type PricingCatalogEntry = PlanPricingRow & {
+  label: string;
+  tagline: string;
+  /** `true` = première souscription : le prix initial s'applique. */
+  isInitial: boolean;
 };
 
-/** Vérifie que la valeur est bien une offre achetable en ligne. */
-export function isSaasPlanType(value: unknown): value is SaasPlanType {
-  return (
-    typeof value === "string" &&
-    (SAAS_PLAN_TYPES as readonly string[]).includes(value)
-  );
+/**
+ * Catalogue tarifaire d'une organisation : pour CHAQUE formule commerciale,
+ * indique si le client est en acquisition (prix initial) ou en
+ * renouvellement — la page de facturation affiche ainsi automatiquement le
+ * bon tarif selon le statut du client.
+ */
+export async function getPricingCatalogForOrganization(
+  organizationId: string
+): Promise<PricingCatalogEntry[]> {
+  const [grid, completedInvoices] = await Promise.all([
+    getPlanPricingGrid(),
+    countCompletedInvoices(organizationId),
+  ]);
+
+  const isInitial = completedInvoices === 0;
+
+  return PRICING_PLAN_TYPES.map((planType) => ({
+    ...grid[planType],
+    label: PRICING_PLAN_LABELS[planType],
+    tagline: PRICING_PLAN_TAGLINES[planType],
+    isInitial,
+  }));
 }
 
-/** Formate un montant XOF pour l'affichage (ex : « 15 000 FCFA »). */
-export function formatXOF(amount: number): string {
-  return (
-    new Intl.NumberFormat("fr-FR", {
-      style: "decimal",
-      maximumFractionDigits: 0,
-    }).format(amount) + " FCFA"
-  );
-}
+/** Formate un montant XOF pour l'affichage (ex : « 80 000 FCFA »). */
+export { formatXOF } from "@/lib/plan-pricing";
 
 // --------------------------------------
 // Configuration de l'agrégateur (variables d'environnement)
@@ -221,7 +355,10 @@ export function getWebhookUrl(): string {
 export type InitiateSubscriptionInput = {
   organizationId: string;
   organizationName: string;
-  planType: SaasPlanType;
+  /** Formule commerciale de la grille tarifaire dynamique. */
+  planType: PricingPlanType;
+  /** Durée souscrite : 12 mois (annuel) ou 6 mois (semestriel). */
+  durationMonths: BillingDuration;
   /** Email / téléphone du payeur (pré-remplissage chez l'agrégateur). */
   customerEmail?: string | null;
   customerPhone?: string | null;
@@ -244,7 +381,11 @@ export type KkiapayWidgetPayment = {
   /** Page de retour après tentative de paiement. */
   callbackUrl: string;
   /** Métadonnées ré-acheminées par Kkiapay dans le webhook (`stateData`). */
-  metadata: { organizationId: string; planType: SaasPlanType };
+  metadata: {
+    organizationId: string;
+    planType: PricingPlanType;
+    durationMonths: BillingDuration;
+  };
 };
 
 export type InitiateSubscriptionResult =
@@ -264,9 +405,9 @@ export type InitiateSubscriptionResult =
 async function initiateFedapayCheckout(
   input: InitiateSubscriptionInput,
   reference: string,
-  config: ReturnType<typeof getPaymentConfig>
+  config: ReturnType<typeof getPaymentConfig>,
+  pricing: SubscriptionPrice
 ): Promise<string> {
-  const plan = SAAS_PLAN_PRICES[input.planType];
   const baseUrl = config.sandbox
     ? "https://api-sandbox.fedapay.com"
     : "https://api.fedapay.com";
@@ -283,14 +424,15 @@ async function initiateFedapayCheckout(
     method: "POST",
     headers,
     body: JSON.stringify({
-      description: `${plan.label} EduFlow — ${input.organizationName}`,
-      amount: plan.amountXOF,
+      description: `${pricing.label} EduFlow — ${input.organizationName}`,
+      amount: pricing.amount,
       currency: { iso: "XOF" },
       callback_url: `${getAppBaseUrl()}/dashboard/billing?payment=pending`,
       merchant_reference: reference,
       custom_data: {
         organizationId: input.organizationId,
         planType: input.planType,
+        durationMonths: input.durationMonths,
       },
     }),
   });
@@ -391,7 +533,14 @@ export async function initiateSubscriptionPayment(
     };
   }
 
-  const plan = SAAS_PLAN_PRICES[input.planType];
+  // Tarif DYNAMIQUE : prix initial (1ʳᵉ année) ou renouvellement (12 / 6 mois)
+  // selon l'historique de facturation de l'organisation (factures COMPLETED).
+  const pricing = await calculateSubscriptionPrice(
+    input.organizationId,
+    input.planType,
+    input.durationMonths
+  );
+
   const random = Math.random().toString(36).slice(2, 8).toUpperCase();
   const reference = `EDU-${Date.now()}-${random}`;
 
@@ -400,11 +549,11 @@ export async function initiateSubscriptionPayment(
     data: {
       organizationId: input.organizationId,
       planType: input.planType,
-      amount: plan.amountXOF,
-      currency: "XOF",
+      amount: pricing.amount,
+      currency: pricing.currency,
       paymentProvider: config.provider,
       status: "PENDING",
-      description: `${plan.label} EduFlow — ${input.organizationName}`,
+      description: `${pricing.label} EduFlow — ${input.organizationName}`,
     },
   });
 
@@ -413,7 +562,8 @@ export async function initiateSubscriptionPayment(
       const checkoutUrl = await initiateFedapayCheckout(
         input,
         reference,
-        config
+        config,
+        pricing
       );
 
       return { status: "success", provider: config.provider, checkoutUrl };
@@ -430,7 +580,7 @@ export async function initiateSubscriptionPayment(
       provider: "kkiapay",
       widget: {
         publicKey: config.publicKey,
-        amount: plan.amountXOF,
+        amount: pricing.amount,
         currency: "XOF",
         reference,
         sandbox: config.sandbox,
@@ -438,6 +588,7 @@ export async function initiateSubscriptionPayment(
         metadata: {
           organizationId: input.organizationId,
           planType: input.planType,
+          durationMonths: input.durationMonths,
         },
       },
     };
@@ -580,9 +731,32 @@ export type NormalizedWebhook = {
   method: string | null;
   /** Montant payé, si la passerelle le renvoie. */
   amount: number | null;
-  /** Métadonnées transmises à l'initiation (organizationId, planType). */
-  metadata: { organizationId?: string; planType?: string };
+  /**
+   * Métadonnées transmises à l'initiation (organizationId, formule
+   * commerciale et durée souscrite).
+   */
+  metadata: {
+    organizationId?: string;
+    planType?: string;
+    durationMonths?: number;
+  };
 };
+
+/**
+ * Parse robuste de la durée souscrite renvoyée par l'agrégateur : certains
+ * transitent en nombre, d'autres ré-encodent les metadata en chaînes.
+ */
+function parseDurationMonths(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    return Number(value.trim());
+  }
+
+  return undefined;
+}
 
 /** Valeurs considérées comme « paiement réussi » chez les deux agrégateurs. */
 const SUCCESS_STATUSES = new Set([
@@ -623,6 +797,7 @@ function normalizeKkiapayPayload(
         typeof stateData.planType === "string"
           ? stateData.planType
           : undefined,
+      durationMonths: parseDurationMonths(stateData.durationMonths),
     },
   };
 }
@@ -661,6 +836,7 @@ function normalizeFedapayPayload(
         typeof customData.planType === "string"
           ? customData.planType
           : undefined,
+      durationMonths: parseDurationMonths(customData.durationMonths),
     },
   };
 }
@@ -721,22 +897,25 @@ export async function activateSubscriptionAfterPayment(
     return { status: "ignored", message: "Paiement non réussi — ignoré." };
   }
 
-  const { organizationId, planType } = webhook.metadata;
+  const { organizationId, planType, durationMonths } = webhook.metadata;
 
-  if (!organizationId || !isSaasPlanType(planType)) {
+  if (
+    !organizationId ||
+    !isPricingPlanType(planType) ||
+    !isBillingDuration(durationMonths)
+  ) {
     console.error(
-      "[payment][webhook] Metadata manquante ou plan inconnu :",
+      "[payment][webhook] Metadata manquante ou formule/durée inconnue :",
       webhook.metadata
     );
 
     return {
       status: "error",
-      message: "Metadata organizationId / planType absente ou invalide.",
+      message:
+        "Metadata organizationId / planType / durationMonths absente ou invalide.",
       retryable: false,
     };
   }
-
-  const plan = SAAS_PLAN_PRICES[planType];
 
   try {
     // Idempotence : une référence de transaction déjà traitée est ignorée.
@@ -767,16 +946,28 @@ export async function activateSubscriptionAfterPayment(
       };
     }
 
-    // 1. Période d'abonnement : +1 mois (mensuel) ou +12 mois (annuel).
-    const periodStart = new Date();
-    const periodEnd = addMonths(periodStart, plan.periodMonths);
-
-    // 2. Clé de licence signée Ed25519 (LICENSE_PRIVATE_KEY).
-    //    `planType` a été resserré à SaasPlanType, un sous-ensemble direct de
-    //    LicensePlanType (pas de « TRIAL » : l'essai ne porte pas de clé).
-    const licensePayload: LicensePayload = {
+    // 1. Tarif DYNAMIQUE (initial vs renouvellement selon l'historique de
+    //    facturation) + période d'abonnement couverte par le paiement.
+    const pricing = await calculateSubscriptionPrice(
       organizationId,
       planType,
+      durationMonths
+    );
+
+    // Type de plan de LICENCE correspondant à la formule commerciale et à la
+    // durée (ex : SAAS_CLOUD + 6 mois → SAAS_HALF_YEAR) — utilisé pour
+    // `Organization.planType`, la facture et le payload signé.
+    const licensePlanType = getLicensePlanTypeFor(planType, durationMonths);
+
+    const periodStart = new Date();
+    const periodEnd = addMonths(periodStart, durationMonths);
+
+    // 2. Clé de licence signée Ed25519 (LICENSE_PRIVATE_KEY).
+    //    `licensePlanType` est un LicensePlanType (pas de « TRIAL » : l'essai
+    //    ne porte pas de clé).
+    const licensePayload: LicensePayload = {
+      organizationId,
+      planType: licensePlanType,
       expiresAt: periodEnd.toISOString(),
     };
 
@@ -796,7 +987,7 @@ export async function activateSubscriptionAfterPayment(
       prisma.organization.update({
         where: { id: organizationId },
         data: {
-          planType,
+          planType: licensePlanType,
           planStatus: "ACTIVE",
           licenseKey,
           licenseEndsAt: periodEnd,
@@ -806,14 +997,14 @@ export async function activateSubscriptionAfterPayment(
       prisma.invoice.create({
         data: {
           organizationId,
-          planType,
-          amount: webhook.amount ?? plan.amountXOF,
-          currency: "XOF",
+          planType: licensePlanType,
+          amount: webhook.amount ?? pricing.amount,
+          currency: pricing.currency,
           paymentProvider: getPaymentConfig().provider,
           paymentMethod: webhook.method,
           transactionReference: webhook.transactionReference,
           status: "COMPLETED",
-          description: `${plan.label} EduFlow — ${organization.name}`,
+          description: `${pricing.label} EduFlow — ${organization.name}`,
           licenseKey,
           periodStart,
           periodEnd,
@@ -823,12 +1014,12 @@ export async function activateSubscriptionAfterPayment(
     ]);
 
     console.log(
-      `[payment][webhook] Abonnement ${planType} activé pour ${organization.name} (jusqu'au ${periodEnd.toISOString()}).`
+      `[payment][webhook] Abonnement ${pricing.label} activé pour ${organization.name} (jusqu'au ${periodEnd.toISOString()}).`
     );
 
     return {
       status: "success",
-      message: `Abonnement ${plan.label} activé jusqu'au ${periodEnd.toLocaleDateString("fr-FR")}.`,
+      message: `Abonnement ${pricing.label} activé jusqu'au ${periodEnd.toLocaleDateString("fr-FR")}.`,
     };
   } catch (error) {
     console.error(

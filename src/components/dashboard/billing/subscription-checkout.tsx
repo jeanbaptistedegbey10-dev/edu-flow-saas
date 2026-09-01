@@ -27,13 +27,29 @@ import { Button } from "@/components/ui/button";
 // le widget Kkiapay. La validation finale (licence + organisation + facture)
 // est réalisée côté serveur par le webhook signé `/api/webhooks/payment`.
 
-/** Offre commerciale pré-formatée par la page serveur (aucun import serveur ici). */
-export type CheckoutPlan = {
-  planType: "SAAS_MONTHLY" | "SAAS_YEARLY";
-  label: string;
+/** Option de prix pré-formatée par la page serveur (aucun import serveur ici). */
+export type CheckoutPlanOption = {
+  /** Durée facturable : 12 mois ou 6 mois. */
+  durationMonths: number;
+  /** Libellé de l'option (ex : « 1ʳᵉ année — licence + logiciel »). */
+  name: string;
+  /** Prix applicable au statut du client, pré-formaté (XOF). */
   priceText: string;
+  /** Période couverte (ex : « 12 mois »). */
   periodLabel: string;
+  /** Option mise en avant (durée standard de la formule). */
+  isPrimary: boolean;
+};
+
+/** Formule commerciale pré-formatée par la page serveur (aucun import serveur ici). */
+export type CheckoutPlan = {
+  planType: "SAAS_CLOUD" | "SELF_HOSTED" | "DESKTOP_OFFLINE";
+  label: string;
   tagline: string;
+  /** « Tarif acquisition » ou « Tarif renouvellement » (statut du client). */
+  priceKindLabel: string;
+  /** Options facturables : 12 mois (toujours) + 6 mois (renouvellement). */
+  options: CheckoutPlanOption[];
 };
 
 type Props = {
@@ -129,14 +145,14 @@ export function SubscriptionCheckout({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  function purchase(planType: CheckoutPlan["planType"]) {
+  function purchase(planType: CheckoutPlan["planType"], durationMonths: number) {
     setError(null);
-    setPendingPlan(planType);
+    setPendingPlan(`${planType}:${durationMonths}`);
 
     startTransition(async () => {
       try {
         const result: InitiateSubscriptionActionResult =
-          await initiateSubscriptionPaymentAction(planType);
+          await initiateSubscriptionPaymentAction(planType, durationMonths);
 
         if (result.status === "error") {
           setError(result.message);
@@ -194,58 +210,72 @@ export function SubscriptionCheckout({
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {plans.map((plan) => {
-          const loading = pendingPlan === plan.planType;
-
-          return (
-            <div
-              key={plan.planType}
-              className="flex flex-col rounded-xl border bg-muted/20 p-5"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{plan.label}</p>
-                  <p className="mt-0.5 text-sm text-muted-foreground">
-                    {plan.tagline}
-                  </p>
-                </div>
-                <p className="text-right">
-                  <span className="text-xl font-semibold tracking-tight">
-                    {plan.priceText}
-                  </span>
-                  <span className="block text-xs text-muted-foreground">
-                    {plan.periodLabel}
-                  </span>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {plans.map((plan) => (
+          <div
+            key={plan.planType}
+            className="flex flex-col rounded-xl border bg-muted/20 p-5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold">{plan.label}</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  {plan.tagline}
                 </p>
               </div>
-
-              <Button
-                type="button"
-                size="lg"
-                className="mt-4 w-full"
-                disabled={!configured || isPending || loading}
-                onClick={() => purchase(plan.planType)}
-              >
-                {loading ? (
-                  <>
-                    <LoaderCircleIcon className="size-4 animate-spin" />
-                    Préparation du paiement…
-                  </>
-                ) : (
-                  <>
-                    {provider === "kkiapay" ? (
-                      <SmartphoneIcon className="size-4" />
-                    ) : (
-                      <CreditCardIcon className="size-4" />
-                    )}
-                    Payer avec Mobile Money / Carte
-                  </>
-                )}
-              </Button>
+              <span className="shrink-0 rounded-full border border-sky-200/60 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400">
+                {plan.priceKindLabel}
+              </span>
             </div>
-          );
-        })}
+
+            <div className="mt-4 flex flex-1 flex-col gap-2">
+              {plan.options.map((option) => {
+                const loading =
+                  pendingPlan === `${plan.planType}:${option.durationMonths}`;
+
+                return (
+                  <div
+                    key={option.durationMonths}
+                    className={
+                      option.isPrimary
+                        ? "flex items-center justify-between gap-3 rounded-lg border border-sky-300 bg-background p-3 dark:border-sky-500/40"
+                        : "flex items-center justify-between gap-3 rounded-lg border bg-background p-3"
+                    }
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{option.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {option.periodLabel}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <p className="text-lg font-semibold tracking-tight">
+                        {option.priceText}
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!configured || isPending || loading}
+                        onClick={() =>
+                          purchase(plan.planType, option.durationMonths)
+                        }
+                      >
+                        {loading ? (
+                          <LoaderCircleIcon className="size-4 animate-spin" />
+                        ) : provider === "kkiapay" ? (
+                          <SmartphoneIcon className="size-4" />
+                        ) : (
+                          <CreditCardIcon className="size-4" />
+                        )}
+                        Payer
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       {error ? (

@@ -14,6 +14,7 @@ import {
   generateStandaloneLicenseAction,
   type GenerateLicenseFormState,
   type LicenseTargetOrganization,
+  type SuperAdminPlanPricingRow,
 } from "@/actions/super-admin";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,11 @@ import {
   PLAN_TYPE_LABELS,
   type LicensePlanType,
 } from "@/lib/plan-labels";
+import {
+  formatXOF,
+  getPricingPlanForLicensePlan,
+  PRICING_PLAN_LABELS,
+} from "@/lib/plan-pricing";
 
 const INITIAL_STATE: GenerateLicenseFormState = { status: "idle" };
 
@@ -59,16 +65,22 @@ type ExpiryMode = "duration" | "date" | "perpetual";
  *
  * 1. Cible : organisation existante (attribution immédiate en base) OU
  *    nom / ID de client saisi librement (clé à transmettre hors-ligne) ;
- * 2. Plan : SAAS_MONTHLY, SAAS_YEARLY, SELF_HOSTED, OFFLINE ou
+ * 2. Plan : SAAS_MONTHLY, SAAS_HALF_YEAR, SAAS_YEARLY, SELF_HOSTED, OFFLINE ou
  *    DESKTOP_LIFETIME (perpétuelle) ;
  * 3. Expiration : durée en mois, date explicite, ou sans échéance ;
- * 4. La clé `EDU-XXXX-XXXX-…` est signée via une Server Action réutilisant
+ * 4. Tarif théorique : la grille tarifaire dynamique (PlanPricing) est
+ *    consultée en continu pour afficher le prix de référence — acquisition
+ *    (prix initial) ou renouvellement (12 / 6 mois) — utile lors de la
+ *    facturation hors-ligne du client ;
+ * 5. La clé `EDU-XXXX-XXXX-…` est signée via une Server Action réutilisant
  *    `generateLicenseKey()` et s'affiche avec un bouton « Copier ».
  */
 export function LicenseGenerator({
   organizations,
+  pricingRows,
 }: {
   organizations: LicenseTargetOrganization[];
+  pricingRows: SuperAdminPlanPricingRow[];
 }) {
   const [state, formAction, isPending] = React.useActionState(
     generateStandaloneLicenseAction,
@@ -89,6 +101,64 @@ export function LicenseGenerator({
   const [session, setSession] = React.useState(0);
 
   const isDesktopLifetime = planType === "DESKTOP_LIFETIME";
+
+  // ------------------------------------
+  // Tarif théorique (référence de facturation hors-ligne)
+  // ------------------------------------
+  //
+  // La formule tarifaire est déduite du plan de licence sélectionné, puis le
+  // prix affiché suit le modèle hybride : prix INITIAL pour un nouveau client
+  // (saisie manuelle) ou une organisation sans aucune facture COMPLETED,
+  // tarif de RENOUVELLEMENT (12 / 6 mois) pour un client déjà facturé.
+
+  const selectedOrganization = organizations.find(
+    (organization) => organization.id === organizationId
+  );
+
+  const pricingPlanType = getPricingPlanForLicensePlan(planType);
+  const pricingRow = pricingRows.find(
+    (candidate) => candidate.planType === pricingPlanType
+  );
+
+  const isInitialPurchase =
+    targetMode === "manual" || !selectedOrganization?.hasCompletedInvoice;
+
+  const referencePrice: { amount: number; kindLabel: string } | null = (() => {
+    if (!pricingRow) {
+      return null;
+    }
+
+    if (expiryMode === "perpetual") {
+      return {
+        amount: pricingRow.initialPrice,
+        kindLabel: "Licence perpétuelle — prix initial de référence",
+      };
+    }
+
+    if (isInitialPurchase) {
+      return {
+        amount: pricingRow.initialPrice,
+        kindLabel: "Prix initial — 1ʳᵉ année (licence + logiciel)",
+      };
+    }
+
+    if (expiryMode === "duration" && durationMonths === 12) {
+      return {
+        amount: pricingRow.renewalAnnualPrice,
+        kindLabel: "Renouvellement 12 mois",
+      };
+    }
+
+    if (expiryMode === "duration" && durationMonths === 6) {
+      return {
+        amount: pricingRow.renewalHalfYearPrice,
+        kindLabel: "Renouvellement 6 mois",
+      };
+    }
+
+    // Durée personnalisée (1 / 3 / 24 / 36 mois ou date) : hors grille.
+    return null;
+  })();
 
   function handlePlanChange(value: string) {
     const next = value as LicensePlanType;
@@ -319,6 +389,62 @@ export function LicenseGenerator({
                   Licence sans échéance (expiration signée à ~100 ans).
                 </p>
               )}
+            </div>
+
+            {/* Tarif théorique : référence pour la facturation hors-ligne. */}
+            <div className="rounded-lg border border-violet-200/70 bg-violet-50/50 p-3 dark:border-violet-500/20 dark:bg-violet-500/5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                    Tarif théorique — {PRICING_PLAN_LABELS[pricingPlanType]}
+                  </p>
+                  {referencePrice ? (
+                    <p className="mt-1 text-lg font-semibold tracking-tight">
+                      {formatXOF(referencePrice.amount)}
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        {referencePrice.kindLabel}
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Durée personnalisée : hors grille — référez-vous aux
+                      tarifs de référence ci-dessous.
+                    </p>
+                  )}
+                </div>
+                <span className="shrink-0 rounded-full border border-violet-200/60 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300">
+                  {isInitialPurchase ? "Acquisition" : "Client existant"}
+                </span>
+              </div>
+
+              {pricingRow ? (
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-md border bg-background p-2">
+                    <p className="text-xs text-muted-foreground">Initial</p>
+                    <p className="text-sm font-semibold">
+                      {formatXOF(pricingRow.initialPrice)}
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-2">
+                    <p className="text-xs text-muted-foreground">12 mois</p>
+                    <p className="text-sm font-semibold">
+                      {formatXOF(pricingRow.renewalAnnualPrice)}
+                    </p>
+                  </div>
+                  <div className="rounded-md border bg-background p-2">
+                    <p className="text-xs text-muted-foreground">6 mois</p>
+                    <p className="text-sm font-semibold">
+                      {formatXOF(pricingRow.renewalHalfYearPrice)}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
+              <p className="mt-2 text-xs text-muted-foreground">
+                Grille éditable dans « 💰 Tarifs &amp; Offres » — à facturer
+                hors-ligne au client (la licence générée ici ne déclenche
+                aucune facture en ligne).
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

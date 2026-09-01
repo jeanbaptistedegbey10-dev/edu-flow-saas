@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Banknote,
   Building2,
   KeyRound,
   ReceiptText,
@@ -30,6 +31,7 @@ import { cn } from "@/lib/utils";
 /**
  * Onglets de navigation du back-office Super-Admin (/super-admin/*) :
  * - 🏢 Organisations (gestion des écoles / clients) ;
+ * - 💰 Tarifs & Offres (grille tarifaire dynamique — acquisition + renouvellement) ;
  * - 🔑 Générateur de Licences (clés Ed25519 pour clients offline/desktop) ;
  * - 💳 Factures & Paiements SaaS.
  */
@@ -47,6 +49,11 @@ const superAdminMenu: SuperAdminMenuItem[] = [
     url: "/super-admin",
     icon: Building2,
     exact: true,
+  },
+  {
+    title: "💰 Tarifs & Offres",
+    url: "/super-admin/pricing",
+    icon: Banknote,
   },
   {
     title: "Générateur de Licences",

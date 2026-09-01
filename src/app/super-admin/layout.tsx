@@ -27,9 +27,9 @@ export const metadata: Metadata = {
  * administrateurs d'écoles (ADMIN) — est redirigé vers /dashboard sans
  * aucune information divulguée.
  *
- * Le layout intègre la `SuperAdminSidebar` (onglets Organisations, Générateur
- * de Licences, Factures & Paiements SaaS) partagée entre toutes les routes
- * `/super-admin/*`.
+ * Le layout intègre la `SuperAdminSidebar` (onglets Organisations,
+ * 💰 Tarifs & Offres, Générateur de Licences, Factures & Paiements SaaS)
+ * partagée entre toutes les routes `/super-admin/*`.
  */
 export default async function SuperAdminLayout({
   children,

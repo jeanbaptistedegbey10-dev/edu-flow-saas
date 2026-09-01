@@ -23,7 +23,8 @@ const BODY = JSON.stringify({
     status: "approved",
     custom_data: {
       organizationId: "org-smoke",
-      planType: "SAAS_MONTHLY",
+      planType: "SAAS_CLOUD",
+      durationMonths: 12,
     },
   },
 });

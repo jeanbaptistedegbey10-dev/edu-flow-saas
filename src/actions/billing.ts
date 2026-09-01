@@ -5,9 +5,9 @@ import { revalidatePath } from "next/cache";
 import { verifyLicenseKey } from "@/lib/crypto-license";
 import {
   initiateSubscriptionPayment,
-  isSaasPlanType,
   type KkiapayWidgetPayment,
 } from "@/lib/payment";
+import { isBillingDuration, isPricingPlanType } from "@/lib/plan-pricing";
 import { prisma } from "@/lib/prisma";
 import {
   getCurrentOrganizationId,
@@ -147,7 +147,12 @@ export async function activateLicenseWithKeyAction(
  * TOUJOURS résolu côté serveur (jamais reçu du client) pour éviter qu'un
  * utilisateur ne paie ou n'active l'abonnement d'une autre organisation.
  *
- * @param planType « SAAS_MONTHLY » ou « SAAS_YEARLY ».
+ * Le montant N'EST JAMAIS fourni par le client : il est recalculé côté
+ * serveur par `calculateSubscriptionPrice` (prix initial si aucune facture
+ * COMPLETED, tarif de renouvellement 12 / 6 mois sinon).
+ *
+ * @param planType       Formule commerciale (SAAS_CLOUD | SELF_HOSTED | DESKTOP_OFFLINE).
+ * @param durationMonths Durée souscrite : 12 mois (annuel) ou 6 mois (semestriel).
  * @returns URL de paiement (page agrégateur ou widget interne) à ouvrir.
  */
 export type InitiateSubscriptionActionResult =
@@ -156,7 +161,8 @@ export type InitiateSubscriptionActionResult =
   | { status: "error"; message: string };
 
 export async function initiateSubscriptionPaymentAction(
-  planType: string
+  planType: string,
+  durationMonths: number
 ): Promise<InitiateSubscriptionActionResult> {
   const session = await getValidatedSessionContext();
 
@@ -167,8 +173,15 @@ export async function initiateSubscriptionPaymentAction(
     };
   }
 
-  if (!isSaasPlanType(planType)) {
-    return { status: "error", message: "Offre d'abonnement inconnue." };
+  if (!isPricingPlanType(planType)) {
+    return { status: "error", message: "Formule commerciale inconnue." };
+  }
+
+  if (!isBillingDuration(durationMonths)) {
+    return {
+      status: "error",
+      message: "Durée d'abonnement invalide (12 ou 6 mois attendus).",
+    };
   }
 
   // Redirige vers /login si le contexte n'est plus résoluble.
@@ -191,6 +204,7 @@ export async function initiateSubscriptionPaymentAction(
     organizationId: organization.id,
     organizationName: organization.name,
     planType,
+    durationMonths,
     customerEmail: organization.email ?? null,
     customerPhone: organization.phone ?? null,
   });

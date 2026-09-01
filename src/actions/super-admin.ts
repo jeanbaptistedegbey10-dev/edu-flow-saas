@@ -18,6 +18,13 @@ import {
   type LicensePlanType,
   type PlanStatus,
 } from "@/lib/plan-labels";
+import {
+  PRICING_PLAN_LABELS,
+  PRICING_PLAN_TYPES,
+  isPricingPlanType,
+  type PricingPlanType,
+} from "@/lib/plan-pricing";
+import { getPlanPricingGrid } from "@/lib/payment";
 import { getSuperAdminContext } from "@/lib/super-admin";
 
 // --------------------------------------
@@ -38,7 +45,7 @@ export type SuperAdminOrganizationRow = {
   name: string;
   slug: string;
   email: string | null;
-  planType: "TRIAL" | "SAAS_MONTHLY" | "SAAS_YEARLY" | "SELF_HOSTED" | "OFFLINE" | "DESKTOP_LIFETIME";
+  planType: "TRIAL" | "SAAS_MONTHLY" | "SAAS_HALF_YEAR" | "SAAS_YEARLY" | "SELF_HOSTED" | "OFFLINE" | "DESKTOP_LIFETIME";
   planStatus: "ACTIVE" | "EXPIRED" | "CANCELLED";
   trialEndsAt: Date | null;
   licenseEndsAt: Date | null;
@@ -77,6 +84,12 @@ export type LicenseTargetOrganization = {
   name: string;
   slug: string;
   planType: string;
+  /**
+   * `true` si l'organisation possède au moins une facture COMPLETED : le
+   * générateur affiche alors le tarif de RENOUVELLEMENT comme tarif
+   * théorique (référence de facturation hors-ligne), sinon le prix initial.
+   */
+  hasCompletedInvoice: boolean;
 };
 
 /**
@@ -90,12 +103,28 @@ export async function listLicenseTargetOrganizations(): Promise<LicenseTargetOrg
     redirect("/dashboard");
   }
 
-  const organizations = await prisma.organization.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, name: true, slug: true, planType: true },
-  });
+  const [organizations, completedInvoices] = await Promise.all([
+    prisma.organization.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, slug: true, planType: true },
+    }),
+    // Organisations déjà clientes (au moins une facture réglée) : le tarif
+    // théorique affiché par le générateur bascule alors en renouvellement.
+    prisma.invoice.findMany({
+      where: { status: "COMPLETED" },
+      select: { organizationId: true },
+      distinct: ["organizationId"],
+    }),
+  ]);
 
-  return organizations;
+  const completedIds = new Set(
+    completedInvoices.map((invoice) => invoice.organizationId)
+  );
+
+  return organizations.map((organization) => ({
+    ...organization,
+    hasCompletedInvoice: completedIds.has(organization.id),
+  }));
 }
 
 // --------------------------------------
@@ -792,4 +821,147 @@ export async function listInvoicesForSuperAdmin(
   return { invoices: rows, stats };
 }
 
+// --------------------------------------
+// Tarifs & Offres — grille tarifaire dynamique (modèle hybride)
+// --------------------------------------
 
+/** Ligne de la grille tarifaire affichée / éditée dans /super-admin/pricing. */
+export type SuperAdminPlanPricingRow = {
+  planType: PricingPlanType;
+  label: string;
+  initialPrice: number;
+  renewalAnnualPrice: number;
+  renewalHalfYearPrice: number;
+  currency: string;
+  /** Date de dernière modification (ISO). */
+  updatedAt: string;
+};
+
+/**
+ * Retourne la grille tarifaire complète (3 formules commerciales) pour la
+ * page « 💰 Tarifs & Offres ». Les lignes absentes de la base retombent sur
+ * la grille par défaut (`DEFAULT_PLAN_PRICING` via `getPlanPricingGrid`).
+ * Réservé au rôle SUPER_ADMIN.
+ */
+export async function listPlanPricingForSuperAdmin(): Promise<
+  SuperAdminPlanPricingRow[]
+> {
+  const admin = await getSuperAdminContext();
+
+  if (!admin) {
+    redirect("/dashboard");
+  }
+
+  const grid = await getPlanPricingGrid();
+
+  return PRICING_PLAN_TYPES.map((planType) => ({
+    planType,
+    label: PRICING_PLAN_LABELS[planType],
+    initialPrice: grid[planType].initialPrice,
+    renewalAnnualPrice: grid[planType].renewalAnnualPrice,
+    renewalHalfYearPrice: grid[planType].renewalHalfYearPrice,
+    currency: grid[planType].currency,
+    updatedAt: (grid[planType].updatedAt ?? new Date()).toISOString(),
+  }));
+}
+
+/** État du formulaire d'édition de la grille tarifaire (`useActionState`). */
+export type UpdatePlanPricingFormState = {
+  status: "idle" | "success" | "error";
+  message?: string;
+  /** Formule concernée par le dernier enregistrement. */
+  planType?: string;
+};
+
+/**
+ * Sauvegarde les ajustements de prix d'une formule commerciale dans la table
+ * `PlanPricing` (upsert). Réservé au rôle SUPER_ADMIN.
+ *
+ * Le modèle commercial hybride impose trois montants par formule :
+ *   - `initialPrice`          : 1ʳᵉ année / licence + logiciel (acquisition) ;
+ *   - `renewalAnnualPrice`    : renouvellement 12 mois ;
+ *   - `renewalHalfYearPrice`  : renouvellement 6 mois.
+ *
+ * Ces montants sont ensuite appliqués automatiquement par
+ * `calculateSubscriptionPrice()` selon l'historique de facturation du client.
+ */
+export async function updatePlanPricingAction(
+  _prevState: UpdatePlanPricingFormState,
+  formData: FormData
+): Promise<UpdatePlanPricingFormState> {
+  const admin = await getSuperAdminContext();
+
+  if (!admin) {
+    return {
+      status: "error",
+      message: "Accès refusé : rôle Super-Admin requis.",
+    };
+  }
+
+  const planTypeRaw = String(formData.get("planType") ?? "").trim();
+
+  if (!isPricingPlanType(planTypeRaw)) {
+    return {
+      status: "error",
+      message: "Formule commerciale inconnue.",
+    };
+  }
+
+  // Les montants sont des entiers en FCFA (pas de centimes en zone UEMOA).
+  const parseAmount = (field: string): number | null => {
+    const raw = String(formData.get(field) ?? "")
+      .trim()
+      .replaceAll(" ", "");
+    return /^\d+$/.test(raw) ? Number(raw) : null;
+  };
+
+  const initialPrice = parseAmount("initialPrice");
+  const renewalAnnualPrice = parseAmount("renewalAnnualPrice");
+  const renewalHalfYearPrice = parseAmount("renewalHalfYearPrice");
+
+  if (
+    initialPrice === null ||
+    renewalAnnualPrice === null ||
+    renewalHalfYearPrice === null ||
+    initialPrice <= 0 ||
+    renewalAnnualPrice <= 0 ||
+    renewalHalfYearPrice <= 0
+  ) {
+    return {
+      status: "error",
+      planType: planTypeRaw,
+      message:
+        "Montants invalides : saisissez des entiers positifs (FCFA), sans devise ni séparateur.",
+    };
+  }
+
+  const MAX_PRICE = 100_000_000;
+
+  if (
+    initialPrice > MAX_PRICE ||
+    renewalAnnualPrice > MAX_PRICE ||
+    renewalHalfYearPrice > MAX_PRICE
+  ) {
+    return {
+      status: "error",
+      planType: planTypeRaw,
+      message: `Montants trop élevés (maximum ${MAX_PRICE.toLocaleString("fr-FR")} FCFA).`,
+    };
+  }
+
+  await prisma.planPricing.upsert({
+    where: { planType: planTypeRaw },
+    create: { planType: planTypeRaw, initialPrice, renewalAnnualPrice, renewalHalfYearPrice },
+    update: { initialPrice, renewalAnnualPrice, renewalHalfYearPrice },
+  });
+
+  revalidatePath("/super-admin/pricing");
+  // La page de facturation cliente affiche la grille dynamique : à invalider.
+  revalidatePath("/dashboard/billing");
+
+  return {
+    status: "success",
+    planType: planTypeRaw,
+    message: `Grille « ${PRICING_PLAN_LABELS[planTypeRaw]} » enregistrée : initial ${initialPrice.toLocaleString("fr-FR")} · renouvellement 12 mois ${renewalAnnualPrice.toLocaleString("fr-FR")} · 6 mois ${renewalHalfYearPrice.toLocaleString("fr-FR")} FCFA.`,
+  };
+}

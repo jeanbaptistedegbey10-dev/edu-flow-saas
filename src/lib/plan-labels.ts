@@ -15,6 +15,7 @@
 export const PLAN_TYPES = [
   "TRIAL",
   "SAAS_MONTHLY",
+  "SAAS_HALF_YEAR",
   "SAAS_YEARLY",
   "SELF_HOSTED",
   "OFFLINE",
@@ -29,6 +30,7 @@ export type PlanType = (typeof PLAN_TYPES)[number];
  */
 export const LICENSE_PLAN_TYPES = [
   "SAAS_MONTHLY",
+  "SAAS_HALF_YEAR",
   "SAAS_YEARLY",
   "SELF_HOSTED",
   "OFFLINE",
@@ -46,6 +48,7 @@ export type PlanStatus = (typeof PLAN_STATUSES)[number];
 export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
   TRIAL: "Essai gratuit",
   SAAS_MONTHLY: "SaaS mensuel",
+  SAAS_HALF_YEAR: "SaaS semestriel",
   SAAS_YEARLY: "SaaS annuel",
   SELF_HOSTED: "Licence auto-hébergée",
   OFFLINE: "Licence hors-ligne",
@@ -65,6 +68,8 @@ export const PLAN_TYPE_BADGE_CLASSES: Record<PlanType, string> = {
     "border border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400",
   SAAS_MONTHLY:
     "border border-sky-200/60 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400",
+  SAAS_HALF_YEAR:
+    "border border-cyan-200/60 bg-cyan-50 text-cyan-700 dark:border-cyan-500/20 dark:bg-cyan-500/10 dark:text-cyan-400",
   SAAS_YEARLY:
     "border border-indigo-200/60 bg-indigo-50 text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-400",
   SELF_HOSTED:

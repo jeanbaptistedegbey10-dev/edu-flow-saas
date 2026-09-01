@@ -36,12 +36,13 @@ import {
   type LicenseRestrictionReason,
 } from "@/lib/license-check";
 import {
-  SAAS_PLAN_PRICES,
   formatXOF,
   getPaymentConfig,
+  getPricingCatalogForOrganization,
   isPaymentGatewayConfigured,
-  type SaasPlanType,
+  type PricingCatalogEntry,
 } from "@/lib/payment";
+import { getCurrentOrganizationId } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Abonnement & licence | EduFlow",
@@ -134,24 +135,52 @@ export default async function BillingPage({
     );
   }
 
-  // Grille tarifaire préparée côté serveur (le composant client de paiement
-  // ne reçoit que des chaînes déjà formatées, sans aucun import serveur).
+  // Grille tarifaire DYNAMIQUE (modèle hybride Acquisition + Renouvellement) :
+  // le statut du client — aucune facture COMPLETED = acquisition (prix
+  // initial), sinon renouvellement (12 ou 6 mois) — détermine les prix
+  // affichés. Le composant client ne reçoit que des chaînes déjà formatées.
   const gateway = getPaymentConfig();
   const gatewayConfigured = isPaymentGatewayConfigured();
 
-  const checkoutPlans: CheckoutPlan[] = (
-    Object.keys(SAAS_PLAN_PRICES) as SaasPlanType[]
-  ).map((slug) => {
-    const plan = SAAS_PLAN_PRICES[slug];
+  const organizationId = await getCurrentOrganizationId();
+  const catalog = await getPricingCatalogForOrganization(organizationId).catch(
+    () => [] as PricingCatalogEntry[]
+  );
 
-    return {
-      planType: plan.planType,
-      label: plan.label,
-      priceText: formatXOF(plan.amountXOF),
-      periodLabel: slug === "SAAS_MONTHLY" ? "/ mois" : "/ an",
-      tagline: plan.tagline,
-    };
-  });
+  const isInitialClient = catalog[0]?.isInitial ?? true;
+
+  const checkoutPlans: CheckoutPlan[] = catalog.map((entry) => ({
+    planType: entry.planType,
+    label: entry.label,
+    tagline: entry.tagline,
+    priceKindLabel: entry.isInitial ? "Tarif acquisition" : "Renouvellement",
+    options: entry.isInitial
+      ? [
+          {
+            durationMonths: 12,
+            name: "1ʳᵉ année — licence + logiciel",
+            priceText: formatXOF(entry.initialPrice),
+            periodLabel: "Couvre 12 mois",
+            isPrimary: true,
+          },
+        ]
+      : [
+          {
+            durationMonths: 12,
+            name: "Renouvellement 12 mois",
+            priceText: formatXOF(entry.renewalAnnualPrice),
+            periodLabel: "Couvre 12 mois",
+            isPrimary: true,
+          },
+          {
+            durationMonths: 6,
+            name: "Renouvellement 6 mois",
+            priceText: formatXOF(entry.renewalHalfYearPrice),
+            periodLabel: "Couvre 6 mois",
+            isPrimary: false,
+          },
+        ],
+  }));
 
   const warningMessage = reason ? RESTRICTION_REASON_MESSAGES[reason] : null;
 
@@ -271,6 +300,26 @@ export default async function BillingPage({
           {license.canWrite
             ? " Votre licence est active : vous pouvez prolonger votre période à tout moment."
             : " Votre accès en écriture sera rétabli automatiquement dès la confirmation du paiement."}
+        </p>
+        <p className="mb-4 text-sm">
+          <span className="font-medium">Statut client : </span>
+          {isInitialClient ? (
+            <>
+              première souscription — le{" "}
+              <span className="font-medium text-sky-700 dark:text-sky-400">
+                tarif initial (1ʳᵉ année)
+              </span>{" "}
+              s&apos;applique automatiquement.
+            </>
+          ) : (
+            <>
+              client existant — les{" "}
+              <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                tarifs de renouvellement
+              </span>{" "}
+              (12 ou 6 mois) s&apos;appliquent automatiquement.
+            </>
+          )}
         </p>
         <SubscriptionCheckout
           plans={checkoutPlans}

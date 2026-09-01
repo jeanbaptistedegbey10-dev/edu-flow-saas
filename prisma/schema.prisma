@@ -628,6 +628,46 @@ model Invoice {
 }
 
 // --------------------------------------
+// Modèle commercial hybride — Grille tarifaire dynamique
+// --------------------------------------
+
+/// Formules commerciales de la plateforme (grille tarifaire éditable par le
+/// Super-Admin dans /super-admin/pricing) :
+/// - SAAS_CLOUD      : abonnement SaaS hébergé (cloud) ;
+/// - SELF_HOSTED     : Self-Hosted Docker (installé chez le client) ;
+/// - DESKTOP_OFFLINE : Desktop Offline .exe (poste de travail isolé).
+enum PricingPlanType {
+  SAAS_CLOUD
+  SELF_HOSTED
+  DESKTOP_OFFLINE
+}
+
+/// Grille tarifaire dynamique par formule commerciale (modèle hybride
+/// « Acquisition + Renouvellement ») :
+/// - initialPrice          : prix de la 1ʳᵉ année (licence + logiciel),
+///                           appliqué tant que l'organisation n'a AUCUNE
+///                           facture COMPLETED ;
+/// - renewalAnnualPrice    : prix de renouvellement pour 12 mois ;
+/// - renewalHalfYearPrice  : prix de renouvellement pour 6 mois.
+/// Une seule ligne par formule (`planType` unique) — éditée en direct par le
+/// Super-Admin via la Server Action `updatePlanPricingAction`.
+model PlanPricing {
+  id                   String          @id @default(cuid())
+  planType             PricingPlanType @unique
+  /// Prix 1ʳᵉ année / Licence + Logiciel (XOF / FCFA — pas de centimes).
+  initialPrice         Int
+  /// Prix de renouvellement 12 mois (XOF / FCFA).
+  renewalAnnualPrice   Int
+  /// Prix de renouvellement 6 mois (XOF / FCFA).
+  renewalHalfYearPrice Int
+  currency             String          @default("XOF")
+  updatedAt            DateTime        @updatedAt
+}
+
+// --------------------------------------
+// POS / Ventes annexes
+// --------------------------------------
+// --------------------------------------
 // POS / Ventes annexes
 // --------------------------------------
 
