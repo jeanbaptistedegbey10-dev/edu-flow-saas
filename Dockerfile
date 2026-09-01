@@ -39,6 +39,7 @@ FROM node:${NODE_VERSION} AS builder
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_OUTPUT_STANDALONE=1 \
     DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public" \
     DIRECT_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 

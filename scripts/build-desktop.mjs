@@ -67,7 +67,13 @@ async function ensureNextStandalone() {
 
   if (!fs.existsSync(path.join(standalone, "server.js"))) {
     log("Build Next.js introuvable — exécution de `npm run build`…");
-    exec("next build", "npm", ["run", "build"], { cwd: ROOT });
+    exec("next build", "npm", ["run", "build"], {
+      cwd: ROOT,
+      // `output: "standalone"` est conditionnel (voir next.config.ts) : il est
+      // réservé aux cibles self-hosted (Docker / Desktop) et doit rester désactivé
+      // pour Vercel, dont le packaging échoue sur ce mode (ENOENT nft.json).
+      env: { ...process.env, NEXT_OUTPUT_STANDALONE: "1" },
+    });
   }
 
   log("Copie du serveur standalone → runtime/web-standalone …");
