@@ -23,3 +23,5 @@ export default async function StudentsPage() {
     />
   );
 }
+
+export const dynamic = "force-dynamic";
