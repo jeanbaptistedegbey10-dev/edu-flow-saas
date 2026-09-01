@@ -205,7 +205,7 @@ export async function addDocumentAction(
   const fileUrl = parseFileUrl(formData.get("fileUrl")?.toString() ?? "");
   if (!fileUrl) {
     fieldErrors.fileUrl =
-      "Lien invalide : collez une URL http(s) complète ou téléversez un fichier.";
+      "Lien invalide : collez une URL http(s) complète (Google Drive, OneDrive, DropBox…).";
   }
 
   // Métadonnée optionnelle fournie par l'upload cloud (ignorée si absurde).

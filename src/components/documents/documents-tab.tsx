@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { useActionState } from "react";
 import {
   CreditCardIcon,
   DownloadIcon,
@@ -12,16 +11,12 @@ import {
   Loader2Icon,
   PaperclipIcon,
   PlaneTakeoffIcon,
-  PlusIcon,
   Trash2Icon,
-  UploadCloudIcon,
 } from "lucide-react";
 
 import {
-  addDocumentAction,
   deleteDocumentAction,
   type DocumentDTO,
-  type DocumentFormState,
   type DocumentsOwner,
 } from "@/actions/documents";
 import {
@@ -35,26 +30,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { AddDocumentModal } from "@/components/documents/add-document-modal";
+import { GoogleDriveGuideModal } from "@/components/documents/google-drive-guide-modal";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -66,9 +44,7 @@ import {
 import {
   getDocumentTypeBadgeClass,
   getDocumentTypeLabel,
-  DOCUMENT_TYPES_ORDER,
 } from "@/lib/document-labels";
-import { uploadDocumentFile } from "@/lib/supabase-storage";
 import { cn } from "@/lib/utils";
 
 // --------------------------------------
@@ -86,8 +62,6 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 
 const BADGE_BASE_CLASSES =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
-
-const INITIAL_FORM_STATE: DocumentFormState = { status: "idle" };
 
 /** Taille affichable (Ko / Mo) depuis un nombre d'octets. */
 function formatFileSize(size: number | null): string {
@@ -120,283 +94,6 @@ function DocumentTypeIcon({
   }
 }
 
-/** Convertit une erreur inconnue en message utilisateur. */
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message
-    ? error.message
-    : "Une erreur inattendue est survenue.";
-}
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return (
-    <p role="alert" className="text-xs font-medium text-destructive">
-      {message}
-    </p>
-  );
-}
-
-// --------------------------------------
-// Modale d'ajout : lien collé OU fichier vers stockage cloud
-// --------------------------------------
-
-type AddMode = "link" | "upload";
-
-/**
- * Formulaire d'ajout proprement dit. Remonté à chaque ouverture de la
- * modale (clé `formKey`) afin de repartir d'un état vierge, y compris après
- * un succès.
- */
-function AddDocumentForm({
-  owner,
-  onCreated,
-}: {
-  owner: DocumentsOwner;
-  onCreated: () => void;
-}) {
-  const [state, formAction, isPending] = React.useActionState(
-    addDocumentAction,
-    INITIAL_FORM_STATE
-  );
-
-  const [mode, setMode] = React.useState<AddMode>("link");
-  const [isUploading, setIsUploading] = React.useState(false);
-  const [uploadError, setUploadError] = React.useState<string | null>(null);
-  const [uploaded, setUploaded] = React.useState<{
-    url: string;
-    size: number;
-    name: string;
-  } | null>(null);
-
-  React.useEffect(() => {
-    if (state.status === "success") {
-      onCreated();
-    }
-  }, [state, onCreated]);
-
-  /** Téléverse directement le fichier vers le stockage cloud (hors serveur web). */
-  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-
-    if (!file) return;
-
-    setIsUploading(true);
-    setUploadError(null);
-    setUploaded(null);
-
-    try {
-      const result = await uploadDocumentFile(file);
-      setUploaded({ url: result.url, size: result.size, name: file.name });
-    } catch (error) {
-      setUploadError(toErrorMessage(error));
-    } finally {
-      setIsUploading(false);
-      event.target.value = "";
-    }
-  }
-
-  return (
-    <form action={formAction} className="flex flex-col gap-4">
-      <input type="hidden" name="studentId" value={owner.studentId ?? ""} />
-      <input
-        type="hidden"
-        name="travelProcedureId"
-        value={owner.travelProcedureId ?? ""}
-      />
-
-      {mode === "upload" && uploaded ? (
-        <>
-          <input type="hidden" name="fileUrl" value={uploaded.url} />
-          <input type="hidden" name="fileSize" value={String(uploaded.size)} />
-        </>
-      ) : null}
-
-      <div className="grid gap-2">
-        <Label htmlFor="document-title">Titre du document</Label>
-        <Input
-          id="document-title"
-          name="title"
-          placeholder="Passeport, Acte de naissance, Bulletin A1…"
-          maxLength={120}
-          required
-          autoFocus
-          aria-invalid={state.fieldErrors?.title ? true : undefined}
-        />
-        <FieldError message={state.fieldErrors?.title} />
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor="document-type">Type de pièce</Label>
-        <Select name="type" defaultValue="OTHER">
-          <SelectTrigger id="document-type" className="w-full">
-            <SelectValue placeholder="Choisir un type" />
-          </SelectTrigger>
-          <SelectContent>
-            {DOCUMENT_TYPES_ORDER.map((value) => (
-              <SelectItem key={value} value={value}>
-                {getDocumentTypeLabel(value)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <fieldset className="grid gap-2 rounded-md border border-slate-200/80 p-3 dark:border-slate-800">
-        <legend className="px-1 text-xs font-medium text-muted-foreground">
-          Source du fichier (stockage externe, jamais sur le serveur web)
-        </legend>
-
-        {/* Sélecteur de mode : lien collé / téléversement cloud */}
-        <div className="flex gap-1 rounded-md bg-muted/60 p-1">
-          <Button
-            type="button"
-            variant="pill"
-            size="sm"
-            className="flex-1"
-            aria-pressed={mode === "link"}
-            onClick={() => setMode("link")}
-          >
-            <PaperclipIcon className="size-4" />
-            Coller un lien
-          </Button>
-          <Button
-            type="button"
-            variant="pill"
-            size="sm"
-            className="flex-1"
-            aria-pressed={mode === "upload"}
-            onClick={() => setMode("upload")}
-          >
-            <UploadCloudIcon className="size-4" />
-            Téléverser un fichier
-          </Button>
-        </div>
-
-        {mode === "link" ? (
-          <div className="grid gap-2">
-            <Input
-              name="fileUrl"
-              type="url"
-              placeholder="https://drive.google.com/file/d/…"
-              autoComplete="url"
-              required
-              aria-invalid={state.fieldErrors?.fileUrl ? true : undefined}
-            />
-            <p className="text-xs text-muted-foreground">
-              Collez un lien direct Google Drive, Dropbox, OneDrive… Pensez à
-              régler le partage sur « quiconque dispose du lien ».
-            </p>
-            <FieldError message={state.fieldErrors?.fileUrl} />
-          </div>
-        ) : (
-          <div className="grid gap-2">
-            {uploaded ? (
-              <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-500/10">
-                <span className="block font-medium">{uploaded.name}</span>
-                <span className="text-muted-foreground">
-                  Téléversé vers le stockage cloud ·{" "}
-                  {formatFileSize(uploaded.size)}
-                </span>
-              </p>
-            ) : (
-              <Input
-                type="file"
-                onChange={handleFileChange}
-                disabled={isUploading}
-                aria-label="Fichier à téléverser vers le stockage cloud"
-              />
-            )}
-
-            {isUploading ? (
-              <p
-                role="status"
-                className="flex items-center gap-2 text-sm text-muted-foreground"
-              >
-                <Loader2Icon className="size-4 animate-spin" />
-                Téléversement vers le stockage cloud en cours…
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                PDF, images, Office, texte ou ZIP · 100 Mo maximum. Le fichier
-                part directement du navigateur vers Supabase Storage ; seul le
-                lien obtenu est enregistré.
-              </p>
-            )}
-
-            <FieldError message={uploadError ?? state.fieldErrors?.fileUrl} />
-          </div>
-        )}
-      </fieldset>
-
-      {state.status === "error" && state.message ? (
-        <p role="alert" className="text-sm font-medium text-destructive">
-          {state.message}
-        </p>
-      ) : null}
-
-      <DialogFooter>
-        <DialogClose asChild>
-          <Button type="button" variant="outline">
-            Annuler
-          </Button>
-        </DialogClose>
-        <Button type="submit" disabled={isPending || isUploading}>
-          {isPending || isUploading ? (
-            <Loader2Icon className="size-4 animate-spin" />
-          ) : (
-            <PaperclipIcon className="size-4" />
-          )}
-          Enregistrer le document
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
-
-/** Bouton [➕ Ajouter un document] et modale de création associée. */
-function AddDocumentDialog({ owner }: { owner: DocumentsOwner }) {
-  const router = useRouter();
-  const [open, setOpen] = React.useState(false);
-  // Remonte le formulaire vierge à chaque nouvelle ouverture.
-  const [formKey, setFormKey] = React.useState(0);
-
-  const handleCreated = React.useCallback(() => {
-    setOpen(false);
-    // La Server Action a déjà invalidé la page : réconciliation immédiate.
-    router.refresh();
-  }, [router]);
-
-  function handleOpenChange(nextOpen: boolean) {
-    setOpen(nextOpen);
-    if (nextOpen) {
-      setFormKey((key) => key + 1);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <PlusIcon className="size-4" />
-          Ajouter un document
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Ajouter un document</DialogTitle>
-          <DialogDescription>
-            Joignez une pièce officielle à ce dossier : collez simplement un
-            lien de partage ou téléversez le fichier vers votre espace de
-            stockage cloud.
-          </DialogDescription>
-        </DialogHeader>
-
-        <AddDocumentForm key={formKey} owner={owner} onCreated={handleCreated} />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // --------------------------------------
 // Onglet principal
 // --------------------------------------
@@ -421,9 +118,16 @@ function DocumentTypeBadge({ type }: { type: DocumentDTO["type"] }) {
 export function DocumentsTab({
   owner,
   initialDocuments,
+  studentName,
 }: {
   owner: DocumentsOwner;
   initialDocuments: DocumentDTO[];
+  /**
+   * Nom complet de l'apprenant / du candidat (ex : « Dupont Jean ») alimentant
+   * l'arborescence Drive générée dans la modale d'ajout :
+   * `EduFlow / [Nom_Prénom_Apprenant] / [Nom_Document]`.
+   */
+  studentName?: string | null;
 }) {
   const router = useRouter();
   const [confirmId, setConfirmId] = React.useState<string | null>(null);
@@ -472,7 +176,7 @@ export function DocumentsTab({
           </p>
         </div>
 
-        <AddDocumentDialog owner={owner} />
+        <AddDocumentModal owner={owner} ownerName={studentName} />
       </div>
 
       {rowError ? (
@@ -492,7 +196,8 @@ export function DocumentsTab({
           <p className="text-sm font-medium">Aucun document</p>
           <p className="max-w-xs text-sm text-muted-foreground">
             Utilisez « Ajouter un document » pour joindre un passeport, un acte
-            de naissance, un diplôme… via lien externe ou stockage cloud.
+            de naissance, un diplôme… via un lien public Google Drive, OneDrive
+            ou DropBox.
           </p>
         </div>
       ) : (
@@ -626,6 +331,20 @@ export function DocumentsTab({
           </Table>
         </div>
       )}
+
+      {/* Texte explicatif : stockage externe & conservation gratuite (Drive). */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/80 px-4 py-3 md:px-5 dark:border-slate-800">
+        <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground">Stockage externe :</span>{" "}
+          EduFlow n&apos;héberge aucun fichier. Chaque pièce jointe est
+          conservée sur votre propre espace — Google Drive (15 Go gratuits),
+          OneDrive ou DropBox — et seul son lien public est enregistré ici.
+          Vos documents restent disponibles en permanence, sans aucun coût de
+          stockage supplémentaire, même en cas de résiliation de
+          l&apos;abonnement.
+        </p>
+        <GoogleDriveGuideModal variant="outline" size="xs" />
+      </div>
     </section>
   );
 }

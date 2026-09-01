@@ -13,6 +13,7 @@ import {
   MapPinIcon,
   PrinterIcon,
   Trash2Icon,
+  Undo2Icon,
   UserRoundXIcon,
   WalletIcon,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import {
   addTravelInstallmentAction,
   deleteTravelInstallmentAction,
   setTravelCurrentStageAction,
+  unverifyStepAction,
   updateTravelDeadlineAction,
   type TravelPaymentDTO,
   type TravelProcedureDetailDTO,
@@ -126,6 +128,9 @@ function StageTimeline({
 }) {
   const router = useRouter();
   const [pendingOrder, setPendingOrder] = React.useState<number | null>(null);
+  const [pendingUnverifyOrder, setPendingUnverifyOrder] = React.useState<
+    number | null
+  >(null);
   const [isSavingDeadline, setIsSavingDeadline] = React.useState(false);
   const deadlineInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -146,6 +151,24 @@ function StageTimeline({
       if (result.ok) router.refresh();
     } finally {
       setPendingOrder(null);
+    }
+  };
+
+  /**
+   * Annule la validation d'une étape déjà validée : l'étape visée redevient
+   * « En cours » (IN_PROGRESS) et les suivantes « À venir » (PENDING).
+   */
+  const handleUnverify = async (stageOrder: number) => {
+    setPendingUnverifyOrder(stageOrder);
+    try {
+      const result = await unverifyStepAction({
+        procedureId: detail.id,
+        stepOrder: stageOrder,
+      });
+      onStageResult(result.ok ? null : result.message);
+      if (result.ok) router.refresh();
+    } finally {
+      setPendingUnverifyOrder(null);
     }
   };
 
@@ -249,10 +272,38 @@ function StageTimeline({
 
                   <div className="flex items-center gap-1.5">
                     {isValidated ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200/60 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
-                        <CheckIcon className="size-3" />
-                        Validé
-                      </span>
+                      <>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200/60 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+                          <CheckIcon className="size-3" />
+                          Validé
+                        </span>
+                        {/* Annulation de validation (retour arrière) :
+                            l'étape redevient « En cours » et les suivantes
+                            « À venir ». */}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          className="text-emerald-700 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300"
+                          title={`Annuler la validation de l'étape ${index + 1}`}
+                          aria-label={`Annuler la validation de l'étape ${index + 1}`}
+                          disabled={
+                            pendingOrder !== null ||
+                            pendingUnverifyOrder !== null
+                          }
+                          onClick={() => handleUnverify(index + 1)}
+                        >
+                          {pendingUnverifyOrder === index + 1 ? (
+                            <Loader2Icon
+                              data-icon="inline-start"
+                              className="animate-spin"
+                            />
+                          ) : (
+                            <Undo2Icon data-icon="inline-start" />
+                          )}
+                          Annuler la validation
+                        </Button>
+                      </>
                     ) : null}
                     {isCurrent ? (
                       <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200/60 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-400">
@@ -272,7 +323,9 @@ function StageTimeline({
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-xs"
-                        disabled={pendingOrder !== null}
+                        disabled={
+                          pendingOrder !== null || pendingUnverifyOrder !== null
+                        }
                         onClick={() => handleValidate(index)}
                       >
                         Revenir
@@ -302,7 +355,9 @@ function StageTimeline({
                     <Button
                       type="button"
                       size="sm"
-                      disabled={pendingOrder !== null}
+                      disabled={
+                        pendingOrder !== null || pendingUnverifyOrder !== null
+                      }
                       onClick={() => handleValidate(index + 1)}
                     >
                       {pendingOrder !== null ? (
@@ -753,10 +808,11 @@ export function TravelDetailView({
         </div>
       </div>
 
-      {/* Pièces jointes du dossier : liens externes / stockage cloud */}
+      {/* Pièces jointes du dossier : liens externes / stockage externe */}
       <DocumentsTab
         owner={{ travelProcedureId: detail.id }}
         initialDocuments={documents}
+        studentName={detail.candidateName}
       />
     </div>
   );

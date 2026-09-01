@@ -1478,6 +1478,104 @@ export async function setTravelCurrentStageAction(
 }
 
 /**
+ * Entrée de `unverifyStepAction` : annulation de la validation d'une étape
+ * déjà validée d'un dossier de voyage.
+ */
+export type UnverifyStepInput = {
+  procedureId: string;
+  /** Ordre (1-based) de l'étape dont on annule la validation. */
+  stepOrder: number;
+};
+
+/**
+ * Annule la validation d'une étape déjà validée d'un dossier de voyage
+ * (« retour arrière » dans la procédure).
+ *
+ * Convention de progression : `currentStageOrder` = nombre d'étapes validées.
+ * Annuler la validation de l'étape `stepOrder` ramène donc le compteur à
+ * `stepOrder - 1` :
+ * - l'étape visée repasse au statut « En cours » (IN_PROGRESS) ;
+ * - les étapes suivantes (validées par voie de conséquence) repassent au
+ *   statut « À venir » (PENDING) ;
+ * - si la première étape est annulée, la procédure revient à son état
+ *   initial (aucune étape validée).
+ *
+ * La date limite de l'étape en cours est conservée : elle correspond
+ * généralement à un rendez-vous qui reste pertinent après le retour arrière.
+ */
+export async function unverifyStepAction({
+  procedureId,
+  stepOrder,
+}: UnverifyStepInput): Promise<TravelMutationResult> {
+  await assertCanMutate();
+
+  if (!procedureId) {
+    return { ok: false, message: "Identifiant du dossier manquant." };
+  }
+
+  if (!Number.isInteger(stepOrder) || stepOrder < 1) {
+    return { ok: false, message: "Numéro d'étape invalide." };
+  }
+
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    const procedure = await prisma.travelProcedure.findFirst({
+      where: { id: procedureId, organizationId },
+      select: {
+        id: true,
+        currentStageOrder: true,
+        workflowId: true,
+        workflow: { select: { _count: { select: { stages: true } } } },
+      },
+    });
+
+    if (!procedure) {
+      return {
+        ok: false,
+        message: "Dossier de voyage introuvable dans votre organisation.",
+      };
+    }
+
+    const totalStages = procedure.workflow?._count.stages ?? 0;
+
+    if (procedure.workflowId && stepOrder > totalStages) {
+      return {
+        ok: false,
+        message: `Cette procédure ne compte que ${totalStages} étape(s).`,
+      };
+    }
+
+    if (stepOrder > procedure.currentStageOrder) {
+      return {
+        ok: false,
+        message:
+          "Cette étape n'est pas encore validée : il n'y a rien à annuler.",
+      };
+    }
+
+    await prisma.travelProcedure.update({
+      where: { id: procedure.id },
+      data: { currentStageOrder: stepOrder - 1 },
+    });
+
+    revalidateTravels();
+    revalidatePath(`/dashboard/travels/${procedure.id}`);
+
+    return { ok: true };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[unverifyStepAction] Échec :", error);
+    return {
+      ok: false,
+      message:
+        "Une erreur est survenue lors de l'annulation de la validation de l'étape.",
+    };
+  }
+}
+
+/**
  * Met à jour uniquement la date limite de l'étape en cours
  * (ex : rendez-vous ambassade). Chaîne vide = supprimer la date limite.
  */

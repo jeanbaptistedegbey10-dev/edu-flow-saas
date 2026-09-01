@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import { auth } from "@/auth";
 import {
   getAttendanceTrendAction,
@@ -19,7 +21,23 @@ export const metadata = {
 
 export default async function DashboardPage() {
   const session = await auth();
-  const isTeacher = session?.user?.role === "TEACHER";
+  const role = session?.user?.role;
+
+  // --------------------------------------
+  // Super-Admin : espace de travail dédié
+  // --------------------------------------
+  // Un utilisateur portant le rôle SUPER_ADMIN (administrateur de la
+  // PLATEFORME EduFlow) ne doit jamais atterrir sur le tableau de bord d'un
+  // centre de formation client : redirection immédiate vers son back-office
+  // /super-admin. Le proxy (src/proxy.ts) applique déjà cette règle en amont
+  // sur le JWT de session ; ce garde-fou côté page couvre le cas d'un jeton
+  // obsolète (rôle mis à jour en base sans reconnexion) et toute navigation
+  // directe vers /dashboard.
+  if (role === "SUPER_ADMIN") {
+    redirect("/super-admin");
+  }
+
+  const isTeacher = role === "TEACHER";
 
   // Les enseignants reçoivent une vue strictement pédagogique :
   // AUCUNE donnée financière (paiements, chiffre d'affaires, POS, impayés).
@@ -40,8 +58,9 @@ export default async function DashboardPage() {
       getAttendanceTrendAction(),
     ]);
 
-  const isAdmin =
-    session?.user?.role === "ADMIN" || session?.user?.role === "SUPER_ADMIN";
+  // Le rôle SUPER_ADMIN a été redirigé ci-dessus : la gestion des données de
+  // démonstration reste réservée aux administrateurs du centre.
+  const isAdmin = role === "ADMIN";
 
   return (
     <div className="grid gap-6">

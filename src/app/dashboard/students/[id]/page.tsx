@@ -372,11 +372,12 @@ export default async function StudentDetailPage({
           />
         </TabsContent>
 
-        {/* Onglet 4 : pièces jointes (liens externes / stockage cloud) */}
+        {/* Onglet 4 : pièces jointes (liens externes / stockage externe) */}
         <TabsContent value="documents" className="mt-2">
           <DocumentsTab
             owner={{ studentId: student.id }}
             initialDocuments={documents}
+            studentName={`${student.lastName} ${student.firstName}`}
           />
         </TabsContent>
       </Tabs>
