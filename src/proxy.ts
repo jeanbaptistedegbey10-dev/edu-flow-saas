@@ -170,7 +170,7 @@ export async function proxy(request: NextRequest) {
     // Utilisateur non authentifié tentant d'accéder au tableau de bord :
     // redirection vers la page de connexion en mémorisant la destination
     // initiale (callbackUrl) pour y revenir après connexion.
-    if (pathname.startsWith(DASHBOARD_PATH) || pathname.startsWith(SUPER_ADMIN_PATH)) {
+    if (pathname.startsWith(DASHBOARD_PATH) || pathname.startsWith(SUPER_ADMIN_ROUTE)) {
       const loginUrl = new URL(LOGIN_PATH, request.url);
       loginUrl.searchParams.set("callbackUrl", `${pathname}${search}`);
 

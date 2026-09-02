@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { getSuperAdminRoute } from "@/lib/super-admin-route";
 import {
   getAttendanceTrendAction,
   getCashFlowAction,
