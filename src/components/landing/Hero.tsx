@@ -1,140 +1,156 @@
 "use client";
 
-import React from "react";
-import { ArrowRight, Play, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
+import { ArrowRight, CheckCircle2, Sparkles } from "lucide-react";
+import { VISA_TIMELINE_STEPS } from "@/data/content";
 
-export const Hero = () => {
+export default function Hero() {
   return (
-    <section className="relative pt-32 pb-20 overflow-hidden bg-[#0A0D14]">
-      {/* Background glow effects */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-brand/15 blur-[120px] rounded-full pointer-events-none" />
+    <section className="relative min-h-screen flex items-center overflow-hidden bg-ink-900">
+      {/* Background Gradient Orbs */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute top-1/4 -left-32 w-96 h-96 bg-brand/20 rounded-full blur-3xl animate-float" />
+        <div className="absolute top-1/3 -right-32 w-80 h-80 bg-mint/10 rounded-full blur-3xl animate-float-delayed" />
+        <div className="absolute bottom-1/4 left-1/3 w-72 h-72 bg-brand/10 rounded-full blur-3xl animate-pulse-glow" />
+      </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div className="grid lg:grid-cols-12 gap-12 items-center">
-          
-          {/* Left Column: Copywriting */}
-          <div className="lg:col-span-6 space-y-8 text-left">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand/10 border border-brand/20 text-brand text-xs font-semibold">
-              <span>✨</span> La plateforme N°1 pour Centres de Langues & Agences de Voyage
+      {/* Grid Pattern Overlay */}
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:64px_64px]" />
+
+      <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 md:py-32">
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+          {/* Left Content */}
+          <div className="space-y-8">
+            {/* Badge */}
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand/10 border border-brand/20 text-brand-light text-sm">
+              <Sparkles className="w-4 h-4" />
+              <span>Nouveau : Pipeline Visa integre</span>
             </div>
 
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-tight leading-[1.15]">
-              Pilotez vos cours de <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-teal-300 to-emerald-400">langues & procédures d'immigration</span> en toute simplicité
+            {/* Heading */}
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight">
+              Gerez votre centre de formation{" "}
+              <span className="text-gradient-brand">en toute simplicite</span>
             </h1>
 
-            <p className="text-gray-400 text-lg leading-relaxed max-w-xl">
-              Gérez vos étudiants, sessions de cours, dossiers de voyage et caisse POS depuis une seule plateforme moderne. Disponible en ligne ou hors-ligne.
+            {/* Description */}
+            <p className="text-lg text-gray-400 max-w-xl leading-relaxed">
+              EduFlow est la plateforme SaaS B2B tout-en-un pour les centres de langues et agences de voyage : gestion des cours, pipeline visa, POS et portail etudiant.
             </p>
 
-            <div className="flex flex-wrap items-center gap-4 pt-2">
+            {/* CTA Buttons */}
+            <div className="flex flex-col sm:flex-row gap-4">
               <Link
-                href="/register"
-                className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 hover:from-indigo-500 hover:to-blue-400 text-white font-semibold text-sm shadow-lg shadow-indigo-500/25 transition-all duration-200 flex items-center gap-2"
+                href="/auth/signup"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-base font-medium text-white bg-brand hover:bg-brand-dark rounded-xl transition-all hover:shadow-xl hover:shadow-brand/25 hover:-translate-y-0.5"
               >
-                Essai Gratuit 14 jours
-                <ArrowRight className="w-4 h-4" />
+                Demander une demo
+                <ArrowRight className="w-5 h-5" />
               </Link>
-
               <a
-                href="#tarifs"
-                className="px-6 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-sm transition-all duration-200 flex items-center gap-2"
+                href="#features"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-base font-medium text-gray-300 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 rounded-xl transition-all"
               >
-                <Play className="w-4 h-4 fill-current" />
-                Voir les Tarifs
+                Decouvrir les fonctionnalites
               </a>
             </div>
 
-            <div className="flex items-center gap-3 pt-4">
-              <div className="flex -space-x-2 overflow-hidden">
-                <span className="inline-block h-8 w-8 rounded-full bg-blue-500 ring-2 ring-[#0A0D14]" />
-                <span className="inline-block h-8 w-8 rounded-full bg-teal-500 ring-2 ring-[#0A0D14]" />
-                <span className="inline-block h-8 w-8 rounded-full bg-amber-500 ring-2 ring-[#0A0D14]" />
+            {/* Trust Signals */}
+            <div className="flex items-center gap-6 pt-4">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-mint" />
+                <span className="text-sm text-gray-400">150+ centres nous font confiance</span>
               </div>
-              <span className="text-sm text-gray-400 font-medium">
-                <strong className="text-white">+50 centres</strong> nous font confiance
-              </span>
-            </div>
-          </div>
-
-          {/* Right Column: Visual Dashboard Mockup */}
-          <div className="lg:col-span-6">
-            <div className="relative rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl shadow-2xl">
-              <div className="rounded-xl bg-[#0F172A] p-5 border border-white/5 space-y-6">
-                
-                {/* Dashboard Header */}
-                <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                  <div>
-                    <span className="text-xs text-gray-400 uppercase tracking-wider block">Tableau de bord</span>
-                    <h3 className="text-lg font-bold text-white">Suivi Étudiant</h3>
-                  </div>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-medium">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> En direct
-                  </span>
-                </div>
-
-                {/* Student Info Card */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-white/5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white text-sm">
-                      KA
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-white">Koffi Adjoua</p>
-                      <p className="text-xs text-gray-400">Étudiant : Allemand B2</p>
-                    </div>
-                  </div>
-                  <span className="px-2.5 py-1 rounded-md bg-emerald-500/20 text-emerald-300 text-xs font-semibold">
-                    Actif
-                  </span>
-                </div>
-
-                {/* Status Grid */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 rounded-xl bg-white/5 border border-white/5 space-y-2">
-                    <span className="text-xs text-gray-400 font-medium">📖 Cours</span>
-                    <p className="text-xl font-bold text-white">B2</p>
-                    <p className="text-xs text-gray-400">Allemand • 85% présence</p>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-white/5 border border-white/5 space-y-2">
-                    <span className="text-xs text-gray-400 font-medium">✈️ Visa</span>
-                    <p className="text-xl font-bold text-white">Étape 3/4</p>
-                    <p className="text-xs text-gray-400">RDV Consulat</p>
-                  </div>
-                </div>
-
-                {/* Pipeline Checklist */}
-                <div className="space-y-2.5 pt-2">
-                  <p className="text-xs font-semibold text-gray-400 uppercase">Pipeline Visa - Allemagne</p>
-                  
-                  <div className="flex items-center justify-between text-xs text-gray-300">
-                    <span className="flex items-center gap-2">📂 Dossier déposé</span>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  </div>
-                  
-                  <div className="flex items-center justify-between text-xs text-gray-300">
-                    <span className="flex items-center gap-2">📋 Documents vérifiés</span>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  </div>
-                  
-                  <div className="flex items-center justify-between text-xs text-gray-300">
-                    <span className="flex items-center gap-2">📅 RDV Consulat</span>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-gray-400 opacity-60">
-                    <span className="flex items-center gap-2">🎓 Visa obtenu</span>
-                    <span className="w-4 h-4 rounded-full border border-gray-600" />
-                  </div>
-                </div>
-
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-mint" />
+                <span className="text-sm text-gray-400">Sans engagement</span>
               </div>
             </div>
           </div>
 
+          {/* Right Content - Dashboard Preview */}
+          <div className="relative">
+            <div className="glass-card p-6 glow-brand">
+              {/* Dashboard Header */}
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-white">Suivi Visa</h3>
+                <span className="px-2.5 py-1 text-xs font-medium text-mint bg-mint/10 rounded-full border border-mint/20">
+                  En cours
+                </span>
+              </div>
+
+              {/* Timeline */}
+              <div className="space-y-4">
+                {VISA_TIMELINE_STEPS.map((step, index) => (
+                  <div key={step.step} className="flex items-center gap-4">
+                    {/* Step Indicator */}
+                    <div className="relative">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all ${
+                          step.status === "completed"
+                            ? "bg-mint/20 border-mint text-mint"
+                            : step.status === "current"
+                            ? "bg-brand/20 border-brand text-brand-light animate-timeline-pulse"
+                            : "bg-white/5 border-white/20 text-gray-500"
+                        }`}
+                      >
+                        {step.status === "completed" ? (
+                          <CheckCircle2 className="w-5 h-5" />
+                        ) : (
+                          step.step
+                        )}
+                      </div>
+                      {index < VISA_TIMELINE_STEPS.length - 1 && (
+                        <div
+                          className={`absolute top-10 left-1/2 -translate-x-1/2 w-0.5 h-6 ${
+                            step.status === "completed" ? "bg-mint/40" : "bg-white/10"
+                          }`}
+                        />
+                      )}
+                    </div>
+
+                    {/* Step Content */}
+                    <div className="flex-1">
+                      <p
+                        className={`text-sm font-medium ${
+                          step.status === "upcoming" ? "text-gray-500" : "text-white"
+                        }`}
+                      >
+                        {step.title}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {step.status === "completed" && "Termine"}
+                        {step.status === "current" && "En cours de traitement"}
+                        {step.status === "upcoming" && "A venir"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Progress Bar */}
+              <div className="mt-6 pt-4 border-t border-white/10">
+                <div className="flex justify-between text-xs text-gray-400 mb-2">
+                  <span>Progression</span>
+                  <span>60%</span>
+                </div>
+                <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-brand to-mint rounded-full transition-all duration-1000"
+                    style={{ width: "60%" }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Floating Badge */}
+            <div className="absolute -bottom-4 -left-4 glass-card px-4 py-2 flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-mint animate-pulse" />
+              <span className="text-sm text-gray-300">25 000+ etudiants geres</span>
+            </div>
+          </div>
         </div>
       </div>
     </section>
   );
-};
+}
