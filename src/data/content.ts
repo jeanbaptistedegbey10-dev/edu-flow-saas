@@ -58,60 +58,60 @@ export const NAV_LINKS: NavLink[] = [
 
 // Stats
 export const STATS: Stat[] = [
-  { value: "2 500+", label: "Etudiants accompagnes", icon: "GraduationCap" },
-  { value: "98%", label: "Taux de reussite visa", icon: "ShieldCheck" },
-  { value: "15+", label: "Pays partenaires", icon: "Globe" },
+  { value: "150+", label: "Centres de formation", icon: "Building2" },
+  { value: "25 000+", label: "Etudiants geres", icon: "GraduationCap" },
+  { value: "15+", label: "Pays couverts", icon: "Globe" },
   { value: "4.9/5", label: "Satisfaction client", icon: "Star" },
 ];
 
 // Features
 export const FEATURES: Feature[] = [
   {
-    id: "campus-france",
-    title: "Campus France",
-    description: "Accompagnement complet dans vos demarches Campus France : constitution du dossier, preparation aux entretiens et suivi personnalise.",
-    icon: "Building2",
+    id: "language-courses",
+    title: "Gestion des Cours de Langues",
+    description: "Creez et gerez des sessions de formation par langue et par niveau. Assignez des formateurs, suivez les presences et generez des attestations.",
+    icon: "GraduationCap",
     items: [
-      "Inscription et compte Campus France",
-      "Redaction du projet motive",
-      "Preparation entretien l\'etranger",
-      "Suivi du dossier en temps reel",
+      "Sessions par langue et niveau (A1-C2)",
+      "Suivi des presences par QR code",
+      "Bulletins et attestations automatiques",
+      "Gestion des formateurs et emplois du temps",
     ],
   },
   {
-    id: "visa",
-    title: "Demande de Visa",
-    description: "Guide etape par etape pour votre demande de visa etudiant. Documents, rendez-vous consulaires et preparation aux entretiens.",
+    id: "visa-pipeline",
+    title: "Pipeline Visa & Immigration",
+    description: "Accompagnez vos clients dans leurs demarches d\'immigration avec un suivi visuel etape par etape.",
     icon: "IdCard",
     items: [
-      "Liste de documents personnalisee",
-      "Preparation a l\'entretien visa",
-      "Suivi de la demande en temps reel",
-      "Conseils pays par pays",
+      "Suivi visuel des dossiers par etape",
+      "Checklist documentaire personnalisee",
+      "Rendez-vous consulaires et relances",
+      "Alertes deadlines automatiques",
     ],
   },
   {
-    id: "accommodation",
-    title: "Recherche de Logement",
-    description: "Trouvez votre logement etudiant a l\'etranger : residences universitaires, colocations ou familles d\'accueil.",
-    icon: "Home",
+    id: "pos-cash",
+    title: "POS & Caisse",
+    description: "Gerez les encaissements de votre centre avec les moyens de paiement locaux et les paiements par tranche.",
+    icon: "CreditCard",
     items: [
-      "Residences universitaires CROUS",
-      "Colocations verifiees",
-      "Familles d\'accueil",
-      "Garant et caution solidaire",
+      "Especes, Mobile Money (MTN, Moov, Wave)",
+      "Paiements par tranche et virements",
+      "Recus automatiques et journal de caisse",
+      "Rapports financiers en temps reel",
     ],
   },
   {
-    id: "tracking",
-    title: "Suivi de Dossier",
-    description: "Tableau de bord interactif pour suivre l\'avancement de votre candidature et de votre visa a chaque etape.",
-    icon: "ClipboardCheck",
+    id: "student-portal",
+    title: "Portail Etudiant",
+    description: "Offrez a vos apprenants un espace personnel pour suivre leur progression et leur dossier.",
+    icon: "Users",
     items: [
-      "Statut en temps reel",
-      "Notifications intelligentes",
-      "Historique complet",
-      "Alertes deadlines",
+      "Emploi du temps personnel",
+      "Notes, bulletins et attestations",
+      "Suivi du dossier visa",
+      "Notifications automatiques",
     ],
   },
 ];
@@ -120,39 +120,57 @@ export const FEATURES: Feature[] = [
 export const PRICING_DATA: PricingPlan[] = [
   {
     id: "starter",
-    name: "Pack Etudiant Standard",
-    price: { monthly: 0, annually: 0 },
-    description: "Ideal pour demarches de candidature en autonomie.",
+    name: "Starter",
+    price: { monthly: 29000, annually: 290000 },
+    description: "Ideal pour les petits centres de formation qui demarrent avec la gestion numerique.",
     features: [
-      "Acces au catalogue des universites",
-      "Suivi de dossier de base",
-      "Modeles de CV et Lettres de motivation",
-      "Support communautaire",
+      "Jusqu\'a 50 etudiants",
+      "Gestion des cours et emplois du temps",
+      "Portail etudiant",
+      "Support email",
     ],
-    popular: false,
     ctaText: "Commencer gratuitement",
     checkoutUrl: {
-      monthly: "/auth/signup?plan=starter",
-      annually: "/auth/signup?plan=starter",
+      monthly: "/checkout?plan=starter&billing=monthly",
+      annually: "/checkout?plan=starter&billing=annually",
     },
   },
   {
-    id: "premium",
-    name: "Pack Accompagnement Visa",
-    price: { monthly: 15000, annually: 150000 },
-    description: "Une prise en charge complete pour reussir votre projet d\'etude a l\'international.",
+    id: "professional",
+    name: "Professional",
+    price: { monthly: 79000, annually: 790000 },
+    description: "Pour les centres de formation et agences de voyage en croissance.",
     features: [
-      "Tout ce qu\'il y a dans le Pack Standard",
-      "Verification personnalisee des documents",
-      "Simulation d\'entretien Campus France / Visa",
-      "Assistance recherche de logement et garant",
-      "Support prioritaire 7j/7",
+      "Jusqu\'a 500 etudiants",
+      "Gestion multilingue et pipeline visa",
+      "Module POS & Caisse",
+      "Rapports et analytics",
+      "Support prioritaire",
     ],
     popular: true,
-    ctaText: "Souscrire maintenant",
+    ctaText: "Demarrer l\'essai",
     checkoutUrl: {
-      monthly: "/checkout?plan=premium&billing=monthly",
-      annually: "/checkout?plan=premium&billing=annually",
+      monthly: "/checkout?plan=professional&billing=monthly",
+      annually: "/checkout?plan=professional&billing=annually",
+    },
+  },
+  {
+    id: "enterprise",
+    name: "Enterprise",
+    price: { monthly: 199000, annually: 1990000 },
+    description: "Solution sur mesure pour les reseaux de centres et grandes agences.",
+    features: [
+      "Etudiants illimites",
+      "Multi-sites et multi-utilisateurs",
+      "Licence Self-Hosted disponible",
+      "API et integrations personnalisees",
+      "Account manager dedie",
+      "SLA garanti 99.9%",
+    ],
+    ctaText: "Contacter les ventes",
+    checkoutUrl: {
+      monthly: "/checkout?plan=enterprise&billing=monthly",
+      annually: "/checkout?plan=enterprise&billing=annually",
     },
   },
 ];
@@ -160,25 +178,29 @@ export const PRICING_DATA: PricingPlan[] = [
 // FAQ
 export const FAQ_DATA: FAQItem[] = [
   {
-    question: "Comment fonctionne l\'accompagnement EduFlow ?",
-    answer: "EduFlow vous accompagne a chaque etape de votre projet d\'etudes a l\'international. Apres votre inscription, un conseiller dedie analyse votre profil et vos objectifs. Vous accedez ensuite a un tableau de bord personnalise avec des taches guidees, des modeles de documents et un suivi en temps reel de votre progression.",
+    question: "Comment fonctionne la gestion des langues ?",
+    answer: "EduFlow vous permet de creer des sessions par langue et par niveau (A1, A2, B1, B2, etc.), d\'assigner des formateurs, de suivre les presences via QR code, et de generer automatiquement des bulletins et attestations de fin de formation."
   },
   {
-    question: "Quels sont les delais pour obtenir un visa etudiant ?",
-    answer: "Les delais varient selon le pays de destination : comptez en moyenne 2 a 4 semaines pour un visa Schengen etudiant, 3 a 6 semaines pour le Canada, et 4 a 8 semaines pour les Etats-Unis. Notre Pack Premium inclut un planning personnalise pour optimiser vos delais.",
+    question: "Puis-je suivre les procedures de visa etape par etape ?",
+    answer: "Oui, EduFlow integre un pipeline visuel complet pour suivre chaque dossier d\'immigration : depot de documents, relances administratives, rendez-vous consulaires et obtention du visa."
   },
   {
-    question: "Le paiement est-il securise ?",
-    answer: "Absolument. Tous les paiements sont securises via des partenaires certifies PCI-DSS (KKiaPay, FedaPay, Mobile Money). Vos donnees bancaires ne sont jamais stockees sur nos serveurs. Vous beneficiez d\'une garantie satisfait ou rembourse de 14 jours.",
+    question: "L\'application fonctionne-t-elle hors-ligne ?",
+    answer: "Absolument. En plus de l\'offre SaaS Cloud, nous proposons une version Desktop Offline (.exe) parfaitement adaptee aux zones a faible connectivite avec synchronisation differee."
+  },
+  {
+    question: "Quels moyens de paiement locaux sont supportes ?",
+    answer: "Le module POS & Caisse gere les encaissements en especes, Mobile Money (MTN, Moov, Wave) et virements, avec gestion des paiements par tranche et recus automatiques."
+  },
+  {
+    question: "Les etudiants ont-ils acces a un espace personnel ?",
+    answer: "Oui, un portail etudiant dedie permet a vos apprenants de consulter leurs emargements, notes, bulletins et l\'avancement de leur dossier de visa."
   },
   {
     question: "Puis-je changer de formule a tout moment ?",
-    answer: "Oui, vous pouvez passer du Pack Standard au Pack Premium a tout moment. La difference de tarif sera calculee au prorata. Pour un passage a l\'annuel, contactez notre equipe qui s\'occupera de la transition sans interruption de service.",
-  },
-  {
-    question: "Proposez-vous un support en francais et en anglais ?",
-    answer: "Oui, notre equipe multilingue vous accompagne en francais, anglais et selon la langue de votre pays de destination. Le Pack Premium inclut un support prioritaire 7j/7 par chat, email et telephone.",
-  },
+    answer: "Oui, vous pouvez passer d\'une formule SaaS Cloud a une licence Self-Hosted ou Desktop selon l\'evolution de votre centre."
+  }
 ];
 
 // Visa Timeline Steps

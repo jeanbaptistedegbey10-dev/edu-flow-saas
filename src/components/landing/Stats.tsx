@@ -1,9 +1,9 @@
-import { GraduationCap, ShieldCheck, Globe, Star } from "lucide-react";
+import { Building2, GraduationCap, Globe, Star } from "lucide-react";
 import { STATS } from "@/data/content";
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  Building2,
   GraduationCap,
-  ShieldCheck,
   Globe,
   Star,
 };

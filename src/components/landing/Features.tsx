@@ -2,38 +2,38 @@
 
 import { useState } from "react";
 import {
-  Building2,
+  GraduationCap,
   IdCard,
-  Home,
-  ClipboardCheck,
+  CreditCard,
+  Users,
   CheckCircle2,
 } from "lucide-react";
 import { FEATURES } from "@/data/content";
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  Building2,
+  GraduationCap,
   IdCard,
-  Home,
-  ClipboardCheck,
+  CreditCard,
+  Users,
 };
 
 const colorMap: Record<string, { bg: string; border: string; text: string }> = {
-  "campus-france": {
+  "language-courses": {
     bg: "bg-brand/10",
     border: "border-brand/20",
     text: "text-brand-light",
   },
-  visa: {
+  "visa-pipeline": {
     bg: "bg-mint/10",
     border: "border-mint/20",
     text: "text-mint",
   },
-  accommodation: {
+  "pos-cash": {
     bg: "bg-gold/10",
     border: "border-gold/20",
     text: "text-gold",
   },
-  tracking: {
+  "student-portal": {
     bg: "bg-purple-500/10",
     border: "border-purple-500/20",
     text: "text-purple-400",
@@ -43,7 +43,7 @@ const colorMap: Record<string, { bg: string; border: string; text: string }> = {
 export default function Features() {
   const [activeTab, setActiveTab] = useState(FEATURES[0].id);
   const activeFeature = FEATURES.find((f) => f.id === activeTab) || FEATURES[0];
-  const activeColor = colorMap[activeTab] || colorMap["campus-france"];
+  const activeColor = colorMap[activeTab] || colorMap["language-courses"];
 
   return (
     <section id="features" className="relative py-24 bg-ink-800">
@@ -55,11 +55,11 @@ export default function Features() {
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto mb-16">
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-            Tout ce qu&apos;il vous faut pour {" "}
-            <span className="text-gradient-brand">reussir votre mobilite</span>
+            Tout ce qu&apos;il faut pour {" "}
+            <span className="text-gradient-brand">gerer votre centre</span>
           </h2>
           <p className="text-lg text-gray-400">
-            Une plateforme complete qui couvre chaque etape de votre projet d&apos;etudes a l&apos;international.
+            Une plateforme SaaS B2B complete pour les centres de formation et agences de voyage.
           </p>
         </div>
 
@@ -68,7 +68,7 @@ export default function Features() {
           {FEATURES.map((feature) => {
             const Icon = iconMap[feature.icon];
             const isActive = activeTab === feature.id;
-            const colors = colorMap[feature.id] || colorMap["campus-france"];
+            const colors = colorMap[feature.id] || colorMap["language-courses"];
             return (
               <button
                 key={feature.id}

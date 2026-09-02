@@ -22,10 +22,10 @@ export default function Pricing() {
         <div className="text-center max-w-3xl mx-auto mb-12">
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
             Des tarifs {" "}
-            <span className="text-gradient-brand">transparents</span> et adaptes
+            <span className="text-gradient-brand">adaptes a votre centre</span>
           </h2>
           <p className="text-lg text-gray-400">
-            Commencez gratuitement et evoluez quand vous etes pret. Pas de frais caches.
+            Commencez gratuitement et evoluez selon la taille de votre centre de formation ou agence.
           </p>
         </div>
 
@@ -66,7 +66,7 @@ export default function Pricing() {
         </div>
 
         {/* Pricing Cards */}
-        <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
           {PRICING_DATA.map((plan) => {
             const price = isAnnual ? plan.price.annually : plan.price.monthly;
             const checkoutUrl = isAnnual
