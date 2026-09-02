@@ -24,10 +24,10 @@ export default function FAQ() {
           </div>
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
             Questions {" "}
-            <span className="text-gradient-brand">fréquemment posées</span>
+            <span className="text-gradient-brand">frÃ©quemment posÃ©es</span>
           </h2>
           <p className="text-lg text-gray-400">
-            Trouvez rapidement les réponses à vos questions les plus courantes.
+            Trouvez rapidement les rÃ©ponses Ã  vos questions les plus courantes.
           </p>
         </div>
 
