@@ -46,7 +46,20 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* EduFlow Glassmorphism Dark Design Tokens */
+  --color-ink-900: #0B0F17;
+  --color-ink-800: #111827;
+  --color-ink-700: #1F2937;
+  --color-ink-600: #374151;
+  --color-brand: #4F46E5;
+  --color-brand-light: #6366F1;
+  --color-brand-dark: #3730A3;
+  --color-mint: #10B981;
+  --color-mint-light: #34D399;
+  --color-gold: #F59E0B;
+  --color-gold-light: #FBBF24;
 }
+
 
 :root {
   /* Fond Slate-50 pour un rendu SaaS moderne et lumineux */
@@ -141,7 +154,7 @@
     @apply text-lg font-semibold;
   }
   html {
-    @apply font-sans;
+    @apply font-sans scroll-smooth;
   }
 }
 
@@ -163,5 +176,90 @@
 
   .animate-progress {
     animation: progress-grow 0.8s ease-out forwards;
+  }
+
+  /* Glassmorphism utilities */
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl;
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300 hover:bg-white/10 hover:border-white/20 hover:shadow-lg hover:shadow-brand/5;
+  }
+
+  .glass-navbar {
+    @apply bg-ink-900/80 backdrop-blur-md border-b border-white/10;
+  }
+
+  /* Glow effects */
+  .glow-brand {
+    box-shadow: 0 0 40px rgba(79, 70, 229, 0.15), 0 0 80px rgba(79, 70, 229, 0.05);
+  }
+
+  .glow-mint {
+    box-shadow: 0 0 40px rgba(16, 185, 129, 0.15), 0 0 80px rgba(16, 185, 129, 0.05);
+  }
+
+  .glow-gold {
+    box-shadow: 0 0 40px rgba(245, 158, 11, 0.15), 0 0 80px rgba(245, 158, 11, 0.05);
+  }
+
+  /* Gradient text */
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-brand-light via-brand to-brand-light bg-clip-text text-transparent;
+  }
+
+  .text-gradient-mint {
+    @apply bg-gradient-to-r from-mint-light via-mint to-mint-light bg-clip-text text-transparent;
+  }
+
+  /* Animated gradient orbs */
+  @keyframes float {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    33% { transform: translateY(-20px) rotate(5deg); }
+    66% { transform: translateY(10px) rotate(-3deg); }
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.05); }
+  }
+
+  .animate-float {
+    animation: float 8s ease-in-out infinite;
+  }
+
+  .animate-float-delayed {
+    animation: float 10s ease-in-out 2s infinite;
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 4s ease-in-out infinite;
+  }
+
+  /* Fade in animation */
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in-up {
+    animation: fade-in-up 0.6s ease-out forwards;
+  }
+
+  /* Visa timeline animation */
+  @keyframes timeline-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.8; }
+  }
+
+  .animate-timeline-pulse {
+    animation: timeline-pulse 2s ease-in-out infinite;
   }
 }
