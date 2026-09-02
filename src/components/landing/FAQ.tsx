@@ -27,7 +27,7 @@ export default function FAQ() {
             <span className="text-gradient-brand">fréquemment posées</span>
           </h2>
           <p className="text-lg text-gray-400">
-            Trouvez rapidement les réponses à vos questions les plus courantes.
+            Tout ce que vous devez savoir sur EduFlow pour votre centre de formation.
           </p>
         </div>
 

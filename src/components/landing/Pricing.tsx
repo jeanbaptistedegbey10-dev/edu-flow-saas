@@ -1,19 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Fragment, type ReactNode } from "react";
 import { Check, Sparkles } from "lucide-react";
-import { PRICING_DATA } from "@/data/content";
+import { PRICING_DATA, COMPARISON_MATRIX } from "@/data/content";
+import type { PricingPlan } from "@/data/content";
 
 function formatPrice(price: number): string {
   if (price === 0) return "Gratuit";
   return price.toLocaleString("fr-FR") + " FCFA";
 }
 
+function renderCell(value: string | boolean): ReactNode {
+  if (value === true) {
+    return <Check className="w-5 h-5 text-mint mx-auto" />;
+  }
+  if (value === false) {
+    return <span className="text-gray-600 mx-auto block text-center">—</span>;
+  }
+  return <span className="text-sm text-gray-300">{value}</span>;
+}
+
 export default function Pricing() {
   const [isAnnual, setIsAnnual] = useState(false);
+  const [plans, setPlans] = useState<PricingPlan[]>(PRICING_DATA);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPlans = async () => {
+      try {
+        const res = await fetch("/api/plans");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.plans && Array.isArray(data.plans) && data.plans.length > 0) {
+            setPlans(data.plans);
+          }
+        }
+      } catch {
+        // Fallback to local PRICING_DATA
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPlans();
+  }, []);
 
   return (
-    <section id="pricing" className="relative py-24 bg-ink-900">
+    <section id="tarifs" className="relative py-24 bg-ink-900">
       {/* Background accents */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-brand/5 rounded-full blur-3xl" />
 
@@ -22,10 +54,10 @@ export default function Pricing() {
         <div className="text-center max-w-3xl mx-auto mb-12">
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
             Des tarifs {" "}
-            <span className="text-gradient-brand">adaptes a votre centre</span>
+            <span className="text-gradient-brand">adaptées à votre centre</span>
           </h2>
           <p className="text-lg text-gray-400">
-            Commencez gratuitement et evoluez selon la taille de votre centre de formation ou agence.
+            Cloud, Self-Hébergé ou Desktop : choisissez la formule qui correspond à votre centre de formation ou agence.
           </p>
         </div>
 
@@ -60,14 +92,14 @@ export default function Pricing() {
           </span>
           {isAnnual && (
             <span className="px-2.5 py-1 text-xs font-medium text-gold bg-gold/10 rounded-full border border-gold/20">
-              -15%
+              2 mois offerts
             </span>
           )}
         </div>
 
         {/* Pricing Cards */}
         <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-          {PRICING_DATA.map((plan) => {
+          {plans.map((plan) => {
             const price = isAnnual ? plan.price.annually : plan.price.monthly;
             const checkoutUrl = isAnnual
               ? plan.checkoutUrl.annually
@@ -114,7 +146,7 @@ export default function Pricing() {
                   </div>
                   {isAnnual && plan.price.monthly > 0 && (
                     <p className="text-xs text-mint mt-1">
-                      Economisez{" "}
+                      Économisez{" "}
                       {(
                         plan.price.monthly * 12 -
                         plan.price.annually
@@ -135,7 +167,7 @@ export default function Pricing() {
 
                 {/* CTA Button */}
                 <a
-                  href={checkoutUrl}
+                  href={loading ? plan.checkoutUrl.monthly : checkoutUrl}
                   className={`block w-full text-center py-3.5 rounded-xl font-medium transition-all ${
                     plan.popular
                       ? "bg-brand hover:bg-brand-dark text-white hover:shadow-lg hover:shadow-brand/25"
@@ -147,6 +179,44 @@ export default function Pricing() {
               </div>
             );
           })}
+        </div>
+
+        {/* Comparison Matrix */}
+        <div className="mt-20 max-w-5xl mx-auto">
+          <h3 className="text-2xl font-bold text-white text-center mb-8">
+            Tableau comparatif détaillé
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-white/10">
+                  <th className="py-4 px-4 text-sm font-semibold text-gray-400">Fonctionnalité</th>
+                  <th className="py-4 px-4 text-sm font-semibold text-center text-white">SaaS Cloud</th>
+                  <th className="py-4 px-4 text-sm font-semibold text-center text-white">Self-Hosted Docker</th>
+                  <th className="py-4 px-4 text-sm font-semibold text-center text-white">Desktop Offline</th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARISON_MATRIX.map((row) => (
+                  <Fragment key={row.category}>
+                    <tr className="border-b border-white/5">
+                      <td colSpan={4} className="py-3 px-4 text-sm font-bold text-brand-light bg-brand/5">
+                        {row.category}
+                      </td>
+                    </tr>
+                    {row.items.map((item, idx) => (
+                      <tr key={`${row.category}-${idx}`} className="border-b border-white/5 hover:bg-white/[0.02]">
+                        <td className="py-3 px-4 text-sm text-gray-300">{item.feature}</td>
+                        <td className="py-3 px-4 text-center">{renderCell(item.saasCloud)}</td>
+                        <td className="py-3 px-4 text-center">{renderCell(item.selfHosted)}</td>
+                        <td className="py-3 px-4 text-center">{renderCell(item.desktopOffline)}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>

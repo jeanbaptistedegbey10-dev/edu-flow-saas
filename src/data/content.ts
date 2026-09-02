@@ -24,6 +24,16 @@ export interface PricingPlan {
   };
 }
 
+export interface ComparisonRow {
+  category: string;
+  items: {
+    feature: string;
+    saasCloud: string | boolean;
+    selfHosted: string | boolean;
+    desktopOffline: string | boolean;
+  }[];
+}
+
 export interface Feature {
   id: string;
   title: string;
@@ -52,7 +62,7 @@ export interface VisaStep {
 // Navigation
 export const NAV_LINKS: NavLink[] = [
   { label: "Fonctionnalites", href: "#features" },
-  { label: "Tarifs", href: "#pricing" },
+  { label: "Tarifs", href: "#tarifs" },
   { label: "FAQ", href: "#faq" },
 ];
 
@@ -119,87 +129,144 @@ export const FEATURES: Feature[] = [
 // Pricing Plans
 export const PRICING_DATA: PricingPlan[] = [
   {
-    id: "starter",
-    name: "Starter",
-    price: { monthly: 29000, annually: 290000 },
-    description: "Ideal pour les petits centres de formation qui demarrent avec la gestion numerique.",
-    features: [
-      "Jusqu\'a 50 etudiants",
-      "Gestion des cours et emplois du temps",
-      "Portail etudiant",
-      "Support email",
-    ],
-    ctaText: "Commencer gratuitement",
-    checkoutUrl: {
-      monthly: "/checkout?plan=starter&billing=monthly",
-      annually: "/checkout?plan=starter&billing=annually",
-    },
-  },
-  {
-    id: "professional",
-    name: "Professional",
-    price: { monthly: 79000, annually: 790000 },
-    description: "Pour les centres de formation et agences de voyage en croissance.",
-    features: [
-      "Jusqu\'a 500 etudiants",
-      "Gestion multilingue et pipeline visa",
-      "Module POS & Caisse",
-      "Rapports et analytics",
-      "Support prioritaire",
-    ],
-    popular: true,
-    ctaText: "Demarrer l\'essai",
-    checkoutUrl: {
-      monthly: "/checkout?plan=professional&billing=monthly",
-      annually: "/checkout?plan=professional&billing=annually",
-    },
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    price: { monthly: 199000, annually: 1990000 },
-    description: "Solution sur mesure pour les reseaux de centres et grandes agences.",
+    id: "saas-cloud",
+    name: "SaaS Cloud",
+    price: { monthly: 20000, annually: 200000 },
+    description: "Solution cloud cle en main, hebergee et mise a jour automatiquement.",
     features: [
       "Etudiants illimites",
-      "Multi-sites et multi-utilisateurs",
-      "Licence Self-Hosted disponible",
-      "API et integrations personnalisees",
-      "Account manager dedie",
-      "SLA garanti 99.9%",
+      "Hebergement cloud securise",
+      "Mises a jour automatiques",
+      "Support email prioritaire",
+      "Sauvegarde automatique",
+      "Pipeline Visa complet",
+      "POS & Caisse integres",
+      "Portail etudiant",
     ],
-    ctaText: "Contacter les ventes",
+    popular: true,
+    ctaText: "Essai Gratuit 14 jours",
     checkoutUrl: {
-      monthly: "/checkout?plan=enterprise&billing=monthly",
-      annually: "/checkout?plan=enterprise&billing=annually",
+      monthly: "/register?plan=saas-cloud&billing=monthly",
+      annually: "/register?plan=saas-cloud&billing=annually",
     },
+  },
+  {
+    id: "self-hosted",
+    name: "Self-Hosted Docker",
+    price: { monthly: 120000, annually: 1200000 },
+    description: "Deployez sur vos propres serveurs pour un controle total de vos donnees.",
+    features: [
+      "Tout le plan SaaS Cloud",
+      "Deploiement Docker sur vos serveurs",
+      "Controle total des donnees",
+      "API & integrations avancees",
+      "Support email + telephone",
+      "SLA 99.9%",
+      "Multi-sites",
+      "Account manager dedie",
+    ],
+    ctaText: "Essai Gratuit 14 jours",
+    checkoutUrl: {
+      monthly: "/register?plan=self-hosted&billing=monthly",
+      annually: "/register?plan=self-hosted&billing=annually",
+    },
+  },
+  {
+    id: "desktop-offline",
+    name: "Desktop Offline",
+    price: { monthly: 60000, annually: 600000 },
+    description: "Application bureau pour les zones a faible connectivite avec sync manuelle.",
+    features: [
+      "Jusqu'a 500 etudiants",
+      "Fonctionnement 100% hors-ligne",
+      "Synchronisation manuelle",
+      "POS & Caisse hors-ligne",
+      "Pipeline Visa local",
+      "Bulletins et attestations",
+      "Support email (48h)",
+      "Mises a jour annuelles",
+    ],
+    ctaText: "Telecharger la demo",
+    checkoutUrl: {
+      monthly: "/register?plan=desktop-offline&billing=monthly",
+      annually: "/register?plan=desktop-offline&billing=annually",
+    },
+  },
+];
+
+// Comparison Matrix
+export const COMPARISON_MATRIX: ComparisonRow[] = [
+  {
+    category: "GESTION",
+    items: [
+      { feature: "Clients / Etudiants", saasCloud: "Illimites", selfHosted: "Illimites", desktopOffline: "Jusqu'a 500" },
+      { feature: "Inscriptions", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Multi-utilisateurs", saasCloud: true, selfHosted: true, desktopOffline: "1 utilisateur" },
+    ],
+  },
+  {
+    category: "COURS DE LANGUE",
+    items: [
+      { feature: "Sessions A1-B2", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Presences QR", saasCloud: true, selfHosted: true, desktopOffline: "Hors-ligne" },
+      { feature: "Bulletins & attestations", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Gestion formateurs", saasCloud: true, selfHosted: true, desktopOffline: true },
+    ],
+  },
+  {
+    category: "SUIVI VISA",
+    items: [
+      { feature: "Pipeline d'immigration", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Depot documents", saasCloud: "Cloud", selfHosted: "Local", desktopOffline: "Local" },
+      { feature: "Relances automatiques", saasCloud: true, selfHosted: "Configurable", desktopOffline: false },
+      { feature: "Alertes deadlines", saasCloud: true, selfHosted: true, desktopOffline: false },
+    ],
+  },
+  {
+    category: "POS & CAISSE",
+    items: [
+      { feature: "Encaissements", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Paiement par tranche", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Recus automatiques", saasCloud: true, selfHosted: true, desktopOffline: "Local" },
+      { feature: "Mobile Money (MTN, Moov, Wave)", saasCloud: true, selfHosted: "Configurable", desktopOffline: false },
+    ],
+  },
+  {
+    category: "EXPORTS & SUPPORT",
+    items: [
+      { feature: "Exports PDF / Excel", saasCloud: true, selfHosted: true, desktopOffline: "Limite" },
+      { feature: "Support", saasCloud: "Email prioritaire", selfHosted: "Email + telephone", desktopOffline: "Email (48h)" },
+      { feature: "Mises a jour", saasCloud: "Incluses", selfHosted: "Incluses", desktopOffline: "Annuelles" },
+      { feature: "Synchronisation cloud", saasCloud: true, selfHosted: false, desktopOffline: false },
+    ],
   },
 ];
 
 // FAQ
 export const FAQ_DATA: FAQItem[] = [
   {
-    question: "Comment fonctionne la gestion des langues ?",
-    answer: "EduFlow vous permet de creer des sessions par langue et par niveau (A1, A2, B1, B2, etc.), d\'assigner des formateurs, de suivre les presences via QR code, et de generer automatiquement des bulletins et attestations de fin de formation."
+    question: "Comment fonctionne le suivi des cours de langues ?",
+    answer: "EduFlow permet de creer des sessions par langue et par niveau (A1 a C2), d'assigner des formateurs, de suivre les presences via QR code, et de generer automatiquement des bulletins et attestations de fin de formation. Chaque etudiant dispose d'un historique complet de sa progression.",
   },
   {
-    question: "Puis-je suivre les procedures de visa etape par etape ?",
-    answer: "Oui, EduFlow integre un pipeline visuel complet pour suivre chaque dossier d\'immigration : depot de documents, relances administratives, rendez-vous consulaires et obtention du visa."
+    question: "Comment est gere le pipeline de visa et d'immigration ?",
+    answer: "Le pipeline visa offre un suivi visuel etape par etape de chaque dossier : depot de documents, relances administratives, rendez-vous consulaires et obtention du visa. Des alertes automatiques vous evitent de manquer une deadline.",
   },
   {
-    question: "L\'application fonctionne-t-elle hors-ligne ?",
-    answer: "Absolument. En plus de l\'offre SaaS Cloud, nous proposons une version Desktop Offline (.exe) parfaitement adaptee aux zones a faible connectivite avec synchronisation differee."
+    question: "L'application fonctionne-t-elle en mode hors-ligne ?",
+    answer: "Oui. La version Desktop Offline (Windows) permet de gerer vos cours, presences et dossiers sans connexion Internet. Une synchronisation manuelle permet de reunir les donnees avec le cloud lorsque la connectivite est retablie."
   },
   {
-    question: "Quels moyens de paiement locaux sont supportes ?",
-    answer: "Le module POS & Caisse gere les encaissements en especes, Mobile Money (MTN, Moov, Wave) et virements, avec gestion des paiements par tranche et recus automatiques."
+    question: "Quels moyens de paiement locaux sont integres au POS ?",
+    answer: "Le module POS & Caisse gere les encaissements en especes, Mobile Money (MTN, Moov, Wave) et virements bancaires. Les paiements par tranche sont supportes et les recus sont generes automatiquement pour chaque transaction."
   },
   {
-    question: "Les etudiants ont-ils acces a un espace personnel ?",
-    answer: "Oui, un portail etudiant dedie permet a vos apprenants de consulter leurs emargements, notes, bulletins et l\'avancement de leur dossier de visa."
+    question: "Les etudiants ont-ils acces a un portail personnel ?",
+    answer: "Oui, chaque etudiant dispose d'un portail dedie pour consulter son emploi du temps, ses notes, bulletins, attestations, et l'avancement de son dossier de visa. Des notifications automatiques les informent des evenements importants.",
   },
   {
-    question: "Puis-je changer de formule a tout moment ?",
-    answer: "Oui, vous pouvez passer d\'une formule SaaS Cloud a une licence Self-Hosted ou Desktop selon l\'evolution de votre centre."
+    question: "Puis-je changer de formule ou migrer vers une autre version ?",
+    answer: "Absolument. Vous pouvez passer du SaaS Cloud au Self-Hosted Docker ou a la version Desktop Offline a tout moment. La migration des donnees est accompagnee par notre support pour garantir une transition sans interruption.",
   }
 ];
 
@@ -215,9 +282,9 @@ export const VISA_TIMELINE_STEPS: VisaStep[] = [
 export const FOOTER_LINKS = {
   product: [
     { label: "Fonctionnalites", href: "#features" },
-    { label: "Tarifs", href: "#pricing" },
+    { label: "Tarifs", href: "#tarifs" },
     { label: "FAQ", href: "#faq" },
-    { label: "Connexion", href: "/auth/login" },
+    { label: "Connexion", href: "/login" },
   ],
   company: [
     { label: "A propos", href: "#" },

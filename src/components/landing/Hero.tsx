@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Sparkles } from "lucide-react";
-import { VISA_TIMELINE_STEPS } from "@/data/content";
+import { ArrowRight, CheckCircle2, GraduationCap, IdCard, CreditCard } from "lucide-react";
 
 export default function Hero() {
   return (
@@ -23,122 +22,140 @@ export default function Hero() {
           <div className="space-y-8">
             {/* Badge */}
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand/10 border border-brand/20 text-brand-light text-sm">
-              <Sparkles className="w-4 h-4" />
+              <GraduationCap className="w-4 h-4" />
               <span>Nouveau : Pipeline Visa integre</span>
             </div>
 
             {/* Heading */}
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight">
-              Gerez votre centre de formation{" "}
-              <span className="text-gradient-brand">en toute simplicite</span>
+              Pilotez vos cours de langues &amp; procédures d'immigration{" "}
+              <span className="text-gradient-brand">en toute simplicité</span>
             </h1>
 
             {/* Description */}
             <p className="text-lg text-gray-400 max-w-xl leading-relaxed">
-              EduFlow est la plateforme SaaS B2B tout-en-un pour les centres de langues et agences de voyage : gestion des cours, pipeline visa, POS et portail etudiant.
+              Gérez vos étudiants, sessions de cours, dossiers de voyage et caisse POS depuis une seule plateforme moderne. Disponible en ligne ou hors-ligne.
             </p>
 
             {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4">
               <Link
-                href="/auth/signup"
+                href="/register"
                 className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-base font-medium text-white bg-brand hover:bg-brand-dark rounded-xl transition-all hover:shadow-xl hover:shadow-brand/25 hover:-translate-y-0.5"
               >
-                Demander une demo
+                Essai Gratuit 14 jours
                 <ArrowRight className="w-5 h-5" />
               </Link>
               <a
-                href="#features"
+                href="#tarifs"
                 className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-base font-medium text-gray-300 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 rounded-xl transition-all"
               >
-                Decouvrir les fonctionnalites
+                Voir les Tarifs
               </a>
             </div>
 
-            {/* Trust Signals */}
-            <div className="flex items-center gap-6 pt-4">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-mint" />
-                <span className="text-sm text-gray-400">150+ centres nous font confiance</span>
+            {/* Proof Text */}
+            <div className="flex items-center gap-2 pt-4">
+              <div className="flex -space-x-2">
+                <div className="w-8 h-8 rounded-full bg-brand/30 border-2 border-ink-900 flex items-center justify-center text-xs text-white font-bold">A</div>
+                <div className="w-8 h-8 rounded-full bg-mint/30 border-2 border-ink-900 flex items-center justify-center text-xs text-white font-bold">M</div>
+                <div className="w-8 h-8 rounded-full bg-gold/30 border-2 border-ink-900 flex items-center justify-center text-xs text-white font-bold">S</div>
               </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-mint" />
-                <span className="text-sm text-gray-400">Sans engagement</span>
-              </div>
+              <span className="text-sm text-gray-400 font-medium">+50 centres nous font confiance</span>
             </div>
           </div>
 
           {/* Right Content - Dashboard Preview */}
           <div className="relative">
-            <div className="glass-card p-6 glow-brand">
+            <div className="glass-card p-6 glow-brand space-y-5">
               {/* Dashboard Header */}
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold text-white">Suivi Visa</h3>
-                <span className="px-2.5 py-1 text-xs font-medium text-mint bg-mint/10 rounded-full border border-mint/20">
-                  En cours
-                </span>
-              </div>
-
-              {/* Timeline */}
-              <div className="space-y-4">
-                {VISA_TIMELINE_STEPS.map((step, index) => (
-                  <div key={step.step} className="flex items-center gap-4">
-                    {/* Step Indicator */}
-                    <div className="relative">
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all ${
-                          step.status === "completed"
-                            ? "bg-mint/20 border-mint text-mint"
-                            : step.status === "current"
-                            ? "bg-brand/20 border-brand text-brand-light animate-timeline-pulse"
-                            : "bg-white/5 border-white/20 text-gray-500"
-                        }`}
-                      >
-                        {step.status === "completed" ? (
-                          <CheckCircle2 className="w-5 h-5" />
-                        ) : (
-                          step.step
-                        )}
-                      </div>
-                      {index < VISA_TIMELINE_STEPS.length - 1 && (
-                        <div
-                          className={`absolute top-10 left-1/2 -translate-x-1/2 w-0.5 h-6 ${
-                            step.status === "completed" ? "bg-mint/40" : "bg-white/10"
-                          }`}
-                        />
-                      )}
-                    </div>
-
-                    {/* Step Content */}
-                    <div className="flex-1">
-                      <p
-                        className={`text-sm font-medium ${
-                          step.status === "upcoming" ? "text-gray-500" : "text-white"
-                        }`}
-                      >
-                        {step.title}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {step.status === "completed" && "Termine"}
-                        {step.status === "current" && "En cours de traitement"}
-                        {step.status === "upcoming" && "A venir"}
-                      </p>
-                    </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-brand/20 border border-brand/30 flex items-center justify-center">
+                    <GraduationCap className="w-5 h-5 text-brand-light" />
                   </div>
-                ))}
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Tableau de bord</h3>
+                    <p className="text-xs text-gray-400">EduFlow Centre</p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 text-xs font-medium text-mint bg-mint/10 rounded-full border border-mint/20">En ligne</span>
+              </div>
+              {/* Student Tracking Card */}
+              <div className="flex items-center gap-4 p-3 rounded-xl bg-white/5 border border-white/5">
+                <div className="w-11 h-11 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center shrink-0">
+                  <GraduationCap className="w-5 h-5 text-brand-light" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">Koffi Adjoua</p>
+                  <p className="text-xs text-gray-400">German B2</p>
+                </div>
+                <span className="px-2 py-0.5 text-xs font-medium text-mint bg-mint/10 rounded-full border border-mint/20">Actif</span>
               </div>
 
-              {/* Progress Bar */}
-              <div className="mt-6 pt-4 border-t border-white/10">
-                <div className="flex justify-between text-xs text-gray-400 mb-2">
-                  <span>Progression</span>
-                  <span>60%</span>
+              {/* Course Status */}
+              <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="w-4 h-4 text-brand-light" />
+                    <span className="text-sm font-medium text-white">Assiduite aux cours</span>
+                  </div>
+                  <span className="text-sm font-bold text-mint">85%</span>
                 </div>
                 <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-brand to-mint rounded-full transition-all duration-1000"
-                    style={{ width: "60%" }}
-                  />
+                  <div className="h-full bg-gradient-to-r from-brand to-mint rounded-full" style={{ width: "85%" }} />
+                </div>
+                <p className="text-xs text-gray-500 mt-2">34/40 sessions assistees ce mois</p>
+              </div>
+
+              {/* Visa Pipeline */}
+              <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <IdCard className="w-4 h-4 text-brand-light" />
+                    <span className="text-sm font-medium text-white">Pipeline Visa</span>
+                  </div>
+                  <span className="text-xs text-gray-400">Etape 3/4</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center gap-1">
+                    <div className="h-2 flex-1 rounded-full bg-mint" />
+                    <div className="h-2 flex-1 rounded-full bg-mint" />
+                    <div className="h-2 flex-1 rounded-full bg-brand animate-pulse" />
+                    <div className="h-2 flex-1 rounded-full bg-white/10" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-xs text-gray-500">Consulat RDV</span>
+                  <span className="text-xs font-medium text-brand-light">En cours</span>
+                </div>
+              </div>
+
+              {/* Checklist */}
+              <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+                <div className="flex items-center gap-2 mb-3">
+                  <CreditCard className="w-4 h-4 text-gold" />
+                  <span className="text-sm font-medium text-white">Checklist documents</span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-mint" />
+                    <span className="text-xs text-gray-300">Passeport valide</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-mint" />
+                    <span className="text-xs text-gray-300">Lettre d'acceptation</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full border-2 border-brand flex items-center justify-center">
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand" />
+                    </div>
+                    <span className="text-xs text-gray-300">Preuve financiere</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full border-2 border-white/20" />
+                    <span className="text-xs text-gray-500">Formulaire consulaire</span>
+                  </div>
                 </div>
               </div>
             </div>
