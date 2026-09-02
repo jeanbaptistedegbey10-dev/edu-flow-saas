@@ -58,3 +58,22 @@ export async function getSuperAdminContext(): Promise<SuperAdminContext | null> 
     organizationId: user.organizationId,
   };
 }
+
+// --------------------------------------
+// Clés API de paiement (KKiaPay / FedaPay)
+// --------------------------------------
+
+/**
+ * Identifiants des clés de paiement stockées dans `SystemSettings`.
+ * Objet de constantes déplacé ici pour respecter la contrainte Next.js
+ * qui interdit l'export d'objets/constantes dans les fichiers "use server".
+ */
+export const PAYMENT_SETTING_KEYS = {
+  KKIA_PAY_PUBLIC_KEY: "kkiapay.publicKey",
+  KKIA_PAY_PRIVATE_KEY: "kkiapay.privateKey",
+  KKIA_PAY_SECRET: "kkiapay.secret",
+  KKIA_PAY_MODE: "kkiapay.mode",
+  FEDA_PAY_PUBLIC_KEY: "fedapay.publicKey",
+  FEDA_PAY_SECRET_KEY: "fedapay.secretKey",
+  FEDA_PAY_MODE: "fedapay.mode",
+} as const;

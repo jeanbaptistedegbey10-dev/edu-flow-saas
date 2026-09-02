@@ -301,7 +301,9 @@ const SANDBOX_TEST_KEYS: Record<
  * de TEST et le fournisseur est forcé sur Kkiapay — le paiement en ligne
  * reste donc testable (ouverture du widget sandbox) sur une instance vierge,
  * au lieu de bloquer l'UI avec « Le paiement en ligne n'est pas encore
- * disponible sur cette instance ».
+ * NOTE : cette fonction lit UNIQUEMENT les variables d'environnement.
+ * Pour la résolution complète (BDD → env → défaut), utiliser
+ * `getPaymentConfigWithDb()` qui interroge d'abord `SystemSettings`.
  */
 export function getPaymentConfig(): {
   provider: PaymentProvider;
@@ -341,6 +343,79 @@ export function getPaymentConfig(): {
       process.env.PAYMENT_WEBHOOK_SECRET?.trim() || fallback?.webhookSecret || "",
     sandbox,
   };
+}
+
+/**
+ * Résolution COMPLÈTE de la configuration de paiement :
+ *   1. Base de données (`SystemSettings`) — prioritaire ;
+ *   2. Variable d'environnement (rétrocompatibilité) ;
+ *   3. Clés de test sandbox (mode démo).
+ *
+ * Fonction asynchrone (requête BDD) à `await`er. Utilisée par les Server
+ * Actions critiques (checkout, webhook) pour garantir que les clés saisies
+ * dans le back-office Super-Admin priment toujours sur les variables env.
+ */
+export async function getPaymentConfigWithDb(): Promise<{
+  provider: PaymentProvider;
+  publicKey: string;
+  secretKey: string;
+  webhookSecret: string;
+  sandbox: boolean;
+}> {
+  const settings = await prisma.systemSettings.findMany({
+    where: { key: { in: ["kkiapay.publicKey", "kkiapay.privateKey", "kkiapay.secret", "kkiapay.mode", "fedapay.publicKey", "fedapay.secretKey", "fedapay.mode"] } },
+    select: { key: true, value: true },
+  });
+
+  const get = (k: string) => settings.find((s) => s.key === k)?.value?.trim() || "";
+
+  const kkiapayDbKey = get("kkiapay.publicKey");
+  const kkiapayDbPrivate = get("kkiapay.privateKey");
+  const kkiapayDbSecret = get("kkiapay.secret");
+  const fedapayDbKey = get("fedapay.publicKey");
+  const fedapayDbSecret = get("fedapay.secretKey");
+
+  const providerRaw = (process.env.PAYMENT_PROVIDER ?? "kkiapay").toLowerCase();
+  let provider: PaymentProvider = providerRaw === "fedapay" ? "fedapay" : "kkiapay";
+
+  if (fedapayDbKey && fedapayDbSecret) {
+    provider = "fedapay";
+  } else if (kkiapayDbKey) {
+    provider = "kkiapay";
+  }
+
+  const kkiapayModeDb = get("kkiapay.mode");
+  const fedapayModeDb = get("fedapay.mode");
+  const envSandbox = (process.env.PAYMENT_SANDBOX ?? "true").toLowerCase() !== "false";
+  const dbSandbox = kkiapayModeDb === "live" || fedapayModeDb === "live" ? false : undefined;
+  const sandbox = dbSandbox ?? envSandbox;
+
+  const kkiapayPublicKey = kkiapayDbKey || process.env.KKIAPAY_PUBLIC_KEY?.trim() || process.env.PAYMENT_PUBLIC_KEY?.trim() || "";
+  const kkiapayPrivateKey = kkiapayDbPrivate || process.env.KKIAPAY_PRIVATE_KEY?.trim() || "";
+  const kkiapaySecret = kkiapayDbSecret || process.env.KKIAPAY_SECRET?.trim() || process.env.PAYMENT_WEBHOOK_SECRET?.trim() || "";
+
+  const fedapayPublicKey = fedapayDbKey || process.env.FEDA_PAY_PUBLIC_KEY?.trim() || "";
+  const fedapaySecretKey = fedapayDbSecret || process.env.FEDA_PAY_SECRET_KEY?.trim() || "";
+
+  const hasRealKeys = Boolean(kkiapayPublicKey || kkiapayPrivateKey || fedapayPublicKey || fedapaySecretKey);
+  if (sandbox && !hasRealKeys) {
+    provider = "kkiapay";
+  }
+
+  const fallback = sandbox ? SANDBOX_TEST_KEYS[provider] : null;
+
+  const isFedapay = provider === "fedapay";
+  const publicKey = isFedapay
+    ? fedapayPublicKey || fallback?.publicKey || ""
+    : kkiapayPublicKey || fallback?.publicKey || "";
+  const secretKey = isFedapay
+    ? fedapaySecretKey || fallback?.secretKey || ""
+    : kkiapayPrivateKey || fallback?.secretKey || "";
+  const webhookSecret = isFedapay
+    ? fedapaySecretKey || fallback?.webhookSecret || ""
+    : kkiapaySecret || fallback?.webhookSecret || "";
+
+  return { provider, publicKey, secretKey, webhookSecret, sandbox };
 }
 
 /** `true` si l'agrégateur est utilisable (initiation + vérification webhook). */
@@ -549,9 +624,9 @@ export function getKkiapayWidgetConfig(): {
 export async function initiateSubscriptionPayment(
   input: InitiateSubscriptionInput
 ): Promise<InitiateSubscriptionResult> {
-  const config = getPaymentConfig();
+  const config = await getPaymentConfigWithDb();
 
-  if (!isPaymentGatewayConfigured()) {
+  if (!config.publicKey || !config.secretKey || !config.webhookSecret) {
     return {
       status: "error",
       message:
@@ -658,14 +733,17 @@ export type WebhookVerificationResult =
  *
  * Le corps brut (`rawBody`) est obligatoire : le HMAC est calculé sur les
  * octets exacts envoyés par la passerelle, jamais sur un objet re-sérialisé.
+ *
+ * Le `webhookSecret` est passé en paramètre (résolu en amont via
+ * `getPaymentConfigWithDb`) pour garantir la cohérence avec la configuration
+ * active (BDD + env).
  */
 export function verifyWebhookSignature(
   provider: PaymentProvider,
   rawBody: string,
+  webhookSecret: string,
   headers: Headers
 ): WebhookVerificationResult {
-  const { webhookSecret } = getPaymentConfig();
-
   if (!webhookSecret) {
     return {
       valid: false,

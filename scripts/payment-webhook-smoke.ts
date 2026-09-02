@@ -60,6 +60,7 @@ function main(): void {
   const ok = verifyWebhookSignature(
     "fedapay",
     BODY,
+    TEST_WEBHOOK_SECRET,
     new Headers({ "x-fedapay-signature": validHeader })
   );
   assert(ok.valid, "Fedapay : signature authentique acceptée");
@@ -69,12 +70,13 @@ function main(): void {
   const tampered = verifyWebhookSignature(
     "fedapay",
     tamperedBody,
+    TEST_WEBHOOK_SECRET,
     new Headers({ "x-fedapay-signature": validHeader })
   );
   assert(!tampered.valid, "Fedapay : corps falsifié rejeté");
 
   // 3. Fedapay : en-tête absent → rejetée (fail-closed).
-  const missing = verifyWebhookSignature("fedapay", BODY, new Headers());
+  const missing = verifyWebhookSignature("fedapay", BODY, TEST_WEBHOOK_SECRET, new Headers());
   assert(!missing.valid, "Fedapay : en-tête absent rejeté");
 
   // 4. Fedapay : signature rejouée (horodatage > 5 min) → rejetée.
@@ -86,6 +88,7 @@ function main(): void {
   const replayed = verifyWebhookSignature(
     "fedapay",
     BODY,
+    TEST_WEBHOOK_SECRET,
     new Headers({ "x-fedapay-signature": staleHeader })
   );
   assert(!replayed.valid, "Fedapay : rejeu (horodatage trop ancien) rejeté");
@@ -94,6 +97,7 @@ function main(): void {
   const kkOk = verifyWebhookSignature(
     "kkiapay",
     BODY,
+    TEST_WEBHOOK_SECRET,
     new Headers({ "x-kkiapay-secret": TEST_WEBHOOK_SECRET })
   );
   assert(kkOk.valid, "Kkiapay : secret correct accepté");
@@ -102,6 +106,7 @@ function main(): void {
   const kkBad = verifyWebhookSignature(
     "kkiapay",
     BODY,
+    TEST_WEBHOOK_SECRET,
     new Headers({ "x-kkiapay-secret": "secret-falsifie" })
   );
   assert(!kkBad.valid, "Kkiapay : secret incorrect rejeté");

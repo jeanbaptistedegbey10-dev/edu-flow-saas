@@ -132,6 +132,34 @@ model Document {
 }
 
 // --------------------------------------
+// Configuration globale (clé/valeur) — Paramètres système SaaS
+// --------------------------------------
+
+/// Stockage clé/valeur des paramètres globaux de la plateforme
+/// (clés API de paiement, configuration licence, préférences email…).
+///
+/// Réservé au Super-Admin : chaque paramètre est identifié par une `key`
+/// unique (ex : « kkiapay.publicKey ») et persiste sa valeur en `value`.
+/// La lecture côté logique métier applique un fallback sur les variables
+/// d'environnement si la clé n'est pas renseignée en base.
+model SystemSettings {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @default("")
+  /// Description lisible affichée dans l'UI (documentation pour le Super-Admin).
+  label     String?
+  /// Indique si la valeur est sensible (clé secrète) → masquée par défaut dans l'UI.
+  isSecret  Boolean  @default(false)
+  /// Catégorie de regroupement (« payment », « license », « email »…).
+  category  String   @default("general")
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@index([category])
+  @@map("system_settings")
+}
+
+// --------------------------------------
 // Core / Multi-Tenant Models
 // --------------------------------------
 

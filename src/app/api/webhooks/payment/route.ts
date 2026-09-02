@@ -26,8 +26,7 @@ import { NextResponse } from "next/server";
 
 import {
   activateSubscriptionAfterPayment,
-  getPaymentConfig,
-  isPaymentGatewayConfigured,
+  getPaymentConfigWithDb,
   normalizeWebhookPayload,
   verifyWebhookSignature,
 } from "@/lib/payment";
@@ -56,7 +55,9 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  if (!isPaymentGatewayConfigured()) {
+  const gatewayConfig = await getPaymentConfigWithDb();
+
+  if (!gatewayConfig.publicKey || !gatewayConfig.secretKey || !gatewayConfig.webhookSecret) {
     console.error(
       "[webhooks/payment] Passerelle non configurée — notification ignorée."
     );
@@ -68,12 +69,13 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const provider = getPaymentConfig().provider;
+  const provider = gatewayConfig.provider;
 
   // 2. Vérification de la signature — fail-closed.
   const verification = verifyWebhookSignature(
     provider,
     rawBody,
+    gatewayConfig.webhookSecret,
     request.headers
   );
 

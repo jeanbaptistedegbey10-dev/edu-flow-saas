@@ -38,9 +38,8 @@ import {
 } from "@/lib/license-check";
 import {
   formatXOF,
-  getPaymentConfig,
+  getPaymentConfigWithDb,
   getPricingCatalogForOrganization,
-  isPaymentGatewayConfigured,
   type PricingCatalogEntry,
 } from "@/lib/payment";
 import { getCurrentOrganizationId } from "@/lib/session";
@@ -153,8 +152,8 @@ export default async function BillingPage({
   // le statut du client — aucune facture COMPLETED = acquisition (prix
   // initial), sinon renouvellement (12 ou 6 mois) — détermine les prix
   // affichés. Le composant client ne reçoit que des chaînes déjà formatées.
-  const gateway = getPaymentConfig();
-  const gatewayConfigured = isPaymentGatewayConfigured();
+  const gateway = await getPaymentConfigWithDb();
+  const gatewayConfigured = Boolean(gateway.publicKey && gateway.secretKey && gateway.webhookSecret);
 
   const organizationId = await getCurrentOrganizationId();
   const catalog = await getPricingCatalogForOrganization(organizationId).catch(

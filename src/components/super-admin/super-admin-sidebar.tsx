@@ -3,6 +3,7 @@
 import {
   Banknote,
   Building2,
+  CreditCard,
   KeyRound,
   ReceiptText,
   ShieldCheck,
@@ -68,6 +69,11 @@ const superAdminMenu: SuperAdminMenuItem[] = [
     title: "Factures & Paiements SaaS",
     url: superAdminPath("billing"),
     icon: ReceiptText,
+  },
+  {
+    title: "Paiements & API",
+    url: superAdminPath("payments"),
+    icon: CreditCard,
   },
 ];
 
