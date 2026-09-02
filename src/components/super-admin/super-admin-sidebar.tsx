@@ -26,10 +26,14 @@ import {
 } from "@/components/ui/sidebar";
 
 import { NavUser, type SessionUser } from "@/components/dashboard/nav-user";
+import {
+  superAdminPath,
+} from "@/lib/super-admin-route";
 import { cn } from "@/lib/utils";
 
 /**
- * Onglets de navigation du back-office Super-Admin (/super-admin/*) :
+ * Onglets de navigation du back-office Super-Admin (route obfusquée —
+ * par défaut /portal-sys-admin-sec/*, voir src/lib/super-admin-route.ts) :
  * - 🏢 Organisations (gestion des écoles / clients) ;
  * - 💰 Tarifs & Offres (grille tarifaire dynamique — acquisition + renouvellement) ;
  * - 🔑 Générateur de Licences (clés Ed25519 pour clients offline/desktop) ;
@@ -39,30 +43,30 @@ type SuperAdminMenuItem = {
   title: string;
   url: string;
   icon: LucideIcon;
-  /** Égalité stricte de l'URL (utilisé pour l'onglet racine /super-admin). */
+  /** Égalité stricte de l'URL (utilisé pour l'onglet racine du back-office). */
   exact?: boolean;
 };
 
 const superAdminMenu: SuperAdminMenuItem[] = [
   {
     title: "Organisations",
-    url: "/super-admin",
+    url: superAdminPath(),
     icon: Building2,
     exact: true,
   },
   {
     title: "💰 Tarifs & Offres",
-    url: "/super-admin/pricing",
+    url: superAdminPath("pricing"),
     icon: Banknote,
   },
   {
     title: "Générateur de Licences",
-    url: "/super-admin/licenses",
+    url: superAdminPath("licenses"),
     icon: KeyRound,
   },
   {
     title: "Factures & Paiements SaaS",
-    url: "/super-admin/billing",
+    url: superAdminPath("billing"),
     icon: ReceiptText,
   },
 ];

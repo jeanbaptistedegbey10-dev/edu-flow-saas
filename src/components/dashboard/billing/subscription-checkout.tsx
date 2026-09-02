@@ -50,6 +50,11 @@ export type CheckoutPlan = {
   priceKindLabel: string;
   /** Options facturables : 12 mois (toujours) + 6 mois (renouvellement). */
   options: CheckoutPlanOption[];
+  /**
+   * `true` si cette formule est celle actuellement souscrite par
+   * l'organisation — la carte est alors désactivée (bouton grisé « Offre actuelle »).
+   */
+  isCurrent: boolean;
 };
 
 type Props = {
@@ -214,7 +219,11 @@ export function SubscriptionCheckout({
         {plans.map((plan) => (
           <div
             key={plan.planType}
-            className="flex flex-col rounded-xl border bg-muted/20 p-5"
+            className={
+              plan.isCurrent
+                ? "flex flex-col rounded-xl border border-emerald-300 bg-emerald-50/30 p-5 dark:border-emerald-500/30 dark:bg-emerald-500/5"
+                : "flex flex-col rounded-xl border bg-muted/20 p-5"
+            }
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -223,9 +232,15 @@ export function SubscriptionCheckout({
                   {plan.tagline}
                 </p>
               </div>
-              <span className="shrink-0 rounded-full border border-sky-200/60 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400">
-                {plan.priceKindLabel}
-              </span>
+              {plan.isCurrent ? (
+                <span className="shrink-0 rounded-full border border-emerald-200/60 bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+                  Offre actuelle
+                </span>
+              ) : (
+                <span className="shrink-0 rounded-full border border-sky-200/60 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400">
+                  {plan.priceKindLabel}
+                </span>
+              )}
             </div>
 
             <div className="mt-4 flex flex-1 flex-col gap-2">
@@ -252,23 +267,35 @@ export function SubscriptionCheckout({
                       <p className="text-lg font-semibold tracking-tight">
                         {option.priceText}
                       </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={!configured || isPending || loading}
-                        onClick={() =>
-                          purchase(plan.planType, option.durationMonths)
-                        }
-                      >
-                        {loading ? (
-                          <LoaderCircleIcon className="size-4 animate-spin" />
-                        ) : provider === "kkiapay" ? (
-                          <SmartphoneIcon className="size-4" />
-                        ) : (
-                          <CreditCardIcon className="size-4" />
-                        )}
-                        Payer
-                      </Button>
+                      {plan.isCurrent ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled
+                          className="opacity-50 cursor-not-allowed"
+                        >
+                          <ShieldCheckIcon className="size-4" />
+                          Actif
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={!configured || isPending || loading}
+                          onClick={() =>
+                            purchase(plan.planType, option.durationMonths)
+                          }
+                        >
+                          {loading ? (
+                            <LoaderCircleIcon className="size-4 animate-spin" />
+                          ) : provider === "kkiapay" ? (
+                            <SmartphoneIcon className="size-4" />
+                          ) : (
+                            <CreditCardIcon className="size-4" />
+                          )}
+                          Payer
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );

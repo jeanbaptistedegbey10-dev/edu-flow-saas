@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "db:seed": "tsx prisma/seed.ts",
     "db:migrate:deploy": "prisma migrate deploy",
+    "db:enable-rls": "prisma db execute --file ./prisma/migrations/enable_rls_all_tables.sql",
     "postinstall": "prisma generate",
     "license:keygen": "tsx scripts/license-keygen.ts",
     "check:license:desktop": "tsx scripts/check-license-desktop-compat.mts",

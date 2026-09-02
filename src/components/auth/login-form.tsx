@@ -43,6 +43,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { TurnstileWidget } from "./turnstile-widget";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -59,11 +60,20 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  *   `window.location.replace(...)` (rechargement complet du navigateur pour
  *   charger le nouveau cookie de session).
  */
-export function LoginForm() {
+export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
   const searchParams = useSearchParams();
 
   const [isPending, setIsPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Anti-robot (Cloudflare Turnstile). Le widget n'est rendu que si une clé
+  // publique est fournie côté serveur (NEXT_PUBLIC_TURNSTILE_SITE_KEY) ; la
+  // clé secrète (TURNSTILE_SECRET_KEY) active la vérification serveur.
+  const captchaRequired = Boolean(turnstileSiteKey);
+  const [captchaToken, setCaptchaToken] = React.useState<string | null>(null);
+  // Permet de forcer le re-rendu du widget (le jeton Turnstile est à usage
+  // unique) : incrémenté après chaque tentative de connexion.
+  const [captchaWidgetKey, setCaptchaWidgetKey] = React.useState(0);
 
   // Affiche un message clair quand le callback `signIn` d'Auth.js redirige vers
   // /login?error=<code> après un échec d'onboarding Google (ex: problème base
@@ -89,8 +99,16 @@ export function LoginForm() {
   }, [searchParams]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+        event.preventDefault();
     setError(null);
+
+    // Chaque tentative de connexion génère un nouveau challenge Turnstile
+    // (le jeton est à usage unique) : on regénère le widget pour éviter
+    // de soumettre un jeton déjà consommé.
+    if (captchaRequired) {
+      setCaptchaToken(null);
+      setCaptchaWidgetKey((value) => value + 1);
+    }
 
     const formData = new FormData(event.currentTarget);
     const email = String(formData.get("email") ?? "").trim();
@@ -104,6 +122,16 @@ export function LoginForm() {
 
     if (!password) {
       setError("Veuillez saisir votre mot de passe.");
+      return;
+    }
+
+        // Anti-robot : tant que le widget Turnstile n'a pas été validé, la
+    // soumission est bloquée côté client (défense primaire). La clé secrète
+    // côté serveur (src/auth.ts) fait office de défense en profondeur.
+    if (captchaRequired && !captchaToken) {
+      setError(
+        "Veuillez valider la vérification anti-robot avant de vous connecter."
+      );
       return;
     }
 
@@ -127,7 +155,10 @@ export function LoginForm() {
 
       const result = await signIn("credentials", {
         email,
-        password,
+                password,
+        // Jeton Turnstile (vérifié serveur uniquement si la clé secrète est
+        // configurée — sinon le champ est ignoré).
+        turnstileToken: captchaToken ?? "",
         redirect: false,
         redirectTo: destination,
       });
@@ -192,7 +223,7 @@ export function LoginForm() {
         />
       </div>
 
-      <div className="grid gap-2">
+             <div className="grid gap-2">
         <Label htmlFor="password">Mot de passe</Label>
         <Input
           id="password"
@@ -205,7 +236,24 @@ export function LoginForm() {
         />
       </div>
 
-      <Button type="submit" size="lg" className="w-full" disabled={isPending}>
+      {/* Anti-robot : blocage de la soumission tant que non validé (client) */}
+      <TurnstileWidget
+        key={captchaWidgetKey}
+        siteKey={turnstileSiteKey ?? ""}
+        onVerify={(token) => {
+          setCaptchaToken(token);
+          setError(null);
+        }}
+        onExpire={() => setCaptchaToken(null)}
+        onError={() => setCaptchaToken(null)}
+      />
+
+      <Button
+        type="submit"
+        size="lg"
+        className="w-full"
+        disabled={isPending || (captchaRequired && !captchaToken)}
+      >
         {isPending ? (
           <Loader2Icon data-icon="inline-start" className="animate-spin" />
         ) : (

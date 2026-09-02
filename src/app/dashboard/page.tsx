@@ -36,12 +36,13 @@ export default async function DashboardPage() {
   // Un utilisateur portant le rôle SUPER_ADMIN (administrateur de la
   // PLATEFORME EduFlow) ne doit jamais atterrir sur le tableau de bord d'un
   // centre de formation client : redirection immédiate vers son back-office
-  // /super-admin. Le proxy (src/proxy.ts) applique déjà cette règle en amont
-  // sur le JWT de session ; ce garde-fou côté page couvre le cas d'un jeton
-  // obsolète (rôle mis à jour en base sans reconnexion) et toute navigation
-  // directe vers /dashboard.
+  // (route obfusquée — par défaut /portal-sys-admin-sec, jamais /super-admin
+  // qui renvoie désormais un 404). Le proxy (src/proxy.ts) applique déjà
+  // cette règle en amont sur le JWT de session ; ce garde-fou côté page couvre
+  // le cas d'un jeton obsolète (rôle mis à jour en base sans reconnexion) et
+  // toute navigation directe vers /dashboard.
   if (role === "SUPER_ADMIN") {
-    redirect("/super-admin");
+    redirect(getSuperAdminRoute());
   }
 
   const isTeacher = role === "TEACHER";

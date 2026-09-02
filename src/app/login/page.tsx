@@ -15,6 +15,14 @@ export const metadata: Metadata = {
     "Connectez-vous à votre espace de gestion pour centres de formation et agences de mobilité internationale.",
 };
 
+// Clé publique du widget anti-robot Cloudflare Turnstile — injectée par le
+// serveur (NEXT_PUBLIC_*) et transmise au formulaire côté client. Si elle est
+// vide, le widget n'est pas rendu et la connexion n'exige pas de captcha.
+const turnstileSiteKey =
+  typeof process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY === "string"
+    ? process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY.trim()
+    : "";
+
 function LoginFormFallback() {
   return (
     <div className="grid gap-4">
@@ -82,7 +90,7 @@ export default async function LoginPage({
 
         {/* Formulaire (Suspense requis : useSearchParams dans le composant client) */}
         <Suspense fallback={<LoginFormFallback />}>
-          <LoginForm />
+          <LoginForm turnstileSiteKey={turnstileSiteKey} />
         </Suspense>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">

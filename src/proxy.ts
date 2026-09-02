@@ -2,18 +2,27 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
+import {
+  DEFAULT_SUPER_ADMIN_ROUTE,
+  getSuperAdminRoute,
+  isSuperAdminRoutePath,
+} from "@/lib/super-admin-route";
+
 // --------------------------------------
 // Protection des routes (ex-middleware, renommé « proxy » en Next.js 16)
 // --------------------------------------
 //
-// Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/:path* et
-// /super-admin/:path*.
+// Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/:path* et sur la
+// route d'administration obfusquée (par défaut /portal-sys-admin-sec/:path*).
 // Tout le reste (/, /login, /api, /_next, /favicon.ico, assets) est ignoré
 // par le middleware et passe directement en NextResponse.next() — le proxy
 // n'intervient JAMAIS ailleurs, sans AUCUNE redirection.
 //   - /login est JAMAIS intercepté → aucune interférence possible avec la
 //     logique de redirection de la page (auth() vs getToken() mismatch →
 //     anciennement boucle /login ↔ /dashboard).
+//   - /super-admin (route héritée) n'est PLUS couvert par le matcher : la
+//     requête atteint directement la page `[[...rest]]` qui renvoie un 404
+//     réel (aucune redirection, aucun contenu, statut HTTP 404).
 //   - Les endpoints NextAuth (/api/auth/*) et les assets statiques ne sont
 //     jamais interceptés.
 //   - La page /login n'effectue elle-même aucune redirection serveur →
@@ -36,7 +45,15 @@ import { getToken } from "next-auth/jwt";
 const LOGIN_PATH = "/login";
 const HOME_PATH = "/";
 const DASHBOARD_PATH = "/dashboard";
-const SUPER_ADMIN_PATH = "/super-admin";
+
+/**
+ * Route d'administration obfusquée (NEXT_PUBLIC_SUPER_ADMIN_ROUTE,
+ * défaut `/portal-sys-admin-sec`). Les variables NEXT_PUBLIC_* sont inlinées
+ * au build : la valeur est donc figée au déploiement — cohérente avec le
+ * matcher statique ci-dessous.
+ */
+const SUPER_ADMIN_ROUTE = getSuperAdminRoute();
+
 
 /**
  * Noms des cookies de session émis par Auth.js v5 (NextAuth) :
@@ -171,11 +188,12 @@ export async function proxy(request: NextRequest) {
   }
 
   // --------------------------------------
-  // Super-Admin : espace de travail = /super-admin
+  // Super-Admin : espace de travail = route administrateur obfusquée
   // --------------------------------------
   // Un utilisateur ayant le rôle SUPER_ADMIN ne doit JAMAIS atterrir sur
   // l'accueil (`/`) ni sur le tableau de bord d'un centre de formation
-  // client (/dashboard*) : il est renvoyé vers son back-office /super-admin.
+  // client (/dashboard*) : il est renvoyé vers son back-office (route
+  // obfusquée, par défaut /portal-sys-admin-sec).
   // Aucun risque de boucle : on ne redirige QUE depuis `/` et `/dashboard`.
   const role = typeof token.role === "string" ? token.role : null;
 
@@ -183,7 +201,7 @@ export async function proxy(request: NextRequest) {
     role === "SUPER_ADMIN" &&
     (pathname === HOME_PATH || pathname.startsWith(DASHBOARD_PATH))
   ) {
-    return NextResponse.redirect(new URL(SUPER_ADMIN_PATH, request.url));
+    return NextResponse.redirect(new URL(SUPER_ADMIN_ROUTE, request.url));
   }
 
   // --------------------------------------
@@ -195,12 +213,27 @@ export async function proxy(request: NextRequest) {
   // information du back-office ne soit divulguée. La deuxième barrière
   // (relecture du rôle en base) vit dans src/lib/super-admin.ts et dans
   // chaque Server Action de src/actions/super-admin.ts.
-  if (pathname.startsWith(SUPER_ADMIN_PATH)) {
+  if (isSuperAdminRoutePath(pathname)) {
     if (role !== "SUPER_ADMIN") {
       return NextResponse.redirect(new URL(DASHBOARD_PATH, request.url));
     }
 
     return NextResponse.next();
+  }
+
+  // --------------------------------------
+  // Route interne par défaut : masquée si la route est personnalisée
+  // --------------------------------------
+  // Si NEXT_PUBLIC_SUPER_ADMIN_ROUTE pointe vers un autre chemin, le segment
+  // de route interne (par défaut /portal-sys-admin-sec) ne doit PAS rester
+  // joignable : toute requête est réécrite vers /super-admin — la page
+  // [[...rest]] renvoie alors un 404 réel.
+  if (
+    SUPER_ADMIN_ROUTE !== DEFAULT_SUPER_ADMIN_ROUTE &&
+    (pathname === DEFAULT_SUPER_ADMIN_ROUTE ||
+      pathname.startsWith(`${DEFAULT_SUPER_ADMIN_ROUTE}/`))
+  ) {
+    return NextResponse.rewrite(new URL("/super-admin", request.url));
   }
 
   // --------------------------------------
@@ -240,10 +273,21 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/* et
-  // /super-admin/*, plus l'accueil `/` (intercepté uniquement pour la
-  // redirection Super-Admin → /super-admin ; les non-connectés y sont
-  // laissés tels quels, la page / les renvoie ensuite vers /dashboard).
+  // Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/* et sur la
+  // route d'administration obfusquée (par défaut /portal-sys-admin-sec/*),
+  // plus l'accueil `/` (intercepté uniquement pour la redirection
+  // Super-Admin → back-office ; les non-connectés y sont laissés tels quels,
+  // la page / les renvoie ensuite vers /dashboard).
+  //
+  // Le matcher doit être une CONSTANTE statique (analyse au build) : si
+  // NEXT_PUBLIC_SUPER_ADMIN_ROUTE est personnalisé, ajoutez le chemin
+  // configuré ici ; le rewrite de next.config.ts fait ensuite le pont vers
+  // le segment de route interne, protégé par la barrière DB du layout.
+  //
+  // /super-admin (route héritée) est volontairement ABSENT du matcher : la
+  // requête atteint directement src/app/super-admin/[[...rest]]/page.tsx qui
+  // renvoie un 404 réel — pour tout le monde, y compris les Super Admins.
+  //
   // Tout le reste (/login, /api, /_next, /favicon.ico, assets) est ignoré
   // par le middleware et passe directement en NextResponse.next() — le proxy
   // n'intervient JAMAIS ailleurs, sans AUCUNE redirection. Cette exclusion
@@ -251,5 +295,5 @@ export const config = {
   // /dashboard → /login → /dashboard → … (ERR_TOO_MANY_REDIRECTS), liée à un
   // désaccord entre getToken() (proxy) et auth() (page /login). La page /login
   // n'effectue plus, elle-même, aucune redirection serveur → /dashboard.
-  matcher: ["/", "/dashboard/:path*", "/super-admin/:path*"],
+  matcher: ["/", "/dashboard/:path*", "/portal-sys-admin-sec/:path*"],
 };

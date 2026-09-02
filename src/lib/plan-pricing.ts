@@ -153,6 +153,41 @@ export function getPricingPlanForLicensePlan(
   }
 }
 
+/**
+ * Mapping licence ↔ formule commerciale de la grille tarifaire.
+ *
+ * `LicensePlanType` (colonne `Organization.planType`) engendre plusieurs
+ * variantes que la grille tarifaire regroupe en 3 formules commerciales
+ * (`PricingPlanType`) : le cloud semestriel et mensuel partagent la formule
+ * SAAS_CLOUD. Cette fonction déduit la formule active à partir du type de
+ * licence enregistré sur l'organisation — `null` si c'est un essai ou s'il n'y
+ * a pas de licence.
+ */
+export function getPricingPlanForLicensePlanSafe(
+  planType: string
+): PricingPlanType | null {
+  switch (planType) {
+    case "SAAS_MONTHLY":
+    case "SAAS_HALF_YEAR":
+    case "SAAS_YEARLY":
+      return "SAAS_CLOUD";
+    case "SELF_HOSTED":
+      return "SELF_HOSTED";
+    case "OFFLINE":
+    case "DESKTOP_LIFETIME":
+      return "DESKTOP_OFFLINE";
+    default:
+      return null; // TRIAL ou inconnue.
+  }
+}
+
+/** Libellés de déploiement affichés dans la grille et sur les cartes. */
+export const PRICING_DEPLOYMENT_LABELS: Record<PricingPlanType, string> = {
+  SAAS_CLOUD: "Cloud (hébergé)",
+  SELF_HOSTED: "Self-Hosted (Docker)",
+  DESKTOP_OFFLINE: "Desktop Offline (.exe)",
+};
+
 /** Formate un montant XOF pour l'affichage (ex : « 80 000 FCFA »). */
 export function formatXOF(amount: number): string {
   return (

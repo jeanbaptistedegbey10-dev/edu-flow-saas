@@ -57,6 +57,8 @@ export type LicenseState = {
   trialEndsAt: Date | null;
   licenseEndsAt: Date | null;
   hasLicenseKey: boolean;
+  /** Clé de licence brute (null si aucune clé enregistrée). */
+  licenseKey: string | null;
   /**
    * Jours restants de la période d'essai (0 minimum). `null` lorsque le plan
    * n'est pas un essai ou lorsqu'aucune date de fin n'est définie.
@@ -126,6 +128,7 @@ function restrictedFallbackState(
     trialEndsAt: null,
     licenseEndsAt: null,
     hasLicenseKey: false,
+    licenseKey: null,
     trialDaysLeft: null,
     accessEndsAt: null,
     canWrite: false,
@@ -205,6 +208,7 @@ export async function getLicenseState(
       trialEndsAt,
       licenseEndsAt,
       hasLicenseKey: Boolean(organization.licenseKey),
+      licenseKey: organization.licenseKey ?? null,
       trialDaysLeft,
       accessEndsAt: planType === "TRIAL" ? trialEndsAt : licenseEndsAt,
       canWrite: restrictionReason === null,

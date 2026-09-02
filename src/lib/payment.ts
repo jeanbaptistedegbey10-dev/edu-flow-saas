@@ -29,11 +29,13 @@ import {
 } from "@/lib/crypto-license";
 import {
   DEFAULT_PLAN_PRICING,
+  PRICING_DEPLOYMENT_LABELS,
   PRICING_PLAN_LABELS,
   PRICING_PLAN_TAGLINES,
   PRICING_PLAN_TYPES,
   SUBSCRIPTION_PRICE_KIND_LABELS,
   getLicensePlanTypeFor,
+  getPricingPlanForLicensePlanSafe,
   isBillingDuration,
   isPricingPlanType,
   type BillingDuration,
@@ -199,6 +201,17 @@ export type PricingCatalogEntry = PlanPricingRow & {
   tagline: string;
   /** `true` = première souscription : le prix initial s'applique. */
   isInitial: boolean;
+  /**
+   * Type de déploiement commercial de la formule (ex:
+   * « Cloud (hébergé) ») — miroir de `PRICING_DEPLOYMENT_LABELS`.
+   */
+  deploymentType: PricingPlanType;
+  /**
+   * `true` si cette formule est celle actuellement souscrite par
+   * l'organisation (détectée via `Organization.planType`). La carte
+   * correspondante est désactivée et affichée comme « Offre actuelle ».
+   */
+  isCurrent: boolean;
 };
 
 /**
@@ -210,18 +223,31 @@ export type PricingCatalogEntry = PlanPricingRow & {
 export async function getPricingCatalogForOrganization(
   organizationId: string
 ): Promise<PricingCatalogEntry[]> {
-  const [grid, completedInvoices] = await Promise.all([
+  const [grid, completedInvoices, organization] = await Promise.all([
     getPlanPricingGrid(),
     countCompletedInvoices(organizationId),
+    prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { planType: true },
+    }),
   ]);
 
   const isInitial = completedInvoices === 0;
+
+  // Détermine la formule commerciale actuellement souscrite par
+  // l'organisation (ex : SAAS_YEARLY → SAAS_CLOUD). `null` si l'organisation
+  // est en essai ou n'a pas encore de licence active.
+  const currentPricingPlan = organization?.planType
+    ? getPricingPlanForLicensePlanSafe(organization.planType)
+    : null;
 
   return PRICING_PLAN_TYPES.map((planType) => ({
     ...grid[planType],
     label: PRICING_PLAN_LABELS[planType],
     tagline: PRICING_PLAN_TAGLINES[planType],
     isInitial,
+    deploymentType: planType,
+    isCurrent: currentPricingPlan === planType,
   }));
 }
 
@@ -514,7 +540,7 @@ export function getKkiapayWidgetConfig(): {
 /**
  * Démarre l'achat d'un abonnement :
  * 1. Génère une référence unique `EDU-<timestamp>-<aléa>` ;
- * 2. Enregistre une facture PENDING (audit + réconciliation) ;
+  * 2. Calcule le tarif dynamique (initial / renouvellement) selon l'historique ;
  * 3. Appelle l'agrégateur configuré pour obtenir l'URL de paiement.
  *
  * Aucune activation n'a lieu ici : seule la confirmation signée du webhook
@@ -544,19 +570,11 @@ export async function initiateSubscriptionPayment(
   const random = Math.random().toString(36).slice(2, 8).toUpperCase();
   const reference = `EDU-${Date.now()}-${random}`;
 
-  // Trace de la demande de paiement, avant tout appel réseau.
-  await prisma.invoice.create({
-    data: {
-      organizationId: input.organizationId,
-      planType: input.planType,
-      amount: pricing.amount,
-      currency: pricing.currency,
-      paymentProvider: config.provider,
-      status: "PENDING",
-      description: `${pricing.label} EduFlow — ${input.organizationName}`,
-    },
-  });
-
+  // Aucune facture n'est créée au clic « Payer » : l'initiation Kkiapay est
+  // pilotée par le widget côté navigateur, et Fedapay ne crée la transaction
+  // que côté agrégateur. La facture est écrite UNIQUEMENT par le webhook signé
+  // (`activateSubscriptionAfterPayment`), une fois le succès (ou l'échec)
+  // confirmé — ce qui garantit un historique net, sans lignes PENDING.
   try {
     if (config.provider === "fedapay") {
       const checkoutUrl = await initiateFedapayCheckout(
@@ -894,6 +912,44 @@ export async function activateSubscriptionAfterPayment(
   webhook: NormalizedWebhook
 ): Promise<SubscriptionActivationResult> {
   if (!webhook.success) {
+    // La passerelle a notifié un échec/rejet : on consigne un historique
+    // traçable (statut FAILED) uniquement si la notification comporte une
+    // référence de transaction + une organisation — les échecs sans
+    // metadata restent ignorés (aucune ligne temporaire ne persiste).
+    // Idempotent : une référence déjà connue n'est pas dupliquée.
+    if (webhook.transactionReference && webhook.metadata.organizationId) {
+      try {
+        const already = await prisma.invoice.findUnique({
+          where: { transactionReference: webhook.transactionReference },
+          select: { id: true },
+        });
+
+        if (!already) {
+          await prisma.invoice.create({
+            data: {
+              organizationId: webhook.metadata.organizationId,
+              planType:
+                typeof webhook.metadata.planType === "string"
+                  ? webhook.metadata.planType
+                  : "UNKNOWN",
+              amount: webhook.amount ?? 0,
+              currency: "XOF",
+              paymentProvider: getPaymentConfig().provider,
+              paymentMethod: webhook.method,
+              transactionReference: webhook.transactionReference,
+              status: "FAILED",
+              description: "Paiement échoué (notification de la passerelle)",
+            },
+          });
+        }
+      } catch (error) {
+        console.error(
+          "[payment][webhook] Échec de l'enregistrement du paiement échoué :",
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+
     return { status: "ignored", message: "Paiement non réussi — ignoré." };
   }
 

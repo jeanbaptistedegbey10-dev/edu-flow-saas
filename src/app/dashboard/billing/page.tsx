@@ -8,6 +8,7 @@ import {
   CreditCardIcon,
   KeyRoundIcon,
   ReceiptTextIcon,
+  ShieldCheckIcon,
 } from "lucide-react";
 
 import {
@@ -68,6 +69,19 @@ function formatDateTime(value: Date | null): string {
 /** Libellé robuste d'un type de plan (retombe sur la valeur brute). */
 function planLabel(planType: string): string {
   return (PLAN_TYPE_LABELS as Record<string, string>)[planType] ?? planType;
+}
+
+/**
+ * Masque une clé de licence pour un affichage lecture seule :
+ * conserve le préfixe `EDU-` et les 4 derniers caractères, remplace le
+ * reste par des `X` (ex : `EDU-XXXX-XXXX-1234`).
+ */
+function maskLicenseKey(key: string): string {
+  const trimmed = key.trim().toUpperCase();
+  if (trimmed.length <= 8) return trimmed;
+  const prefix = trimmed.slice(0, 4);
+  const suffix = trimmed.slice(-4);
+  return `${prefix}-XXXX-XXXX-${suffix}`;
 }
 
 /** Libellé + style de badge de statut de facture. */
@@ -154,6 +168,7 @@ export default async function BillingPage({
     label: entry.label,
     tagline: entry.tagline,
     priceKindLabel: entry.isInitial ? "Tarif acquisition" : "Renouvellement",
+    isCurrent: entry.isCurrent,
     options: entry.isInitial
       ? [
           {
@@ -395,23 +410,63 @@ export default async function BillingPage({
         </section>
       ) : null}
 
-      <section className="rounded-xl border bg-background p-5 shadow-sm">
-        <h2 className="font-semibold tracking-tight">Activer une licence</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Vous avez reçu une clé de licence de la part de l&apos;équipe
-          EduFlow ? Collez-la ci-dessous pour activer immédiatement votre
-          abonnement — la vérification (signature et expiration) est effectuée
-          localement, sans appel réseau.
-        </p>
-        <div className="mt-4 max-w-md">
-          <LicenseActivationForm />
-        </div>
-        <p className="mt-4 text-sm text-muted-foreground">
-          Si votre organisation est en lecture seule, les fonctionnalités de
-          création et de modification sont désactivées tant que
-          l&apos;abonnement n&apos;est pas renouvelé.
-        </p>
-      </section>
+      {license.hasLicenseKey && license.licenseKey ? (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-5 shadow-sm dark:border-emerald-500/20 dark:bg-emerald-500/5">
+          <div className="mb-4 flex items-center gap-2">
+            <ShieldCheckIcon className="size-5 text-emerald-600" />
+            <h2 className="font-semibold tracking-tight">Licence active</h2>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-lg border bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Clé de licence
+              </p>
+              <p className="mt-1 font-mono text-sm font-semibold tracking-wide">
+                {maskLicenseKey(license.licenseKey)}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-background p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Type d&apos;abonnement
+              </p>
+              <p className="mt-1 text-lg font-semibold">
+                {PLAN_TYPE_LABELS[license.planType]}
+              </p>
+            </div>
+            <div className="flex items-start gap-3 rounded-lg border bg-background p-4 sm:col-span-2">
+              <CalendarClockIcon className="mt-0.5 size-5 text-muted-foreground" />
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Expire le
+                </p>
+                <p className="mt-1 font-medium">
+                  {license.licenseEndsAt
+                    ? formatDate(license.licenseEndsAt)
+                    : "Licence perpétuelle (aucune expiration)"}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <section className="rounded-xl border bg-background p-5 shadow-sm">
+          <h2 className="font-semibold tracking-tight">Activer une licence</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Vous avez reçu une clé de licence de la part de l&apos;équipe
+            EduFlow ? Collez-la ci-dessous pour activer immédiatement votre
+            abonnement — la vérification (signature et expiration) est
+            effectuée localement, sans appel réseau.
+          </p>
+          <div className="mt-4 max-w-md">
+            <LicenseActivationForm />
+          </div>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Si votre organisation est en lecture seule, les fonctionnalités de
+            création et de modification sont désactivées tant que
+            l&apos;abonnement n&apos;est pas renouvelé.
+          </p>
+        </section>
+      )}
     </main>
   );
 }

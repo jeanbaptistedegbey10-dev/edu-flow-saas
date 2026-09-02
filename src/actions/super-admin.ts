@@ -11,6 +11,7 @@ import {
   type LicensePayload,
 } from "@/lib/crypto-license";
 import { prisma } from "@/lib/prisma";
+import { getSuperAdminRoute, superAdminPath } from "@/lib/super-admin-route";
 import {
   LICENSE_PLAN_TYPES,
   PLAN_STATUSES,
@@ -355,7 +356,7 @@ export async function generateLicenseAction(
     },
   });
 
-  revalidatePath("/super-admin");
+    revalidatePath(getSuperAdminRoute());
   revalidatePath("/dashboard/billing");
 
   return {
@@ -586,7 +587,7 @@ export async function generateStandaloneLicenseAction(
       },
     });
 
-    revalidatePath("/super-admin");
+        revalidatePath(getSuperAdminRoute());
     revalidatePath("/dashboard/billing");
   }
 
@@ -659,7 +660,7 @@ export async function extendTrialAction(
     },
   });
 
-  revalidatePath("/super-admin");
+    revalidatePath(getSuperAdminRoute());
   revalidatePath("/dashboard/billing");
 
   return {
@@ -713,7 +714,7 @@ export async function setOrganizationStatusAction(
     data: { planStatus: status },
   });
 
-  revalidatePath("/super-admin");
+    revalidatePath(getSuperAdminRoute());
   revalidatePath("/dashboard/billing");
 
   const effect =
@@ -955,7 +956,7 @@ export async function updatePlanPricingAction(
     update: { initialPrice, renewalAnnualPrice, renewalHalfYearPrice },
   });
 
-  revalidatePath("/super-admin/pricing");
+    revalidatePath(superAdminPath("pricing"));
   // La page de facturation cliente affiche la grille dynamique : à invalider.
   revalidatePath("/dashboard/billing");
 

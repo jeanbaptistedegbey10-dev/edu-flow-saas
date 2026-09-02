@@ -24,6 +24,10 @@ node /app/scripts/docker-init-wait.mjs
 echo "[eduflow:init] ⋙ Application des migrations Prisma (prisma migrate deploy)…"
 npx prisma migrate deploy
 
+# 2b. Activation de Row Level Security (RLS) sur toutes les tables publiques
+echo "[eduflow:init] ⋙ Activation de RLS sur toutes les tables publiques…"
+npx prisma db execute --file ./prisma/migrations/enable_rls_all_tables.sql
+
 # 3. Seed conditionnel (premier démarrage uniquement)
 if node /app/scripts/docker-seed-check.mjs >/dev/null 2>&1; then
   echo "[eduflow:init] ⋙ Base vide — exécution du seed de démarrage…"

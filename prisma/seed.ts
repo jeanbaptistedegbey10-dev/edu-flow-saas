@@ -99,7 +99,7 @@ async function main() {
     },
   });
 
-  // --------------------------------------
+    // --------------------------------------
   // Plateforme (back-office Super-Admin)
   // --------------------------------------
   // Organisation « porteuse » du compte Super-Admin : la relation
@@ -114,18 +114,23 @@ async function main() {
     },
   });
 
+  // Super Admin principal — email unique, compatible connexion Google
+  // (NEXT_PUBLIC_SUPER_ADMIN_ROUTE / SUPER_ADMIN_EMAIL). Identique à la
+  // valeur reçue par la logique RBAC de src/auth.ts : la première connexion
+  // Google avec cet email provisionne/rajuste ce compte en rôle SUPER_ADMIN.
   const superAdmin = await prisma.user.create({
     data: {
       organizationId: platformOrg.id,
-      email: "superadmin@eduflow.app",
+      email: "jeanbaptistedegbey10@gmail.com",
       passwordHash: demoPasswordHash,
-      firstName: "EduFlow",
-      lastName: "Platform",
+      firstName: "Jean-Baptiste",
+      lastName: "Degbey",
       role: "SUPER_ADMIN",
       // Statut « ACTIVE » : l'équivalent applicatif du statut actif est le
       // booléen `isActive` (le modèle User n'a pas d'enum de statut). Explicité
       // ici pour garantir un compte immédiatement opérationnel (connexion au
-      // back-office /super-admin) dès la fin du seed.
+      // back-office, désormais à la route /portal-sys-admin-sec) dès la fin du
+      // seed.
       isActive: true,
     },
   });

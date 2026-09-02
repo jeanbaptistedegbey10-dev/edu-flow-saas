@@ -9,6 +9,10 @@ import { seedDemoDataForOrganization } from "@/lib/demo-seed";
 import { computeTrialEndDate } from "@/lib/license-check";
 import { prisma } from "@/lib/prisma";
 import { generateUniqueOrganizationSlug } from "@/lib/slug";
+import {
+  isPlatformSuperAdminEmail,
+  PLATFORM_SUPER_ADMIN_EMAIL,
+} from "@/lib/platform-admin";
 
 // --------------------------------------
 // Configuration NextAuth v5 (Auth.js)
@@ -103,21 +107,53 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Credentials({
       name: "credentials",
       credentials: {
-        email: { label: "Email", type: "email" },
+                email: { label: "Email", type: "email" },
         password: { label: "Mot de passe", type: "password" },
+        // Jeton anti-robot (Cloudflare Turnstile) — champ optionnel côté
+        // formulaire ; il n'est vérifié que si TURNSTILE_SECRET_KEY est défini.
+        turnstileToken: { label: "Vérification anti-robot", type: "text" },
       },
 
       /**
        * Vérifie les identifiants soumis :
+       * 0. (optionnel, si configured) Vérification du jeton Turnstile.
        * 1. Recherche de l'utilisateur par email (normalisé en minuscules).
        * 2. Vérification que le compte est actif.
        * 3. Comparaison du mot de passe avec le hash bcrypt stocké.
        *
        * Retourne `null` en cas d'échec → NextAuth renvoie une erreur
        * `CredentialsSignin` côté client (message générique, sans fuite d'information).
-        */
+       *
+       * NOTE : le contrôle Turnstile est effectué côté client dans le
+       * formulaire (soumission bloquée tant que le widget n'est pas validé).
+       * Le contrôle serveur ici est la défense en profondeur : il fait fi du
+       * client et valide le jeton via l'API officielle siteverify.
+       */
       async authorize(credentials) {
-        const email =
+        // 0. Vérification anti-robot (Cloudflare Turnstile) — uniquement si
+        //    la clé secrète serveur est configurée.
+        const turnstileSecret = process.env.TURNSTILE_SECRET_KEY?.trim();
+
+        if (turnstileSecret) {
+          const turnstileToken =
+            typeof credentials?.turnstileToken === "string"
+              ? credentials.turnstileToken.trim()
+              : "";
+
+          const captchaOk = await verifyTurnstileToken(
+            turnstileToken,
+            turnstileSecret
+          );
+
+          if (!captchaOk) {
+            console.warn(
+              "[auth] Connexion refusée : vérification anti-robot (Turnstile) invalide ou absente."
+            );
+            return null;
+          }
+        }
+
+                        const email =
           typeof credentials?.email === "string"
             ? credentials.email.trim().toLowerCase()
             : null;
@@ -199,9 +235,99 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * `allowDangerousEmailAccountLinking: true` permet de lier automatiquement
      * un compte existant avec le même email.
      */
-    async signIn({ user, account, profile }) {
+        async signIn({ user, account, profile }) {
       if (account?.provider === "google" && user.email) {
         const email = user.email.trim().toLowerCase();
+
+        // 0. Super Admin principal de la plateforme (email unique). Cette
+        //    adresse est la seule à pouvoir rejoindre le back-office (route
+        //    obfusquée — voir src/lib/super-admin-route.ts). La logique ci-après
+        //    ne dépend pas d'un seed préalable : l'organisation porteuse et le
+        //    compte sont créés à la volée si absents (compatibilité avec le
+        //    bouton « Continue avec Google »).
+        if (isPlatformSuperAdminEmail(email)) {
+          const existingSuper = await prisma.user.findUnique({
+            where: { email },
+            select: { id: true, role: true, isActive: true, avatarUrl: true },
+          });
+
+          // Compte existant : on rétablit le rôle SUPER_ADMIN + l'activation.
+          if (existingSuper) {
+            const updates: {
+              role?: "SUPER_ADMIN";
+              isActive?: boolean;
+              avatarUrl?: string;
+            } = {};
+
+            if (existingSuper.role !== "SUPER_ADMIN") {
+              updates.role = "SUPER_ADMIN";
+            }
+
+            if (!existingSuper.isActive) {
+              updates.isActive = true;
+            }
+
+            if (!existingSuper.avatarUrl && user.image) {
+              updates.avatarUrl = user.image;
+            }
+
+            if (Object.keys(updates).length > 0) {
+              await prisma.user.update({
+                where: { id: existingSuper.id },
+                data: updates,
+              });
+            }
+
+            return true;
+          }
+
+          // Première connexion Google du Super Admin : provisioning minimal —
+          // organisation porteuse (slug eduflow-platform) + compte SUPER_ADMIN.
+          // Aucun jeu de données de démonstration n'est injecté : ce compte
+          // administre la plateforme, il ne consomme pas de licence client.
+          const adminPasswordHash = await bcrypt.hash(
+            randomBytes(24).toString("base64url"),
+            10
+          );
+
+          await prisma.$transaction(async (tx) => {
+            let platformOrg = await tx.organization.findUnique({
+              where: { slug: "eduflow-platform" },
+              select: { id: true },
+            });
+
+            if (!platformOrg) {
+              platformOrg = await tx.organization.create({
+                data: {
+                  name: "EduFlow Platform",
+                  slug: "eduflow-platform",
+                  email,
+                },
+              });
+            }
+
+            await tx.user.create({
+              data: {
+                organizationId: platformOrg.id,
+                email,
+                passwordHash: adminPasswordHash,
+                firstName:
+                  profile?.given_name ||
+                  (user.name?.trim().split(" ")[0] as string) ||
+                  "Super",
+                lastName:
+                  profile?.family_name ||
+                  (user.name?.trim().split(" ").slice(1).join(" ") as string) ||
+                  "Admin",
+                role: "SUPER_ADMIN",
+                isActive: true,
+                avatarUrl: user.image ?? null,
+              },
+            });
+          });
+
+          return true;
+        }
 
         try {
           // 1. Compte existant → simple connexion (+ avatar si manquant).
@@ -380,7 +506,54 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         (session.user as any).organizationId = token.organizationId ?? null;
       }
 
-      return session;
+            return session;
     },
   },
 });
+
+// --------------------------------------
+// Vérification serveur du jeton Cloudflare Turnstile (anti-robot)
+// --------------------------------------
+// La défense en profondeur : le widget côté client bloque la soumission tant
+// que le challenge n'est pas résolu ; le serveur valide indépendamment le jeton
+// reçu via la clé secrète, en évitant toute contournement du client.
+//
+// `fetch` côté serveur (Node runtime) — jamais exposé au client (la clé
+// secrète ne quitte jamais le serveur).
+async function verifyTurnstileToken(
+  token: string,
+  secret: string
+): Promise<boolean> {
+  if (!token) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(
+      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        // `cache: "no-store"` : chaque tentative de connexion est isolée.
+        cache: "no-store",
+        body: new URLSearchParams({
+          secret,
+          response: token,
+        }).toString(),
+      }
+    );
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = (await response.json()) as { success?: unknown };
+    return data.success === true;
+  } catch {
+    // En cas d'erreur réseau, on échoue OUVERT : si le secret n'est pas
+    // configuré le widget n'est pas non plus rendu (branche ci-dessus). Ici le
+    // secret existe mais siteverify est injoignable — on refuse par
+    // prudence (l'utilisateur peut réessayer).
+    return false;
+  }
+}

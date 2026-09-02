@@ -263,8 +263,17 @@ export async function getRecentInvoices(
     return null;
   }
 
+    // Nettoyage de l'historique : on n'affiche QUE les paiements effectivement
+  // traités par la passerelle — succès (COMPLETED) ou échecs notifiés
+  // (FAILED). Les statuts transitoires (PENDING) ou les tententes abandonnées
+  // ne sont PAS persistés (aucune ligne PENDING n'est créée lors du clic
+  // « Payer » — seul le webhook signé crée une facture, voir
+  // `src/lib/payment.ts#activateSubscriptionAfterPayment`).
   const invoices = await prisma.invoice.findMany({
-    where: { organizationId: context.organizationId },
+    where: {
+      organizationId: context.organizationId,
+      status: { in: ["COMPLETED", "FAILED"] },
+    },
     orderBy: { createdAt: "desc" },
     take: Math.min(Math.max(limit, 1), 50),
   });
