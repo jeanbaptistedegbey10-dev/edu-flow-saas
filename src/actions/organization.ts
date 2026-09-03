@@ -43,6 +43,12 @@ export type OrganizationInfoDTO = {
    * l'inscription d'un étudiant qui ne les a pas encore réglés.
    */
   defaultRegistrationFee: number;
+  /**
+   * Solde initial / solde de départ de la caisse (FCFA) : montant d'ouverture
+   * saisi à l'adoption du logiciel, intégré au calcul de trésorerie
+   * (/dashboard/tresorerie).
+   */
+  initialCashBalance: number;
   createdAt: Date;
   memberCount: number;
 };
@@ -57,7 +63,8 @@ export type OrganizationFormField =
   | "logoUrl"
   | "rccm"
   | "ifu"
-  | "defaultRegistrationFee";
+  | "defaultRegistrationFee"
+  | "initialCashBalance";
 
 export type OrganizationFormState = {
   status: "idle" | "success" | "error";
@@ -67,6 +74,9 @@ export type OrganizationFormState = {
 
 /** Plafond de sécurité pour les frais d'inscription (FCFA). */
 const MAX_REGISTRATION_FEE = 10_000_000;
+
+/** Plafond de sécurité pour les montants financiers saisis (FCFA). */
+const MAX_AMOUNT_LIMIT = 1_000_000_000;
 
 // --------------------------------------
 // Server Actions
@@ -97,6 +107,7 @@ export async function getOrganizationInfo(): Promise<OrganizationInfoDTO> {
         rccm: true,
         ifu: true,
         defaultRegistrationFee: true,
+        initialCashBalance: true,
         createdAt: true,
         _count: {
           select: { users: true },
@@ -123,6 +134,7 @@ export async function getOrganizationInfo(): Promise<OrganizationInfoDTO> {
       rccm: organization.rccm,
       ifu: organization.ifu,
       defaultRegistrationFee: organization.defaultRegistrationFee,
+      initialCashBalance: organization.initialCashBalance,
       createdAt: organization.createdAt,
       memberCount: organization._count.users,
     };
@@ -263,6 +275,15 @@ export async function updateOrganizationAction(
   const defaultRegistrationFee =
     rawDefaultRegistrationFee !== "" ? Number(rawDefaultRegistrationFee) : 0;
 
+  // Solde initial de caisse : montant positif ; vide ⇒ 0 (caisse ouverte à zéro).
+  const rawInitialCashBalance = String(
+    formData.get("initialCashBalance") ?? ""
+  )
+    .trim()
+    .replace(",", ".");
+  const initialCashBalance =
+    rawInitialCashBalance !== "" ? Number(rawInitialCashBalance) : 0;
+
   const fieldErrors: Partial<Record<OrganizationFormField, string>> = {};
 
   if (!name) {
@@ -336,6 +357,18 @@ export async function updateOrganizationAction(
       "Les frais d'inscription dépassent la limite autorisée.";
   }
 
+  // Solde initial de caisse : nombre positif plafonné (FCFA).
+  if (Number.isNaN(initialCashBalance)) {
+    fieldErrors.initialCashBalance =
+      "Le solde initial doit être un nombre.";
+  } else if (initialCashBalance < 0) {
+    fieldErrors.initialCashBalance =
+      "Le solde initial ne peut pas être négatif.";
+  } else if (initialCashBalance > MAX_AMOUNT_LIMIT) {
+    fieldErrors.initialCashBalance =
+      "Le solde initial dépasse la limite autorisée.";
+  }
+
   if (Object.keys(fieldErrors).length > 0) {
     return {
       status: "error",
@@ -360,10 +393,12 @@ export async function updateOrganizationAction(
         rccm: rccm || null,
         ifu: ifu || null,
         defaultRegistrationFee,
+        initialCashBalance,
       },
     });
 
     revalidatePath("/dashboard/organization");
+    revalidatePath("/dashboard/tresorerie");
     revalidatePath("/dashboard");
     // Le logo et le nom apparaissent dans le layout du tableau de bord :
     // revalidation large pour rafraîchir toutes les pages filles.

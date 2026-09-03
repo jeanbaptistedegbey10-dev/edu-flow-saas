@@ -29,6 +29,14 @@ export type StudentDTO = {
   discountType: DiscountType;
   /** Net à payer = totalCost − réduction (calculé automatiquement). */
   netAmount: number | null;
+  /**
+   * Paiements antérieurs hors système (FCFA) : montant déjà réglé avant
+   * l'adoption du logiciel. Déduit du reste à payer, mais jamais compté
+   * dans le journal de caisse courant (sauf inclusion explicite).
+   */
+  legacyPaidAmount: number;
+  /** Le montant hérité a-t-il été injecté dans le journal de caisse courant ? */
+  legacyAmountInCashJournal: boolean;
   /** Frais d'inscription déjà réglés (uniques à vie). */
   hasPaidRegistrationFee: boolean;
   /** Classe / cohorte active de l'étudiant. */
@@ -46,6 +54,7 @@ export type StudentFormField =
   | "totalCost"
   | "discount"
   | "discountType"
+  | "legacyPaidAmount"
   | "classId";
 
 export type StudentFormState = {
@@ -82,6 +91,17 @@ type ParsedFinancials = {
   discount: number | null;
   discountType: DiscountType;
   netAmount: number | null;
+  /**
+   * Paiements antérieurs hors système (FCFA), saisis à l'inscription.
+   * Toujours défini (0 par défaut) pour simplifier la persistance.
+   */
+  legacyPaidAmount: number;
+  /**
+   * État de la case « Ne pas inclure dans le journal de caisse actuel » :
+   * true (défaut) → le montant hérité reste informatif, AUCUN impact
+   * comptable ; false → une recette « LEGACY-* » est créée pour l'inclure.
+   */
+  legacyExcludeFromJournal: boolean;
 };
 
 /**
@@ -161,7 +181,49 @@ function parseFinancialFields(
         : totalCost - discount;
   }
 
-  return { totalCost, discount, discountType, netAmount };
+  // Paiements antérieurs hors système (montant déjà réglé avant l'adoption).
+  const rawLegacyPaidAmount = String(
+    formData.get("legacyPaidAmount") ?? ""
+  )
+    .trim()
+    .replace(",", ".");
+  let legacyPaidAmount = 0;
+  if (rawLegacyPaidAmount) {
+    const value = Number(rawLegacyPaidAmount);
+    if (Number.isNaN(value)) {
+      fieldErrors.legacyPaidAmount =
+        "Le montant des paiements antérieurs doit être un nombre.";
+    } else if (value < 0) {
+      fieldErrors.legacyPaidAmount =
+        "Le montant des paiements antérieurs ne peut pas être négatif.";
+    } else if (value > MAX_AMOUNT) {
+      fieldErrors.legacyPaidAmount =
+        "Le montant des paiements antérieurs dépasse la limite autorisée.";
+    } else {
+      legacyPaidAmount = value;
+    }
+  }
+
+  // Case « Ne pas inclure dans le journal de caisse actuel » :
+  // - cochée (valeur envoyée) → montant hérité EXCLU de la comptabilité ;
+  // - absente alors que la case était rendue (sentinelle) → l'utilisateur
+  //   l'a décochée : inclusion explicite dans le journal courant ;
+  // - absente sans sentinelle (formulaire tiers) → défaut sûr : exclu.
+  const legacyCheckboxRendered =
+    String(formData.get("legacyCheckboxRendered") ?? "").trim() === "1";
+  const legacyCheckboxChecked =
+    String(formData.get("excludeLegacyFromCashJournal") ?? "").trim() !== "";
+  const legacyExcludeFromJournal =
+    legacyCheckboxChecked || !legacyCheckboxRendered;
+
+  return {
+    totalCost,
+    discount,
+    discountType,
+    netAmount,
+    legacyPaidAmount,
+    legacyExcludeFromJournal,
+  };
 }
 
 type ParsedStudentInput =
@@ -177,6 +239,8 @@ type ParsedStudentInput =
         discount: number | null;
         discountType: DiscountType;
         netAmount: number | null;
+        legacyPaidAmount: number;
+        legacyExcludeFromJournal: boolean;
       };
     }
   | { ok: false; fieldErrors: Partial<Record<StudentFormField, string>> };
@@ -241,6 +305,23 @@ function parseStudentForm(formData: FormData): ParsedStudentInput {
 
 /** Libellé de la recette générée pour les frais d'inscription. */
 const REGISTRATION_FEE_DESCRIPTION = "Frais d'inscription";
+
+/**
+ * Libellé de la recette « LEGACY » : paiements antérieurs hors système que
+ * l'utilisateur a explicitement choisi d'inclure dans le journal de caisse
+ * courant (case dédiée décochée). Par défaut ces montants restent
+ * strictement informatifs (aucune écriture comptable).
+ */
+const LEGACY_PAYMENT_DESCRIPTION =
+  "Paiements antérieurs hors système (avant adoption du logiciel)";
+
+/**
+ * Référence unique et stable de la recette « LEGACY » d'un étudiant :
+ * permet la réconciliation idempotente lors des mises à jour (upsert/suppression).
+ */
+function buildLegacyPaymentReference(studentCode: string): string {
+  return `LEGACY-${studentCode}`;
+}
 
 /**
  * Référence unique de la recette de frais d'inscription :
@@ -342,6 +423,7 @@ function computeFinancialsWithFee(
       : totalCost - discount;
 
   return {
+    ...financials,
     totalCost,
     discount,
     discountType,
@@ -381,9 +463,20 @@ export type StudentDetailDTO = {
   discountType: DiscountType;
   /** Net à payer (totalCost − réduction). */
   netAmount: number | null;
+  /**
+   * Paiements antérieurs hors système (FCFA) : montant déjà réglé avant
+   * l'adoption du logiciel, affiché comme ligne dédiée sur la fiche.
+   */
+  legacyPaidAmount: number;
+  /** Le montant hérité a-t-il été injecté dans le journal de caisse courant ? */
+  legacyAmountInCashJournal: boolean;
   /** Montant déjà encaissé : somme des paiements COMPLETED. */
   paidAmount: number;
-  /** Reste à payer : max(0, netAmount − paidAmount). */
+  /**
+   * Reste à payer : max(0, netAmount − encaissé − hérité). Le montant hérité
+   * n'est déduit ici que s'il n'a PAS été injecté dans le journal de caisse
+   * (sinon il est déjà compté dans `paidAmount` via la recette « LEGACY-* »).
+   */
   remainingAmount: number | null;
   /** Frais d'inscription déjà réglés (uniques à vie). */
   hasPaidRegistrationFee: boolean;
@@ -425,6 +518,8 @@ export async function getStudentDetail(
         discount: true,
         discountType: true,
         netAmount: true,
+        legacyPaidAmount: true,
+        legacyAmountInCashJournal: true,
         hasPaidRegistrationFee: true,
         currentClassId: true,
         currentClass: {
@@ -464,9 +559,17 @@ export async function getStudentDetail(
 
     const paidAmount = paidAggregate._sum.amount ?? 0;
 
+    // Montant hérité (paiements antérieurs hors système) : déduit du reste à
+    // payer UNIQUEMENT s'il n'a pas été injecté dans le journal de caisse
+    // (sinon il est déjà inclus dans `paidAmount` via la recette « LEGACY-* »).
+    const legacyAmountInCashJournal = student.legacyAmountInCashJournal;
+    const effectiveLegacyCredit = legacyAmountInCashJournal
+      ? 0
+      : student.legacyPaidAmount;
+
     const remainingAmount =
       student.netAmount !== null
-        ? Math.max(0, student.netAmount - paidAmount)
+        ? Math.max(0, student.netAmount - paidAmount - effectiveLegacyCredit)
         : null;
 
     return {
@@ -482,6 +585,8 @@ export async function getStudentDetail(
       discount: student.discount,
       discountType: student.discountType,
       netAmount: student.netAmount,
+      legacyPaidAmount: student.legacyPaidAmount,
+      legacyAmountInCashJournal,
       hasPaidRegistrationFee: student.hasPaidRegistrationFee,
       currentClassId: student.currentClassId,
       currentClassName: student.currentClass?.name ?? null,
@@ -565,6 +670,8 @@ export async function getStudents(): Promise<StudentDTO[]> {
         discount: true,
         discountType: true,
         netAmount: true,
+        legacyPaidAmount: true,
+        legacyAmountInCashJournal: true,
         hasPaidRegistrationFee: true,
         currentClassId: true,
         currentClass: { select: { name: true } },
@@ -584,6 +691,8 @@ export async function getStudents(): Promise<StudentDTO[]> {
       discount: student.discount,
       discountType: student.discountType,
       netAmount: student.netAmount,
+      legacyPaidAmount: student.legacyPaidAmount,
+      legacyAmountInCashJournal: student.legacyAmountInCashJournal,
       hasPaidRegistrationFee: student.hasPaidRegistrationFee,
       currentClassId: student.currentClassId,
       currentClassName: student.currentClass?.name ?? null,
@@ -682,6 +791,10 @@ export async function createStudentAction(
       const studentCode = await generateStudentCode();
 
       const createdStudent = await prisma.$transaction(async (tx) => {
+        const legacyInJournal =
+          financials.legacyPaidAmount > 0 &&
+          !financials.legacyExcludeFromJournal;
+
         const student = await tx.student.create({
           data: {
             organizationId,
@@ -695,11 +808,32 @@ export async function createStudentAction(
             discount: financials.discount,
             discountType: financials.discountType,
             netAmount: financials.netAmount,
+            // Paiements antérieurs hors système : mémorisés sur la fiche
+            // (informatifs par défaut, exclus du journal de caisse courant).
+            legacyPaidAmount: financials.legacyPaidAmount,
+            legacyAmountInCashJournal: legacyInJournal,
             // Les frais d'inscription sont réglés dès la création.
             hasPaidRegistrationFee: true,
             ...(targetClass ? { currentClassId: targetClass.id } : {}),
           },
         });
+
+        // Recette « LEGACY » : uniquement si l'utilisateur a décoché la case
+        // « Ne pas inclure dans le journal de caisse actuel » — sinon le
+        // montant hérité reste strictement informatif (aucune écriture).
+        if (legacyInJournal) {
+          await tx.payment.create({
+            data: {
+              organizationId,
+              studentId: student.id,
+              amount: financials.legacyPaidAmount,
+              paymentMethod: "CASH",
+              status: "COMPLETED",
+              reference: buildLegacyPaymentReference(studentCode),
+              description: LEGACY_PAYMENT_DESCRIPTION,
+            },
+          });
+        }
 
         // Historique d'affectation à la classe + inscription au cours porteur.
         if (targetClass) {
@@ -764,9 +898,18 @@ export async function createStudentAction(
         ? ` Frais d'inscription (${formatFcfa(registrationFee)}) encaissés.`
         : "";
 
+      const legacyNote =
+        financials.legacyPaidAmount > 0
+          ? financials.legacyExcludeFromJournal
+            ? " Paiements antérieurs hors système enregistrés (exclus du journal de caisse)."
+            : ` Paiements antérieurs (${formatFcfa(
+                financials.legacyPaidAmount
+              )}) inclus dans le journal de caisse.`
+          : "";
+
       return {
         status: "success",
-        message: `Étudiant créé avec succès (${createdStudent.studentCode}).${feeNote}`,
+        message: `Étudiant créé avec succès (${createdStudent.studentCode}).${feeNote}${legacyNote}`,
       };
     } catch (error) {
       lastError = error;
@@ -829,7 +972,14 @@ export async function updateStudentAction(
     // Isolation multi-tenant : l'étudiant doit appartenir à l'organisation active.
     const existing = await prisma.student.findFirst({
       where: { id: studentId, organizationId },
-      select: { id: true, hasPaidRegistrationFee: true, currentClassId: true },
+      select: {
+        id: true,
+        studentCode: true,
+        hasPaidRegistrationFee: true,
+        currentClassId: true,
+        legacyPaidAmount: true,
+        legacyAmountInCashJournal: true,
+      },
     });
 
     if (!existing) {
@@ -891,6 +1041,17 @@ export async function updateStudentAction(
     const classChanged =
       targetClass !== null && targetClass.id !== existing.currentClassId;
 
+    // Réconciliation de la recette « LEGACY » (paiements antérieurs hors
+    // système) : idempotente, basée sur la référence unique LEGACY-<code>.
+    // - case décochée + montant > 0 → upsert de la recette (inclusion) ;
+    // - case cochée ou montant nul → suppression de toute recette résiduelle.
+    const legacyInJournal =
+      financials.legacyPaidAmount > 0 && !financials.legacyExcludeFromJournal;
+    const legacyReference = buildLegacyPaymentReference(existing.studentCode);
+    const legacyChanged =
+      legacyInJournal !== existing.legacyAmountInCashJournal ||
+      legacyInJournal;
+
     await prisma.$transaction(async (tx) => {
       await tx.student.update({
         where: { id: studentId },
@@ -904,6 +1065,8 @@ export async function updateStudentAction(
           discount: financials.discount,
           discountType: financials.discountType,
           netAmount: financials.netAmount,
+          legacyPaidAmount: financials.legacyPaidAmount,
+          legacyAmountInCashJournal: legacyInJournal,
           ...(appliesRegistrationFee
             ? { hasPaidRegistrationFee: true }
             : {}),
@@ -914,6 +1077,30 @@ export async function updateStudentAction(
               : {}),
         },
       });
+
+      // Journal de caisse : synchronise la recette « LEGACY-* » avec l'état
+      // de la case (aucune écriture si le montant reste exclu du journal).
+      if (legacyChanged) {
+        if (legacyInJournal) {
+          await tx.payment.upsert({
+            where: { reference: legacyReference },
+            create: {
+              organizationId,
+              studentId,
+              amount: financials.legacyPaidAmount,
+              paymentMethod: "CASH",
+              status: "COMPLETED",
+              reference: legacyReference,
+              description: LEGACY_PAYMENT_DESCRIPTION,
+            },
+            update: { amount: financials.legacyPaidAmount },
+          });
+        } else {
+          await tx.payment.deleteMany({
+            where: { organizationId, reference: legacyReference },
+          });
+        }
+      }
 
       // Nouvelle affectation : historique + inscription au cours porteur.
       if (targetClass && classChanged) {
@@ -971,6 +1158,10 @@ export async function updateStudentAction(
     revalidatePath(`/dashboard/students/${studentId}`);
     revalidatePath("/dashboard/payments");
     revalidatePath("/dashboard/classes");
+    // Impacts financiers possibles (recette « LEGACY ») : rafraîchit les
+    // vues analytiques et la trésorerie.
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/tresorerie");
 
     const notes: string[] = [];
 
@@ -981,6 +1172,16 @@ export async function updateStudentAction(
     } else if (classChanged && existing.hasPaidRegistrationFee) {
       notes.push(
         "Réinscription enregistrée : frais d'inscription déjà réglés (0 FCFA facturé)."
+      );
+    }
+
+    if (financials.legacyPaidAmount > 0) {
+      notes.push(
+        financials.legacyExcludeFromJournal
+          ? "Paiements antérieurs hors système mis à jour (exclus du journal de caisse)."
+          : `Paiements antérieurs (${formatFcfa(
+              financials.legacyPaidAmount
+            )}) inclus dans le journal de caisse.`
       );
     }
 

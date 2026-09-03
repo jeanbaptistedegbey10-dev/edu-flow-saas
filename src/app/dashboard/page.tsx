@@ -5,7 +5,6 @@ import { auth } from "@/auth";
 import { getSuperAdminRoute } from "@/lib/super-admin-route";
 import {
   getAttendanceTrendAction,
-  getCashFlowAction,
   getDashboardStatsAction,
   getFinancialOverviewAction,
   getStudentDistributionAction,
@@ -58,11 +57,12 @@ export default async function DashboardPage() {
 
   // Vue analytique globale : les données sont calculées serveur et
   // transmises aux composants clients (graphiques Recharts inclus).
-  const [stats, financialOverview, cashFlow, distribution, attendanceTrend] =
+  // La trésorerie (cash flow) vit désormais dans la page dédiée
+  // /dashboard/tresorerie — elle n'est plus chargée ici.
+  const [stats, financialOverview, distribution, attendanceTrend] =
     await Promise.all([
       getDashboardStatsAction(),
       getFinancialOverviewAction(),
-      getCashFlowAction(),
       getStudentDistributionAction(),
       getAttendanceTrendAction(),
     ]);
@@ -76,7 +76,6 @@ export default async function DashboardPage() {
       <DashboardOverview
         stats={stats}
         financialOverview={financialOverview}
-        cashFlow={cashFlow}
         distribution={distribution}
         attendanceTrend={attendanceTrend}
       />

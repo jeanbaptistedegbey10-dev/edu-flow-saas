@@ -18,6 +18,7 @@ import {
   ClipboardCheck,
   ShieldCheck,
   CreditCard,
+  Coins,
   type LucideIcon,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
@@ -129,6 +130,16 @@ const managementMenu: MenuItem[] = [
     title: "Calendrier",
     url: "/dashboard/calendar",
     icon: CalendarDays,
+  },
+]
+
+// Menu réservé aux rôles administratifs (jamais affiché aux enseignants) :
+// la trésorerie expose des données financières consolidées de la caisse.
+const financeMenu: MenuItem[] = [
+  {
+    title: "Trésorerie",
+    url: "/dashboard/tresorerie",
+    icon: Coins,
   },
 ]
 
@@ -274,6 +285,14 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {managementMenu.map((item) => (
+                    <SidebarLink
+                      key={item.title}
+                      item={item}
+                      active={isItemActive(item, pathname)}
+                    />
+                  ))}
+                  {/* Trésorerie : visible uniquement hors vue enseignant */}
+                  {financeMenu.map((item) => (
                     <SidebarLink
                       key={item.title}
                       item={item}

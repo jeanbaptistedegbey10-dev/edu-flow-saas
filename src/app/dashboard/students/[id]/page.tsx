@@ -6,6 +6,7 @@ import {
   BanknoteIcon,
   CalendarDaysIcon,
   ClipboardCheckIcon,
+  HistoryIcon,
   MailIcon,
   PhoneIcon,
   ReceiptTextIcon,
@@ -215,7 +216,7 @@ export default async function StudentDetailPage({
                 <>
                   <div className="mt-3">
                     <SummaryRow
-                      label="Coût initial de la formation"
+                      label="Coût de la formation"
                       icon={<BanknoteIcon />}
                       value={formatAmount(student.totalCost ?? 0)}
                     />
@@ -230,6 +231,14 @@ export default async function StudentDetailPage({
                       icon={<WalletIcon />}
                       value={formatAmount(student.netAmount ?? 0)}
                     />
+                    {student.legacyPaidAmount > 0 ? (
+                      <SummaryRow
+                        label="Paiements antérieurs (hérités)"
+                        icon={<HistoryIcon />}
+                        value={`− ${formatAmount(student.legacyPaidAmount)}`}
+                        valueClasses="text-amber-600 dark:text-amber-400"
+                      />
+                    ) : null}
                     <SummaryRow
                       label="Montant déjà encaissé"
                       icon={<ReceiptTextIcon />}
@@ -246,6 +255,14 @@ export default async function StudentDetailPage({
                       }
                     />
                   </div>
+
+                  {student.legacyPaidAmount > 0 ? (
+                    <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-400">
+                      {student.legacyAmountInCashJournal
+                        ? "Le montant hérité a été injecté dans le journal de caisse courant (recette « LEGACY »)."
+                        : "Paiements effectués avant l’adoption du logiciel : déduits du solde, sans impact sur le journal de caisse actuel."}
+                    </p>
+                  ) : null}
 
                   {/* Bandeau d'état : soldé / solde restant */}
                   <p

@@ -64,6 +64,12 @@ export type CreateSaleInput = {
   items: CartItemInput[];
   discount: number;
   paymentMethod: string;
+  /**
+   * Coordonnées optionnelles du client de passage (vente anonyme) :
+   * affichées sur la facturette sous « Client de passage : Nom - Téléphone ».
+   */
+  guestName?: string | null;
+  guestPhone?: string | null;
 };
 
 export type SaleReceiptData = {
@@ -158,6 +164,24 @@ type PaymentMethodValue = (typeof PAYMENT_METHODS)[number];
 
 function isPaymentMethod(value: string): value is PaymentMethodValue {
   return (PAYMENT_METHODS as readonly string[]).includes(value);
+}
+
+/**
+ * Construit le détail client imprimé sur la facturette d'une vente anonyme :
+ * - aucune coordonnée saisie  → null (le reçu affiche « Client de passage ») ;
+ * - nom seul                  → le nom ;
+ * - téléphone seul            → le téléphone ;
+ * - les deux                  → « Nom Prénom - Numéro ».
+ */
+function buildWalkInClientDetail(
+  guestName?: string | null,
+  guestPhone?: string | null
+): string | null {
+  const name = (guestName ?? "").trim();
+  const phone = (guestPhone ?? "").trim();
+
+  if (name && phone) return `${name} - ${phone}`;
+  return name || phone || null;
 }
 
 // --------------------------------------
@@ -373,9 +397,10 @@ export async function getPosStats(dateRange?: DateRangeFilter): Promise<PosStats
 /**
  * Résout le nom affichable du client d'une vente selon sa rattachement :
  * étudiant inscrit, candidat voyage (étudiant lié ou nom saisi) ou client
- * de passage.
+ * de passage (éventuellement identifié par le nom saisi au comptoir).
  */
 function resolveSaleClientName(client: {
+  guestName?: string | null;
   student: { firstName: string; lastName: string } | null;
   travelProcedure: {
     candidateName: string | null;
@@ -396,7 +421,8 @@ function resolveSaleClientName(client: {
     );
   }
 
-  return "Client de passage";
+  const guestName = (client.guestName ?? "").trim();
+  return guestName ? `Client de passage — ${guestName}` : "Client de passage";
 }
 
 /**
@@ -436,6 +462,7 @@ export async function getSalesHistory(
           paymentMethod: true,
           status: true,
           createdAt: true,
+          guestName: true,
           student: { select: { firstName: true, lastName: true } },
           travelProcedure: {
             select: {
@@ -512,6 +539,8 @@ export async function getSaleReceiptData(
         netAmount: true,
         paymentMethod: true,
         createdAt: true,
+        guestName: true,
+        guestPhone: true,
         student: { select: { firstName: true, lastName: true } },
         travelProcedure: {
           select: {
@@ -555,7 +584,7 @@ export async function getSaleReceiptData(
           ? "Étudiant inscrit"
           : hasTravelProcedure
             ? "Candidat voyage"
-            : null,
+            : buildWalkInClientDetail(sale.guestName, sale.guestPhone),
         cashierName: `${sale.cashier.firstName} ${sale.cashier.lastName}`,
         items: sale.items.map((item) => ({
           name: item.productService.name,
@@ -930,6 +959,17 @@ export async function createSaleAction(
     return { ok: false, message: "Moyen de paiement invalide." };
   }
 
+  // Coordonnées optionnelles du client de passage (vente anonyme) :
+  // troncature défensive pour protéger la facturette d'un excès de saisie.
+  const guestName =
+    input.clientKind === "WALK_IN"
+      ? String(input.guestName ?? "").trim().slice(0, 120) || null
+      : null;
+  const guestPhone =
+    input.clientKind === "WALK_IN"
+      ? String(input.guestPhone ?? "").trim().slice(0, 30) || null
+      : null;
+
   try {
     const organizationId = await getCurrentOrganizationId();
     const user = await getCurrentSessionUser();
@@ -1032,6 +1072,8 @@ export async function createSaleAction(
           netAmount,
           paymentMethod: input.paymentMethod as PaymentMethodValue,
           status: "COMPLETED",
+          guestName,
+          guestPhone,
         },
       });
 
@@ -1067,7 +1109,7 @@ export async function createSaleAction(
         clientName,
         clientDetail:
           input.clientKind === "WALK_IN"
-            ? null
+            ? buildWalkInClientDetail(guestName, guestPhone)
             : input.clientKind === "STUDENT"
               ? "Étudiant inscrit"
               : "Candidat voyage",

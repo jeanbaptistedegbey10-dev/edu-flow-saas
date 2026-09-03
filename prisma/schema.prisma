@@ -177,6 +177,10 @@ model Organization {
   ifu                    String?
   /// Frais d'inscription uniques facturés une seule fois par étudiant (FCFA).
   defaultRegistrationFee Float    @default(15000)
+  /// Solde initial / solde de départ de la caisse (FCFA) : montant d'ouverture
+  /// saisi lors de l'adoption du logiciel, intégré au calcul de trésorerie
+  /// (Solde total = Solde initial + Encaissements − Dépenses).
+  initialCashBalance     Float    @default(0)
 
   // --------------------------------------
   // Abonnement / Licence (commercialisation multi-versions : SaaS + Licences)
@@ -274,6 +278,15 @@ model Student {
   /// Type de réduction : pourcentage du coût total ou montant fixe en FCFA.
   discountType           DiscountType  @default(FIXED)
   netAmount              Float?
+  /// Paiements antérieurs hors système (FCFA) : montant déjà réglé par
+  /// l'étudiant AVANT l'adoption du logiciel. Déduit du reste à payer mais
+  /// jamais comptabilisé dans le journal de caisse courant tant que
+  /// `legacyAmountInCashJournal` est faux.
+  legacyPaidAmount       Float         @default(0)
+  /// Indique si le montant hérité a été injecté dans le journal de caisse
+  /// courant (paiement « LEGACY-* » créé). Défaut : false — cohérent avec la
+  /// case « Ne pas inclure dans le journal de caisse actuel » cochée.
+  legacyAmountInCashJournal Boolean    @default(false)
   dateOfBirth            DateTime?
   address                String?
   status                 StudentStatus @default(PROSPECT)
@@ -749,6 +762,10 @@ model Sale {
   netAmount         Float
   paymentMethod     PaymentMethod?
   status            SaleStatus     @default(COMPLETED)
+  /// Coordonnées optionnelles d'un client de passage (vente anonyme) :
+  /// imprimées sur la facturette sous « Client de passage : Nom - Téléphone ».
+  guestName         String?
+  guestPhone        String?
   createdAt         DateTime       @default(now())
 
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)

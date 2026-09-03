@@ -276,6 +276,8 @@ export async function getDashboardStatsAction(): Promise<DashboardAnalyticsDTO> 
           firstName: true,
           lastName: true,
           netAmount: true,
+          legacyPaidAmount: true,
+          legacyAmountInCashJournal: true,
         },
       }),
 
@@ -374,7 +376,17 @@ export async function getDashboardStatsAction(): Promise<DashboardAnalyticsDTO> 
       if (netAmount <= 0) continue;
 
       const paidAmount = Math.max(paidByStudentId.get(student.id) ?? 0, 0);
-      const remainingAmount = Math.max(netAmount - paidAmount, 0);
+      // Paiements antérieurs hors système : déduits du reste à payer
+      // uniquement s'ils n'ont pas été injectés dans le journal de caisse
+      // (sinon ils sont déjà inclus dans `paidAmount` via la recette
+      // « LEGACY-* » — jamais de double comptage).
+      const legacyCredit = student.legacyAmountInCashJournal
+        ? 0
+        : Math.max(student.legacyPaidAmount, 0);
+      const remainingAmount = Math.max(
+        netAmount - paidAmount - legacyCredit,
+        0
+      );
       if (remainingAmount <= 0) continue;
 
       outstandingScolarite += remainingAmount;
@@ -384,7 +396,7 @@ export async function getDashboardStatsAction(): Promise<DashboardAnalyticsDTO> 
         label: `${student.firstName} ${student.lastName}`,
         subtitle: student.studentCode,
         netAmount,
-        paidAmount,
+        paidAmount: paidAmount + legacyCredit,
         remainingAmount,
       });
     }
@@ -899,8 +911,13 @@ export type CashFlowDTO = {
   /** Total des dépenses (tous temps). */
   expensesTotal: number;
   /**
-   * Solde de caisse global = total encaissements − total dépenses.
-   * (Solde Caisse = Tous Encaissements Totaux − Toutes Dépenses Totales.)
+   * Solde initial / solde de départ de la caisse (FCFA), saisi dans les
+   * paramètres de l'organisation lors de l'adoption du logiciel.
+   */
+  initialCashBalance: number;
+  /**
+   * Solde total de caisse = Solde initial + Total encaissements − Total
+   * dépenses.
    */
   cashBalance: number;
 };
@@ -909,6 +926,8 @@ export type CashFlowDTO = {
  * Calcule les indicateurs de trésorerie de l'organisation active :
  * - encaissements / dépenses du mois courant ;
  * - totaux globaux (tous temps) et solde de caisse.
+ *
+ * Formule : Solde total caisse = Solde initial + Encaissements − Dépenses.
  * Seuls les rôles administratifs y ont accès (défense en profondeur).
  */
 export async function getCashFlowAction(): Promise<CashFlowDTO> {
@@ -926,6 +945,7 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
 
   try {
     const [
+      organization,
       monthlyPayments,
       monthlySales,
       monthlyExpenses,
@@ -933,6 +953,11 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
       totalSales,
       totalExpenses,
     ] = await Promise.all([
+      // Solde initial configuré dans les paramètres de l'organisation.
+      prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { initialCashBalance: true },
+      }),
       // Encaissements du mois (paiements confirmés).
       prisma.payment.aggregate({
         where: {
@@ -975,6 +1000,9 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
       }),
     ]);
 
+    const initialCashBalance = roundAmount(
+      organization?.initialCashBalance ?? 0
+    );
     const collectedThisMonth = roundAmount(
       (monthlyPayments._sum.amount ?? 0) +
         (monthlySales._sum.netAmount ?? 0)
@@ -992,7 +1020,11 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
       expensesThisMonth,
       collectedTotal,
       expensesTotal,
-      cashBalance: roundAmount(collectedTotal - expensesTotal),
+      initialCashBalance,
+      // Solde total = Solde initial + Encaissements − Dépenses.
+      cashBalance: roundAmount(
+        initialCashBalance + collectedTotal - expensesTotal
+      ),
     };
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -1008,6 +1040,7 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
       expensesThisMonth: 0,
       collectedTotal: 0,
       expensesTotal: 0,
+      initialCashBalance: 0,
       cashBalance: 0,
     };
   }

@@ -475,6 +475,33 @@ function OrganizationEditForm({ organization }: { organization: OrganizationInfo
             nouveau). Une recette correspondante est générée automatiquement.
           </p>
         </div>
+
+        {/* Solde initial / solde de départ de la caisse (trésorerie) */}
+        <div className="grid gap-2 sm:max-w-xs">
+          <Label htmlFor="initialCashBalance">
+            Solde initial / Solde de départ (FCFA)
+          </Label>
+          <Input
+            id="initialCashBalance"
+            name="initialCashBalance"
+            type="number"
+            min="0"
+            step="any"
+            inputMode="decimal"
+            defaultValue={organization.initialCashBalance}
+            placeholder="Ex : 250000"
+            aria-invalid={Boolean(fieldErrors.initialCashBalance)}
+          />
+          <FieldError message={fieldErrors.initialCashBalance} />
+          <p className="text-xs text-muted-foreground">
+            Caisse disponible au moment de l’adoption du logiciel. Intégré au
+            calcul de la trésorerie :{" "}
+            <span className="font-medium">
+              Solde total = Solde initial + Encaissements − Dépenses
+            </span>{" "}
+            (page « Trésorerie »).
+          </p>
+        </div>
       </fieldset>
 
       <p className="text-xs text-muted-foreground">

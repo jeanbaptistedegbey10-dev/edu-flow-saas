@@ -11,7 +11,11 @@ export interface PricingPlan {
   id: string;
   name: string;
   price: {
-    monthly: number;
+    /** Prix initial : 1ʳᵉ année (licence + logiciel). */
+    initial: number;
+    /** Prix de renouvellement pour 6 mois (semestriel). */
+    semiAnnual: number;
+    /** Prix de renouvellement pour 12 mois (annuel). */
     annually: number;
   };
   description: string;
@@ -19,7 +23,8 @@ export interface PricingPlan {
   popular?: boolean;
   ctaText: string;
   checkoutUrl: {
-    monthly: string;
+    initial: string;
+    semiAnnual: string;
     annually: string;
   };
 }
@@ -127,11 +132,15 @@ export const FEATURES: Feature[] = [
 ];
 
 // Pricing Plans
+// Valeurs de repli : miroir de `DEFAULT_PLAN_PRICING` (src/lib/plan-pricing.ts)
+// et du seed de la migration `20260901000000_add_plan_pricing`. La source de
+// vérité reste l'API `/api/plans` (table `PlanPricing`, éditable par le
+// Super-Admin) — ces montants ne servent qu'en cas d'indisponibilité.
 export const PRICING_DATA: PricingPlan[] = [
   {
     id: "saas-cloud",
     name: "SaaS Cloud",
-    price: { monthly: 20000, annually: 200000 },
+    price: { initial: 80000, semiAnnual: 30000, annually: 50000 },
     description: "Solution cloud cle en main, hebergee et mise a jour automatiquement.",
     features: [
       "Etudiants illimites",
@@ -146,14 +155,15 @@ export const PRICING_DATA: PricingPlan[] = [
     popular: true,
     ctaText: "Essai Gratuit 14 jours",
     checkoutUrl: {
-      monthly: "/register?plan=saas-cloud&billing=monthly",
+      initial: "/register?plan=saas-cloud&billing=initial",
+      semiAnnual: "/register?plan=saas-cloud&billing=semi-annual",
       annually: "/register?plan=saas-cloud&billing=annually",
     },
   },
   {
     id: "self-hosted",
     name: "Self-Hosted Docker",
-    price: { monthly: 120000, annually: 1200000 },
+    price: { initial: 160000, semiAnnual: 45000, annually: 80000 },
     description: "Deployez sur vos propres serveurs pour un controle total de vos donnees.",
     features: [
       "Tout le plan SaaS Cloud",
@@ -167,14 +177,15 @@ export const PRICING_DATA: PricingPlan[] = [
     ],
     ctaText: "Essai Gratuit 14 jours",
     checkoutUrl: {
-      monthly: "/register?plan=self-hosted&billing=monthly",
+      initial: "/register?plan=self-hosted&billing=initial",
+      semiAnnual: "/register?plan=self-hosted&billing=semi-annual",
       annually: "/register?plan=self-hosted&billing=annually",
     },
   },
   {
     id: "desktop-offline",
     name: "Desktop Offline",
-    price: { monthly: 60000, annually: 600000 },
+    price: { initial: 160000, semiAnnual: 45000, annually: 80000 },
     description: "Application bureau pour les zones a faible connectivite avec sync manuelle.",
     features: [
       "Jusqu'a 500 etudiants",
@@ -188,7 +199,8 @@ export const PRICING_DATA: PricingPlan[] = [
     ],
     ctaText: "Telecharger la demo",
     checkoutUrl: {
-      monthly: "/register?plan=desktop-offline&billing=monthly",
+      initial: "/register?plan=desktop-offline&billing=initial",
+      semiAnnual: "/register?plan=desktop-offline&billing=semi-annual",
       annually: "/register?plan=desktop-offline&billing=annually",
     },
   },

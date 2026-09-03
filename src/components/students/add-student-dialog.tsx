@@ -372,6 +372,42 @@ export function AddStudentDialog({
               </div>
             </div>
 
+            {/* Paiements antérieurs hors système (avant adoption du logiciel) */}
+            <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-500/20 dark:bg-amber-500/5">
+              <div className="grid gap-2">
+                <Label htmlFor="legacyPaidAmount">
+                  Paiements antérieurs hors système (FCFA)
+                </Label>
+                <Input
+                  id="legacyPaidAmount"
+                  name="legacyPaidAmount"
+                  type="number"
+                  min="0"
+                  step="any"
+                  inputMode="decimal"
+                  placeholder="Ex : 100000"
+                  aria-invalid={Boolean(fieldErrors.legacyPaidAmount)}
+                />
+                <FieldError message={fieldErrors.legacyPaidAmount} />
+                <p className="text-xs text-muted-foreground">
+                  Montant déjà réglé par l&apos;étudiant avant l&apos;adoption
+                  d&apos;EduFlow. Il est déduit du reste à payer, mais ne
+                  génère aucune recette dans le journal de caisse actuel.
+                </p>
+              </div>
+              {/* Sentinelle : la case est rendue → absence = décochée */}
+              <input type="hidden" name="legacyCheckboxRendered" value="1" />
+              <label className="flex items-start gap-2 text-xs font-medium">
+                <input
+                  type="checkbox"
+                  name="excludeLegacyFromCashJournal"
+                  defaultChecked
+                  className="mt-0.5 size-4 shrink-0 accent-indigo-600"
+                />
+                Ne pas inclure dans le journal de caisse actuel
+              </label>
+            </div>
+
             {discountType === "PERCENTAGE" ? (
               <p className="mt-2 text-xs text-muted-foreground">
                 La réduction est calculée en pourcentage du coût total

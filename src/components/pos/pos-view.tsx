@@ -559,6 +559,10 @@ export function PosView({
   const [clientValue, setClientValue] = React.useState("walk-in");
   const [discountRaw, setDiscountRaw] = React.useState("");
   const [paymentMethod, setPaymentMethod] = React.useState<string>("CASH");
+  // Coordonnées optionnelles du client de passage (vente anonyme) :
+  // imprimées sur la facturette sous « Client de passage : Nom - Téléphone ».
+  const [guestName, setGuestName] = React.useState("");
+  const [guestPhone, setGuestPhone] = React.useState("");
   const [isCheckingOut, setIsCheckingOut] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [lastSale, setLastSale] = React.useState<SaleReceiptData | null>(null);
@@ -650,6 +654,8 @@ export function PosView({
     setDiscountRaw("");
     setClientValue("walk-in");
     setPaymentMethod("CASH");
+    setGuestName("");
+    setGuestPhone("");
   };
 
   /** Encaisse la vente puis ouvre la facturette. */
@@ -680,6 +686,8 @@ export function PosView({
         })),
         discount,
         paymentMethod,
+        guestName: clientKind === "WALK_IN" ? guestName : null,
+        guestPhone: clientKind === "WALK_IN" ? guestPhone : null,
       });
 
       if (!result.ok) {
@@ -968,6 +976,42 @@ export function PosView({
                 </>
               )}
             </p>
+
+            {/* Coordonnées optionnelles du client de passage (facultatives) :
+                imprimées sur la facturette sous « Client de passage : Nom - Téléphone ». */}
+            {clientValue === "walk-in" ? (
+              <div className="grid gap-1.5 rounded-md border bg-muted/30 p-2">
+                <div className="grid gap-1">
+                  <Label htmlFor="pos-guest-name" className="text-[11px]">
+                    Nom &amp; Prénom (facultatif)
+                  </Label>
+                  <Input
+                    id="pos-guest-name"
+                    placeholder="Ex : Awa Traoré"
+                    value={guestName}
+                    onChange={(event) => setGuestName(event.target.value)}
+                    maxLength={120}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor="pos-guest-phone" className="text-[11px]">
+                    Numéro de téléphone (facultatif)
+                  </Label>
+                  <Input
+                    id="pos-guest-phone"
+                    inputMode="tel"
+                    placeholder="Ex : +229 01 97 00 00 00"
+                    value={guestPhone}
+                    onChange={(event) => setGuestPhone(event.target.value)}
+                    maxLength={30}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Laissez vide pour imprimer « Client de passage » seul sur la
+                  facturette.
+                </p>
+              </div>
+            ) : null}
           </div>
 
           <Separator />

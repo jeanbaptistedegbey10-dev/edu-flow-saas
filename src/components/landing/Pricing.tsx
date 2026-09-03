@@ -5,6 +5,22 @@ import { Check, Sparkles } from "lucide-react";
 import { PRICING_DATA, COMPARISON_MATRIX } from "@/data/content";
 import type { PricingPlan } from "@/data/content";
 
+/** Périodes de facturation affichées (grille tarifaire dynamique). */
+type BillingPeriod = "initial" | "semiAnnual" | "annually";
+
+const BILLING_PERIODS: Array<{ value: BillingPeriod; label: string }> = [
+  { value: "initial", label: "1ʳᵉ année" },
+  { value: "semiAnnual", label: "Semestriel" },
+  { value: "annually", label: "Annuel" },
+];
+
+/** Libellé de période affiché à côté du prix. */
+const PERIOD_SUFFIXES: Record<BillingPeriod, string> = {
+  initial: "/ 1ʳᵉ année",
+  semiAnnual: "/ 6 mois",
+  annually: "/ an",
+};
+
 function formatPrice(price: number): string {
   if (price === 0) return "Gratuit";
   return price.toLocaleString("fr-FR") + " FCFA";
@@ -21,7 +37,9 @@ function renderCell(value: string | boolean): ReactNode {
 }
 
 export default function Pricing() {
-  const [isAnnual, setIsAnnual] = useState(false);
+  // Période de facturation sélectionnée : pilotée par la grille tarifaire
+  // dynamique (table `PlanPricing`) — 1ʳᵉ année, semestriel ou annuel.
+  const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("annually");
   const [plans, setPlans] = useState<PricingPlan[]>(PRICING_DATA);
   const [loading, setLoading] = useState(true);
 
@@ -61,49 +79,42 @@ export default function Pricing() {
           </p>
         </div>
 
-        {/* Billing Toggle */}
-        <div className="flex items-center justify-center gap-4 mb-12">
-          <span
-            className={`text-sm font-medium ${
-              !isAnnual ? "text-white" : "text-gray-400"
-            }`}
-          >
-            Mensuel
-          </span>
-          <button
-            onClick={() => setIsAnnual(!isAnnual)}
-            className={`relative w-14 h-7 rounded-full transition-colors ${
-              isAnnual ? "bg-brand" : "bg-white/10"
-            }`}
-            aria-label="Toggle billing period"
-          >
-            <div
-              className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
-                isAnnual ? "translate-x-8" : "translate-x-1"
+        {/* Billing Toggle : 1ʳᵉ année / Semestriel (6 mois) / Annuel (12 mois) */}
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
+          {BILLING_PERIODS.map((period) => (
+            <button
+              key={period.value}
+              type="button"
+              onClick={() => setBillingPeriod(period.value)}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                billingPeriod === period.value
+                  ? "bg-brand text-white shadow-lg shadow-brand/25"
+                  : "bg-white/10 text-gray-400 hover:bg-white/15 hover:text-white"
               }`}
-            />
-          </button>
-          <span
-            className={`text-sm font-medium ${
-              isAnnual ? "text-white" : "text-gray-400"
-            }`}
-          >
-            Annuel
-          </span>
-          {isAnnual && (
-            <span className="px-2.5 py-1 text-xs font-medium text-gold bg-gold/10 rounded-full border border-gold/20">
-              2 mois offerts
-            </span>
-          )}
+              aria-pressed={billingPeriod === period.value}
+            >
+              {period.label}
+            </button>
+          ))}
         </div>
+        <p className="text-center text-xs text-gray-500 mb-12">
+          {billingPeriod === "initial"
+            ? "Licence + logiciel : prix de la 1ʳᵉ année, réservé aux nouveaux clients."
+            : billingPeriod === "semiAnnual"
+              ? "Abonnement semestriel : renouvellement tous les 6 mois."
+              : "Abonnement annuel : 12 mois, la formule la plus économique."}
+        </p>
 
         {/* Pricing Cards */}
         <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
           {plans.map((plan) => {
-            const price = isAnnual ? plan.price.annually : plan.price.monthly;
-            const checkoutUrl = isAnnual
-              ? plan.checkoutUrl.annually
-              : plan.checkoutUrl.monthly;
+            const price = plan.price[billingPeriod];
+            const checkoutUrl = plan.checkoutUrl[billingPeriod];
+            // Économie annuelle : comparer 2 × semestriel à l'annuel.
+            const annualSavings =
+              billingPeriod === "annually" && plan.price.semiAnnual > 0
+                ? plan.price.semiAnnual * 2 - plan.price.annually
+                : 0;
 
             return (
               <div
@@ -135,22 +146,24 @@ export default function Pricing() {
                 {/* Price */}
                 <div className="mb-6">
                   <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-bold text-white">
+                    <span
+                      className={`text-4xl font-bold text-white ${
+                        loading ? "animate-pulse" : ""
+                      }`}
+                    >
                       {formatPrice(price)}
                     </span>
                     {price > 0 && (
                       <span className="text-gray-400 text-sm">
-                        /{isAnnual ? "an" : "mois"}
+                        {PERIOD_SUFFIXES[billingPeriod]}
                       </span>
                     )}
                   </div>
-                  {isAnnual && plan.price.monthly > 0 && (
+                  {annualSavings > 0 && (
                     <p className="text-xs text-mint mt-1">
                       Économisez{" "}
-                      {(
-                        plan.price.monthly * 12 -
-                        plan.price.annually
-                      ).toLocaleString("fr-FR")} FCFA / an
+                      {annualSavings.toLocaleString("fr-FR")} FCFA / an par
+                      rapport au semestriel
                     </p>
                   )}
                 </div>
@@ -167,7 +180,7 @@ export default function Pricing() {
 
                 {/* CTA Button */}
                 <a
-                  href={loading ? plan.checkoutUrl.monthly : checkoutUrl}
+                  href={loading ? plan.checkoutUrl.annually : checkoutUrl}
                   className={`block w-full text-center py-3.5 rounded-xl font-medium transition-all ${
                     plan.popular
                       ? "bg-brand hover:bg-brand-dark text-white hover:shadow-lg hover:shadow-brand/25"

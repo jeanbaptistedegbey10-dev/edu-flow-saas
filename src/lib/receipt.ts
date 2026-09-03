@@ -737,6 +737,17 @@ export function buildSaleReceiptDocument(
     )
     .join("\n");
 
+  // Client de passage (vente anonyme) : « Client de passage : Nom - Téléphone »
+  // lorsque des coordonnées ont été saisies au comptoir, sinon « Client de
+  // passage » seul. Les clients identifiés (étudiant / candidat) conservent
+  // le rendu « Nom — détail ».
+  const isWalkInClient = sale.clientName === "Client de passage";
+  const clientCell = isWalkInClient
+    ? sale.clientDetail
+      ? `Client de passage : ${escapeHtml(sale.clientDetail)}`
+      : escapeHtml(sale.clientName)
+    : `${escapeHtml(sale.clientName)}${sale.clientDetail ? ` — ${escapeHtml(sale.clientDetail)}` : ""}`;
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -753,7 +764,7 @@ export function buildSaleReceiptDocument(
       <tbody>
         <tr><th>N° ticket</th><td class="mono">${escapeHtml(receiptNumber)}</td></tr>
         <tr><th>Date et heure</th><td>${dateTimeFormatter.format(sale.createdAt)}</td></tr>
-        <tr><th>Client</th><td>${escapeHtml(sale.clientName)}${sale.clientDetail ? ` — ${escapeHtml(sale.clientDetail)}` : ""}</td></tr>
+        <tr><th>Client</th><td>${clientCell}</td></tr>
         <tr><th>Caissier</th><td>${escapeHtml(sale.cashierName)}</td></tr>
         ${sale.paymentMethod ? `<tr><th>Règlement</th><td>${escapeHtml(getPaymentMethodLabel(sale.paymentMethod))}</td></tr>` : ""}
       </tbody>
