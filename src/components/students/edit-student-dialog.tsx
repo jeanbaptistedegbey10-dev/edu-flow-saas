@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import {
   BadgeCheckIcon,
   CheckCircle2Icon,
+  InfoIcon,
   Loader2Icon,
   LockKeyholeIcon,
   SaveIcon,
@@ -97,6 +98,16 @@ function EditStudentForm({
   const [discount, setDiscount] = React.useState(
     student.discount !== null ? String(student.discount) : ""
   );
+  // Étudiant « hérité » : paiements antérieurs saisis OU case « Ne pas inclure
+  // dans le journal de caisse actuel » cochée → les frais d'inscription
+  // (15 000 FCFA) sont réputés réglés hors système — ils ne doivent JAMAIS être
+  // injectés dans la caisse live.
+  const [legacyExcluded, setLegacyExcluded] = React.useState(
+    !student.legacyAmountInCashJournal
+  );
+  const [legacyPaidAmountInput, setLegacyPaidAmountInput] = React.useState(
+    student.legacyPaidAmount > 0 ? String(student.legacyPaidAmount) : ""
+  );
 
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
   const classFeeLocked = selectedClass !== null;
@@ -129,6 +140,12 @@ function EditStudentForm({
 
     return Math.max(0, cost - reduction);
   }, [totalCost, discount, discountType]);
+
+  const legacyBypass = React.useMemo(() => {
+    if (legacyExcluded) return true;
+    const raw = Number(legacyPaidAmountInput.replace(",", "."));
+    return !Number.isNaN(raw) && raw > 0;
+  }, [legacyExcluded, legacyPaidAmountInput]);
 
   const [state, formAction, pending] = useActionState(
     async (_prevState: StudentFormState, rawFormData: FormData) => {
@@ -167,7 +184,10 @@ function EditStudentForm({
         </DialogDescription>
       </DialogHeader>
 
-      <form action={formAction} className="grid gap-4">
+      <form
+        action={formAction}
+        className="grid max-h-[70vh] gap-4 overflow-y-auto pr-2"
+      >
         <input type="hidden" name="id" value={student.id} />
 
         {state.message && state.status === "error" && !state.fieldErrors ? (
@@ -291,8 +311,19 @@ function EditStudentForm({
               </p>
             ) : null}
 
-            {/* Statut des frais d'inscription */}
-            {student.hasPaidRegistrationFee ? (
+            {/* Statut des frais d'inscription : réputés réglés hors système pour
+                un étudiant hérité, encaissés à l'enregistrement sinon. */}
+            {registrationFee > 0 && legacyBypass ? (
+              <p className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+                <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+                Frais d&rsquo;inscription (
+                <strong className="font-semibold tabular-nums">
+                  {registrationFee.toLocaleString("fr-FR")} FCFA
+                </strong>
+                ) : considérés comme réglés hors système. Aucun montant ne sera
+                ajouté à la caisse live.
+              </p>
+            ) : student.hasPaidRegistrationFee ? (
               <p className="flex items-start gap-1.5 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400">
                 <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0" />
                 Frais d&rsquo;inscription déjà réglés : une réinscription dans
@@ -412,10 +443,9 @@ function EditStudentForm({
                 step="any"
                 inputMode="decimal"
                 placeholder="Ex : 100000"
-                defaultValue={
-                  student.legacyPaidAmount > 0
-                    ? String(student.legacyPaidAmount)
-                    : ""
+                value={legacyPaidAmountInput}
+                onChange={(event) =>
+                  setLegacyPaidAmountInput(event.target.value)
                 }
                 aria-invalid={Boolean(fieldErrors.legacyPaidAmount)}
               />
@@ -432,7 +462,8 @@ function EditStudentForm({
               <input
                 type="checkbox"
                 name="excludeLegacyFromCashJournal"
-                defaultChecked={!student.legacyAmountInCashJournal}
+                checked={legacyExcluded}
+                onChange={(event) => setLegacyExcluded(event.target.checked)}
                 className="mt-0.5 size-4 shrink-0 accent-indigo-600"
               />
               Ne pas inclure dans le journal de caisse actuel
@@ -458,7 +489,7 @@ function EditStudentForm({
           <input type="hidden" name="netAmount" value={netAmount ?? ""} />
         </fieldset>
 
-        <DialogFooter>
+        <DialogFooter className="sticky bottom-0 z-20 -mx-4 -mb-4 border-t bg-background pt-3">
           <DialogClose asChild>
             <Button type="button" variant="outline" disabled={pending}>
               Annuler

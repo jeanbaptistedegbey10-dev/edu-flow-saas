@@ -26,6 +26,7 @@ import {
   isNextRedirectError,
 } from "@/lib/session";
 import type { RecentPaymentDTO } from "@/actions/dashboard";
+import type { PaymentMethod } from "@prisma/client";
 import { STUDENT_STATUS_LABELS } from "@/lib/student-status";
 
 // --------------------------------------
@@ -900,7 +901,48 @@ export async function getAttendanceTrendAction(
 // Server Action — Trésorerie (caisse)
 // --------------------------------------
 
-/** Indicateurs de trésorerie de la caisse. */
+/** Point mensuel du graphique « Flux de trésorerie ». */
+export type CashFlowSeriesPointDTO = {
+  /** Clé stable « YYYY-MM ». */
+  key: string;
+  /** Libellé court du mois (ex : « janv. 26 »). */
+  label: string;
+  /** Encaissements du mois (paiements confirmés + ventes POS nettes). */
+  inflows: number;
+  /** Dépenses du mois. */
+  outflows: number;
+  /** Solde cumulé au terme du mois (Solde initial + Σ entrées − Σ sorties). */
+  cashBalance: number;
+};
+
+/** Tranche d'un graphique de répartition (recettes ou dépenses). */
+export type BreakdownSliceDTO = {
+  /** Clé stable (source ou catégorie). */
+  key: string;
+  /** Libellé affichable. */
+  label: string;
+  /** Montant agrégé (FCFA). */
+  value: number;
+};
+
+/** Ligne du journal unifié de caisse (derniers mouvements). */
+export type TreasuryTransactionDTO = {
+  id: string;
+  /** Sens du mouvement : encaissement (entrée) ou dépense (sortie). */
+  kind: "INFLOW" | "OUTFLOW";
+  /** Date effective du mouvement. */
+  date: Date;
+  /** Libellé / description affichable (étudiant, vente, titre de dépense…). */
+  label: string;
+  /** Catégorie / source du mouvement (Scolarité, POS Caisse, Loyer…). */
+  category: string;
+  /** Moyen de paiement (`null` pour les dépenses, non tracé). */
+  method: PaymentMethod | null;
+  /** Montant en FCFA. */
+  amount: number;
+};
+
+/** Indicateurs de trésorerie complets de la caisse. */
 export type CashFlowDTO = {
   /** Encaissements du mois courant (paiements confirmés + ventes POS nettes). */
   collectedThisMonth: number;
@@ -917,9 +959,20 @@ export type CashFlowDTO = {
   initialCashBalance: number;
   /**
    * Solde total de caisse = Solde initial + Total encaissements − Total
-   * dépenses.
+   * dépenses (tous temps).
    */
   cashBalance: number;
+  /**
+   * Série mensuelle des flux (12 derniers mois) : entrées, sorties et solde
+   * cumulé — alimente le graphique « Flux de trésorerie » (Recharts).
+   */
+  monthlyCashFlow: CashFlowSeriesPointDTO[];
+  /** Répartition des recettes par source (Scolarité, POS Caisse, Voyages). */
+  revenueBreakdown: BreakdownSliceDTO[];
+  /** Répartition des dépenses par catégorie. */
+  expenseBreakdown: BreakdownSliceDTO[];
+  /** Les 20 derniers mouvements de caisse (entrées + sorties fusionnées). */
+  recentTransactions: TreasuryTransactionDTO[];
 };
 
 /**
@@ -943,6 +996,10 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
     1
   );
 
+  // Fenêtre de 12 mois pour le graphique d'évolution mensuelle.
+  const buckets = buildMonthBuckets(12);
+  const windowStart = buckets[0]?.start ?? monthStart;
+
   try {
     const [
       organization,
@@ -952,6 +1009,14 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
       totalPayments,
       totalSales,
       totalExpenses,
+      paymentsWindow,
+      salesWindow,
+      expensesWindow,
+      allPaymentsBreakdown,
+      allExpensesBreakdown,
+      recentPayments,
+      recentSales,
+      recentExpenses,
     ] = await Promise.all([
       // Solde initial configuré dans les paramètres de l'organisation.
       prisma.organization.findUnique({
@@ -998,6 +1063,94 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         where: { organizationId },
         _sum: { amount: true },
       }),
+      // Paiements confirmés de la fenêtre (série mensuelle du graphique).
+      prisma.payment.findMany({
+        where: {
+          organizationId,
+          status: "COMPLETED",
+          paidAt: { gte: windowStart },
+        },
+        select: { amount: true, paidAt: true },
+      }),
+      // Ventes POS terminées de la fenêtre (série mensuelle du graphique).
+      prisma.sale.findMany({
+        where: {
+          organizationId,
+          status: "COMPLETED",
+          createdAt: { gte: windowStart },
+        },
+        select: { netAmount: true, createdAt: true },
+      }),
+      // Dépenses de la fenêtre (série mensuelle du graphique).
+      prisma.expense.findMany({
+        where: { organizationId, expenseDate: { gte: windowStart } },
+        select: { amount: true, expenseDate: true },
+      }),
+      // Répartition des recettes (tous temps) : voyage si dossier lié.
+      prisma.payment.findMany({
+        where: { organizationId, status: "COMPLETED" },
+        select: { amount: true, travelProcedureId: true },
+      }),
+      // Répartition des dépenses par catégorie (tous temps).
+      prisma.expense.findMany({
+        where: { organizationId },
+        select: { amount: true, category: true },
+      }),
+      // Les 20 derniers paiements (journal unifié de caisse).
+      prisma.payment.findMany({
+        where: { organizationId, status: "COMPLETED" },
+        orderBy: { paidAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          amount: true,
+          paidAt: true,
+          paymentMethod: true,
+          description: true,
+          reference: true,
+          travelProcedureId: true,
+          student: {
+            select: {
+              firstName: true,
+              lastName: true,
+              studentCode: true,
+            },
+          },
+        },
+      }),
+      // Les 20 dernières ventes POS (journal unifié de caisse).
+      prisma.sale.findMany({
+        where: { organizationId, status: "COMPLETED" },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          netAmount: true,
+          createdAt: true,
+          paymentMethod: true,
+          guestName: true,
+          student: {
+            select: {
+              firstName: true,
+              lastName: true,
+              studentCode: true,
+            },
+          },
+        },
+      }),
+      // Les 20 dernières dépenses (journal unifié de caisse).
+      prisma.expense.findMany({
+        where: { organizationId },
+        orderBy: { expenseDate: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          amount: true,
+          expenseDate: true,
+          category: true,
+          title: true,
+        },
+      }),
     ]);
 
     const initialCashBalance = roundAmount(
@@ -1015,16 +1168,171 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
     );
     const expensesTotal = roundAmount(totalExpenses._sum.amount ?? 0);
 
+    // ----- Série mensuelle des flux (graphique) -----
+    const inflowsByKey = new Map<string, number>();
+    const outflowsByKey = new Map<string, number>();
+    for (const bucket of buckets) {
+      inflowsByKey.set(bucket.key, 0);
+      outflowsByKey.set(bucket.key, 0);
+    }
+
+    for (const payment of paymentsWindow) {
+      const key = monthKeyOf(payment.paidAt);
+      if (inflowsByKey.has(key)) {
+        inflowsByKey.set(key, (inflowsByKey.get(key) ?? 0) + payment.amount);
+      }
+    }
+    for (const sale of salesWindow) {
+      const key = monthKeyOf(sale.createdAt);
+      if (inflowsByKey.has(key)) {
+        inflowsByKey.set(key, (inflowsByKey.get(key) ?? 0) + sale.netAmount);
+      }
+    }
+    for (const expense of expensesWindow) {
+      const key = monthKeyOf(expense.expenseDate);
+      if (outflowsByKey.has(key)) {
+        outflowsByKey.set(key, (outflowsByKey.get(key) ?? 0) + expense.amount);
+      }
+    }
+
+    // Solde cumulé : part du solde initial puis ajoute entrées / retire
+    // sorties — la dernière valeur correspond au solde actuel.
+    let runningBalance = initialCashBalance;
+    const monthlyCashFlow: CashFlowSeriesPointDTO[] = buckets.map((bucket) => {
+      const inflows = roundAmount(inflowsByKey.get(bucket.key) ?? 0);
+      const outflows = roundAmount(outflowsByKey.get(bucket.key) ?? 0);
+      runningBalance = roundAmount(runningBalance + inflows - outflows);
+
+      return {
+        key: bucket.key,
+        label: bucket.label,
+        inflows,
+        outflows,
+        cashBalance: runningBalance,
+      };
+    });
+
+    // ----- Répartition des recettes (Scolarité / POS Caisse / Voyages) -----
+    let scolariteAmount = 0;
+    let voyagesAmount = 0;
+    for (const payment of allPaymentsBreakdown) {
+      if (payment.travelProcedureId !== null) {
+        voyagesAmount += payment.amount;
+      } else {
+        scolariteAmount += payment.amount;
+      }
+    }
+
+    const revenueBreakdown: BreakdownSliceDTO[] = [
+      {
+        key: "scolarite",
+        label: "Scolarité",
+        value: roundAmount(scolariteAmount),
+      },
+      {
+        key: "pos",
+        label: "POS Caisse",
+        value: roundAmount(totalSales._sum.netAmount ?? 0),
+      },
+      {
+        key: "voyages",
+        label: "Procédures voyage",
+        value: roundAmount(voyagesAmount),
+      },
+    ].filter((slice) => slice.value > 0);
+
+    // ----- Répartition des dépenses par catégorie (tous temps) -----
+    const expenseByCategory = new Map<string, number>();
+    for (const expense of allExpensesBreakdown) {
+      expenseByCategory.set(
+        expense.category,
+        (expenseByCategory.get(expense.category) ?? 0) + expense.amount
+      );
+    }
+    const expenseBreakdown: BreakdownSliceDTO[] = [
+      ...expenseByCategory.entries(),
+    ]
+      .map(([category, value]) => ({
+        key: category,
+        label: category,
+        value: roundAmount(value),
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    // ----- Journal unifié des mouvements de caisse -----
+    const transactions: TreasuryTransactionDTO[] = [];
+
+    for (const payment of recentPayments) {
+      const category =
+        payment.travelProcedureId !== null
+          ? "Procédures voyage"
+          : payment.description === "Frais d'inscription" ||
+              payment.reference?.startsWith("REG-")
+            ? "Scolarité · Frais d'inscription"
+            : payment.reference?.startsWith("LEGACY-")
+              ? "Scolarité · Paiements antérieurs"
+              : "Scolarité";
+      const studentName = payment.student
+        ? `${payment.student.firstName} ${payment.student.lastName}`.trim()
+        : "Règlement externe";
+
+      transactions.push({
+        id: `payment-${payment.id}`,
+        kind: "INFLOW",
+        date: payment.paidAt,
+        label: studentName,
+        category,
+        method: payment.paymentMethod,
+        amount: roundAmount(payment.amount),
+      });
+    }
+
+    for (const sale of recentSales) {
+      const customer =
+        sale.guestName?.trim() ||
+        (sale.student
+          ? `${sale.student.firstName} ${sale.student.lastName}`.trim()
+          : "");
+
+      transactions.push({
+        id: `sale-${sale.id}`,
+        kind: "INFLOW",
+        date: sale.createdAt,
+        label: customer ? `Vente POS · ${customer}` : "Vente comptoir",
+        category: "POS Caisse",
+        method: sale.paymentMethod,
+        amount: roundAmount(sale.netAmount),
+      });
+    }
+
+    for (const expense of recentExpenses) {
+      transactions.push({
+        id: `expense-${expense.id}`,
+        kind: "OUTFLOW",
+        date: expense.expenseDate,
+        label: expense.title,
+        category: expense.category,
+        method: null,
+        amount: roundAmount(expense.amount),
+      });
+    }
+
+    transactions.sort((a, b) => b.date.getTime() - a.date.getTime());
+
     return {
       collectedThisMonth,
       expensesThisMonth,
       collectedTotal,
       expensesTotal,
       initialCashBalance,
-      // Solde total = Solde initial + Encaissements − Dépenses.
+      // Solde total = Solde initial + Encaissements − Dépenses (tous temps).
       cashBalance: roundAmount(
         initialCashBalance + collectedTotal - expensesTotal
       ),
+      monthlyCashFlow,
+      revenueBreakdown,
+      expenseBreakdown,
+      recentTransactions: transactions.slice(0, 20),
     };
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -1042,6 +1350,16 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
       expensesTotal: 0,
       initialCashBalance: 0,
       cashBalance: 0,
+      monthlyCashFlow: buckets.map((bucket) => ({
+        key: bucket.key,
+        label: bucket.label,
+        inflows: 0,
+        outflows: 0,
+        cashBalance: 0,
+      })),
+      revenueBreakdown: [],
+      expenseBreakdown: [],
+      recentTransactions: [],
     };
   }
 }

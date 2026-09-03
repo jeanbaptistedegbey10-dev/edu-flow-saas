@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import {
   BadgeCheckIcon,
+  InfoIcon,
   Loader2Icon,
   LockKeyholeIcon,
   PlusIcon,
@@ -78,6 +79,13 @@ export function AddStudentDialog({
     React.useState<"FIXED" | "PERCENTAGE">("FIXED");
   const [totalCost, setTotalCost] = React.useState("");
   const [discount, setDiscount] = React.useState("");
+  // Étudiant « hérité » : dès que des paiements antérieurs sont saisis ou que
+  // la case « Ne pas inclure dans le journal de caisse actuel » est cochée,
+  // les frais d'inscription (15 000 FCFA) sont réputés réglés hors système —
+  // aucune écriture ne doit être générée dans la caisse live.
+  const [legacyExcluded, setLegacyExcluded] = React.useState(true);
+  const [legacyPaidAmountInput, setLegacyPaidAmountInput] =
+    React.useState("");
 
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
   const classFeeLocked = selectedClass !== null;
@@ -111,6 +119,15 @@ export function AddStudentDialog({
     return Math.max(0, cost - reduction);
   }, [totalCost, discount, discountType]);
 
+  // Frais d'inscription : pour un étudiant hérité (paiements antérieurs > 0
+  // ou case d'exclusion cochée), ils sont réputés réglés hors système et ne
+  // génèrent AUCUNE écriture dans la caisse live.
+  const legacyBypass = React.useMemo(() => {
+    if (legacyExcluded) return true;
+    const raw = Number(legacyPaidAmountInput.replace(",", "."));
+    return !Number.isNaN(raw) && raw > 0;
+  }, [legacyExcluded, legacyPaidAmountInput]);
+
   // Enveloppe l'action serveur pour fermer la modale dès que la création réussit.
   const [state, formAction, pending] = useActionState(
     async (_prevState: StudentFormState, rawFormData: FormData) => {
@@ -133,6 +150,8 @@ export function AddStudentDialog({
         setDiscountType("FIXED");
         setTotalCost("");
         setDiscount("");
+        setLegacyExcluded(true);
+        setLegacyPaidAmountInput("");
       }
 
       return result;
@@ -160,7 +179,10 @@ export function AddStudentDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form action={formAction} className="grid gap-4">
+        <form
+          action={formAction}
+          className="grid max-h-[70vh] gap-4 overflow-y-auto pr-2"
+        >
           {state.message && state.status === "error" && !state.fieldErrors ? (
             <p
               role="alert"
@@ -386,6 +408,10 @@ export function AddStudentDialog({
                   step="any"
                   inputMode="decimal"
                   placeholder="Ex : 100000"
+                  value={legacyPaidAmountInput}
+                  onChange={(event) =>
+                    setLegacyPaidAmountInput(event.target.value)
+                  }
                   aria-invalid={Boolean(fieldErrors.legacyPaidAmount)}
                 />
                 <FieldError message={fieldErrors.legacyPaidAmount} />
@@ -401,7 +427,8 @@ export function AddStudentDialog({
                 <input
                   type="checkbox"
                   name="excludeLegacyFromCashJournal"
-                  defaultChecked
+                  checked={legacyExcluded}
+                  onChange={(event) => setLegacyExcluded(event.target.checked)}
                   className="mt-0.5 size-4 shrink-0 accent-indigo-600"
                 />
                 Ne pas inclure dans le journal de caisse actuel
@@ -415,20 +442,35 @@ export function AddStudentDialog({
               </p>
             ) : null}
 
-            {/* Annonce des frais d'inscription uniques */}
+            {/* Statut des frais d'inscription : encaissement live (étudiant
+                saisi dans EduFlow) ou réputés réglés hors système (hérités). */}
             {registrationFee > 0 ? (
-              <div className="mt-3 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
-                <BadgeCheckIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>
-                  Frais d&rsquo;inscription uniques :{" "}
-                  <strong className="font-semibold tabular-nums">
-                    {registrationFee.toLocaleString("fr-FR")} FCFA
-                  </strong>{" "}
-                  seront ajoutés au coût total exigé et encaissés
-                  automatiquement (recette « Frais d&rsquo;inscription ») lors
-                  de la validation.
-                </span>
-              </div>
+              legacyBypass ? (
+                <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+                  <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+                  <span>
+                    Frais d&rsquo;inscription (
+                    <strong className="font-semibold tabular-nums">
+                      {registrationFee.toLocaleString("fr-FR")} FCFA
+                    </strong>
+                    ) : considérés comme réglés hors système. Aucun montant ne
+                    sera ajouté à la caisse live.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+                  <BadgeCheckIcon className="mt-0.5 size-3.5 shrink-0" />
+                  <span>
+                    Frais d&rsquo;inscription uniques :{" "}
+                    <strong className="font-semibold tabular-nums">
+                      {registrationFee.toLocaleString("fr-FR")} FCFA
+                    </strong>{" "}
+                    seront ajoutés au coût total exigé et encaissés
+                    automatiquement (recette « Frais d&rsquo;inscription ») lors
+                    de la validation.
+                  </span>
+                </div>
+              )
             ) : null}
 
             {/* Net à payer calculé automatiquement (lecture seule) */}
@@ -443,7 +485,7 @@ export function AddStudentDialog({
             <input type="hidden" name="netAmount" value={netAmount ?? ""} />
           </fieldset>
 
-          <DialogFooter>
+          <DialogFooter className="sticky bottom-0 z-20 -mx-4 -mb-4 border-t bg-background pt-3">
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={pending}>
                 Annuler

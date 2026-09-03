@@ -751,9 +751,18 @@ export async function createStudentAction(
 
   const registrationFee = organization.defaultRegistrationFee;
 
-  // Un nouvel étudiant n'a jamais réglé les frais d'inscription :
-  // ils sont facturés dès cette première inscription (si > 0).
-  const appliesRegistrationFee = registrationFee > 0;
+  // Étudiant « hérité » : dès que des paiements antérieurs hors système sont
+  // saisis ou que la case « Ne pas inclure dans le journal de caisse actuel »
+  // est cochée, les frais d'inscription (15 000 FCFA) sont réputés réglés hors
+  // système — ils ne doivent JAMAIS être injectés dans la caisse live.
+  const registrationFeeExcluded =
+    parsed.data.legacyExcludeFromJournal || parsed.data.legacyPaidAmount > 0;
+
+  // Un nouvel étudiant n'a jamais réglé les frais d'inscription : ils sont
+  // facturés dès cette première inscription (si > 0), sauf pour un étudiant
+  // hérité dont les frais sont déjà réputés réglés hors système.
+  const appliesRegistrationFee =
+    registrationFee > 0 && !registrationFeeExcluded;
 
   // Classe / cohorte ciblée (validation multi-tenant) — résolue AVANT le
   // calcul financier afin d'appliquer automatiquement les frais de la classe
@@ -896,7 +905,11 @@ export async function createStudentAction(
 
       const feeNote = appliesRegistrationFee
         ? ` Frais d'inscription (${formatFcfa(registrationFee)}) encaissés.`
-        : "";
+        : registrationFeeExcluded
+          ? ` Frais d'inscription (${formatFcfa(
+              registrationFee
+            )}) réputés réglés hors système (aucune écriture en caisse).`
+          : "";
 
       const legacyNote =
         financials.legacyPaidAmount > 0
@@ -1005,9 +1018,17 @@ export async function updateStudentAction(
 
     const registrationFee = organization.defaultRegistrationFee;
 
+    // Étudiant « hérité » (paiements antérieurs > 0 ou case « Ne pas inclure
+    // dans le journal de caisse actuel » cochée) : les frais d'inscription sont
+    // réputés réglés hors système et ne doivent JAMAIS entrer en caisse live.
+    const registrationFeeExcluded =
+      parsed.data.legacyExcludeFromJournal || parsed.data.legacyPaidAmount > 0;
+
     // Frais d'inscription : uniquement s'ils n'ont jamais été réglés.
     const appliesRegistrationFee =
-      !existing.hasPaidRegistrationFee && registrationFee > 0;
+      !existing.hasPaidRegistrationFee &&
+      registrationFee > 0 &&
+      !registrationFeeExcluded;
 
     // Classe / cohorte ciblée (validation multi-tenant).
     // Sélection explicite « Aucune classe » ⇒ retrait de la cohorte active.
@@ -1067,7 +1088,9 @@ export async function updateStudentAction(
           netAmount: financials.netAmount,
           legacyPaidAmount: financials.legacyPaidAmount,
           legacyAmountInCashJournal: legacyInJournal,
-          ...(appliesRegistrationFee
+          // L'étudiant (y compris hérité) a réglé — ou réputé réglé — ses
+          // frais d'inscription : toute réinscription future est gratuite.
+          ...(registrationFeeExcluded || appliesRegistrationFee
             ? { hasPaidRegistrationFee: true }
             : {}),
           ...(wantsNoClass
@@ -1168,6 +1191,12 @@ export async function updateStudentAction(
     if (appliesRegistrationFee) {
       notes.push(
         `Frais d'inscription (${formatFcfa(registrationFee)}) encaissés.`
+      );
+    } else if (registrationFeeExcluded) {
+      notes.push(
+        `Frais d'inscription (${formatFcfa(
+          registrationFee
+        )}) réputés réglés hors système (aucune écriture en caisse).`
       );
     } else if (classChanged && existing.hasPaidRegistrationFee) {
       notes.push(
