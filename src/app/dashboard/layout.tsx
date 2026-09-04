@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { auth } from "@/auth";
 import { getCurrentOrganizationBranding } from "@/actions/organization";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
+import { HelpAssistant } from "@/components/help/HelpAssistant";
 import { Separator } from "@/components/ui/separator";
 import {
   SidebarInset,
@@ -160,6 +161,8 @@ export default async function DashboardLayout({
             {children}
           </div>
         </main>
+        {/* Assistant d'aide flottant — accessible depuis toutes les pages du tableau de bord. */}
+        <HelpAssistant />
       </SidebarInset>
     </SidebarProvider>
   );
