@@ -274,4 +274,15 @@
   .animate-timeline-pulse {
     animation: timeline-pulse 2s ease-in-out infinite;
   }
+
+  /* Apparition « pop » des coches automatiques (checklist du Hero) */
+  @keyframes check-pop {
+    0% { transform: scale(0.4); opacity: 0; }
+    70% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  .animate-check-pop {
+    animation: check-pop 0.4s ease-out forwards;
+  }
 }

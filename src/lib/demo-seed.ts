@@ -3,36 +3,31 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
-// --------------------------------------
-// Seeding automatique des données de démonstration
-// --------------------------------------
-//
-// À l'inscription d'une nouvelle organisation, ce module crée un jeu de
-// données réaliste et cohérent : cours, classes, étudiants, paiements,
-// procédures voyage, logements, évaluations, assiduité, dépenses, tâches,
-// le catalogue de produits/services de la caisse (POS), ainsi que les
-// comptes de démonstration (Secrétaire et Enseignant — l'Administrateur
-// fondateur existe déjà au moment de l'appel).
+// ---------------------------------------------------------------------------
+// Seeding des données de démonstration — couverture 100 % des modules
+// ---------------------------------------------------------------------------
+// Crée un jeu de données réaliste cohérent pour TOUTES les modules :
+//   - Trésorerie : solde de caisse initial + journal pré-rempli (paiements,
+//     ventes POS, dépenses du mois courant) ;
+//   - Pédagogie : 3 cours, 3 classes/cohortes, 6 étudiants profils complets
+//     (dont paiements antérieurs « legacy » + indicateur de journal) ;
+//   - Assiduité : séances PASSÉES avec statuts PRÉSENT / ABSENT / LATE /
+//     EXCUSÉ pour tous les étudiants ;
+//   - Voyages : 3 dossiers (Canada, Allemagne, France) avec workflows
+//     (Consulat, Campus France, Blocage de fonds…) et documents ;
+//   - Évaluations & notes, dépenses, tâches ;
+//   - Caisse POS : catalogue produits/services + 4 reçus de vente comptoir.
 //
 // Garanties :
-// - Isolation multi-tenant : tout est rattaché à l'organisation fraîchement
-//   créée.
-// - Unicité globale des emails de comptes démo (`User.email @unique`) : ils
-//   sont dérivés du slug de l'organisation (contrainte `@unique` sur
-//   `Organization.slug`) ET d'un jeton court dérivé de l'identifiant de
-//   l'organisation → jamais de collision P2002 avec une autre organisation.
-// - Unicité globale des codes étudiants (`Student.studentCode @unique`) :
-//   séquence recalculée DANS la transaction, au moment de l'insertion.
-// - Unicité globale des références de paiement (`Payment.reference @unique`) :
-//   le jeton d'organisation est embarqué dans chaque référence.
-// - Atomicité : l'intégralité du jeu de données est créée au sein d'UNE
-//   transaction Prisma (all-or-nothing). Toute collision unique (P2002,
-//   course condition entre deux inscriptions concurrentes) annule la
-//   transaction et déclenche une relance automatique avec de nouvelles
-//   séquences et un nouveau jeton.
-// - Tolérance : si l'organisation contient déjà des données (relance après un
-//   seed partiel), le seeding est ignoré SANS lever d'exception — l'appelant
-//   (`registerAction`) ne doit jamais être bloqué par cette fonction.
+//   - Isolation multi-tenant : tout dépend de l'organisation cible.
+//   - Unicité globale des emails démo, codes étudiants et références de
+//     paiement (jeton dérivé du slug + id d'organisation).
+//   - Atomicité : une seule transaction Prisma interactive (all-or-nothing).
+//   - Performance : créations par lots (createMany) + Promise.all pour
+//     minimiser les allers-retours réseau → exécution < 3 s, sous le budget
+//     des Serverless Vercel (10 s).
+//   - Tolérance : si l'organisation est déjà pourvue, retour `ALREADY_SEEDED`
+//     sans exception (l'appelant n'est jamais bloqué).
 
 /** Mot de passe commun aux comptes de démonstration générés. */
 const DEMO_PASSWORD = "demo12345";
@@ -41,11 +36,27 @@ const DEMO_PASSWORD = "demo12345";
 const DEMO_SEED_MAX_ATTEMPTS = 3;
 
 /**
- * Options de la transaction interactive : le jeu complet représente une
- * centaine d'opérations sur une base distante (Supabase), bien au-delà du
- * timeout par défaut de Prisma (5 s).
+ * Options de la transaction interactive — optimisées pour rester sous le
+ * budget temps des Serverless (corps du seeding < 3 s sur base distante).
  */
-const DEMO_SEED_TX_OPTIONS = { maxWait: 20_000, timeout: 120_000 };
+const DEMO_SEED_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 };
+
+/** Solde de caisse initial injecté dans le journal de trésorerie (FCFA). */
+const DEMO_INITIAL_CASH_BALANCE = 500_000;
+
+/** Nombre de séances de présence passées générées par classe. */
+const ATTENDANCE_SESSIONS_PER_CLASS = 6;
+
+/** Équivalents TypeScript des enums Prisma utilisés dans ce module. */
+type StudentStatusValue =
+  | "PROSPECT"
+  | "ENROLLED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "SUSPENDED"
+  | "DROPPED_OUT";
+type DiscountTypeValue = "PERCENTAGE" | "FIXED";
+type AttendanceStatusValue = "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
 
 /** Prénoms/noms réalistes servant au seeding des étudiants. */
 const DEMO_STUDENTS: Array<{
@@ -53,59 +64,73 @@ const DEMO_STUDENTS: Array<{
   lastName: string;
   email: string;
   phone: string;
+  dateOfBirth: string;
+  address: string;
 }> = [
   {
     firstName: "Awa",
     lastName: "Traoré",
     email: "awa.traore@example.com",
     phone: "+225 05 00 00 00 11",
+    dateOfBirth: "2001-04-15",
+    address: "Cocody Angré, Abidjan",
   },
   {
     firstName: "Yann",
     lastName: "Kouassi",
     email: "yann.kouassi@example.com",
     phone: "+225 05 00 00 00 12",
+    dateOfBirth: "2000-08-22",
+    address: "Marcory Zone 4, Abidjan",
   },
   {
     firstName: "Fatou",
     lastName: "Diop",
     email: "fatou.diop@example.com",
     phone: "+225 05 00 00 00 13",
+    dateOfBirth: "2002-01-09",
+    address: "Plateau, Abidjan",
   },
   {
     firstName: "Ibrahim",
     lastName: "Diallo",
     email: "ibrahim.diallo@example.com",
     phone: "+225 07 00 00 00 14",
+    dateOfBirth: "1999-11-30",
+    address: "Yopougon Niangon, Abidjan",
   },
   {
     firstName: "Amina",
     lastName: "N'Diaye",
     email: "amina.ndiaye@example.com",
     phone: "+225 05 00 00 00 15",
+    dateOfBirth: "2001-06-17",
+    address: "Treichville, Abidjan",
   },
   {
     firstName: "Samuel",
     lastName: "Mensah",
     email: "samuel.mensah@example.com",
     phone: "+225 07 00 00 00 16",
+    dateOfBirth: "2003-02-05",
+    address: "Cocody Riviera, Abidjan",
   },
 ];
 
 /** Catalogue de démonstration des catégories personnalisées du POS. */
-const DEMO_PRODUCT_CATEGORIES = ["Livres & Fascicules", "Services Assermentés"] as const;
+const DEMO_PRODUCT_CATEGORIES = [
+  "Livres & Fascicules",
+  "Services Assermentés",
+] as const;
 
 /**
- * Catalogue de démonstration de la caisse (POS) : produits/services vendus
- * au comptoir dès la création de l'organisation, afin que le module Caisse
- * soit immédiatement utilisable (ventes de livres, traductions assermentées,
- * photocopies et services annexes). Certains produits sont volontairement
- * SANS catégorie pour illustrer le filtre « Sans catégorie ».
+ * Catalogue de démonstration de la caisse (POS) : produits/services vendus au
+ * comptoir (livres, traductions assermentées, photocopies et services annexes).
+ * Certains produits sont volontairement SANS catégorie (filtre « Sans catégorie »).
  */
 const DEMO_PRODUCTS: Array<{
   name: string;
-  /** Nom de la catégorie personnalisée (null = produit sans catégorie). */
-  categoryName: string | null;
+  categoryName: (typeof DEMO_PRODUCT_CATEGORIES)[number] | null;
   unitPrice: number;
   description: string;
 }> = [
@@ -148,8 +173,58 @@ const DEMO_PRODUCTS: Array<{
   },
 ];
 
-/** Équivalent TypeScript de l'enum Prisma DiscountType (évite l'import). */
-type DiscountTypeValue = "PERCENTAGE" | "FIXED";
+/** Montants « legacy » (paiements antérieurs hors système) par étudiant. */
+const DEMO_LEGACY_PAYMENTS = new Map<
+  number,
+  { amount: number; inCashJournal: boolean }
+>([
+  [0, { amount: 100_000, inCashJournal: true }],
+  [1, { amount: 50_000, inCashJournal: false }],
+  [3, { amount: 75_000, inCashJournal: true }],
+]);
+
+/**
+ * Reçus de vente comptoir (POS) générés — les produits sont référencés par
+ * leur nom exact du catalogue `DEMO_PRODUCTS`.
+ */
+const DEMO_SALES: Array<{
+  studentIndex: number | null;
+  guestName?: string;
+  guestPhone?: string;
+  paymentMethod: "CASH" | "MOBILE_MONEY";
+  items: Array<{ productName: string; quantity: number }>;
+}> = [
+  {
+    studentIndex: 1,
+    paymentMethod: "CASH",
+    items: [
+      { productName: "Livre d'apprentissage B1", quantity: 1 },
+      { productName: "Photocopie A4 (page)", quantity: 10 },
+    ],
+  },
+  {
+    studentIndex: null,
+    guestName: "Client de passage (M. Koffi)",
+    guestPhone: "+225 07 00 00 00 99",
+    paymentMethod: "MOBILE_MONEY",
+    items: [{ productName: "Traduction assermentée de diplôme", quantity: 1 }],
+  },
+  {
+    studentIndex: 3,
+    paymentMethod: "CASH",
+    items: [{ productName: "Livre d'exercices A1", quantity: 2 }],
+  },
+  {
+    studentIndex: null,
+    guestName: "Client de passage (Mme Adjoua)",
+    guestPhone: "+225 05 00 00 00 88",
+    paymentMethod: "CASH",
+    items: [
+      { productName: "Traduction assermentée de relevé de notes", quantity: 1 },
+      { productName: "Lot de photocopies / fascicule", quantity: 3 },
+    ],
+  },
+];
 
 /** Résumé du seeding, retourné à l'appelant pour journalisation. */
 export type DemoSeedSummary = {
@@ -159,9 +234,16 @@ export type DemoSeedSummary = {
   reason?: "ORG_NOT_FOUND" | "ALREADY_SEEDED";
   counts: {
     students: number;
+    classes: number;
     courses: number;
+    attendances: number;
+    travelProcedures: number;
+    documents: number;
     expenses: number;
     payments: number;
+    sales: number;
+    evaluations: number;
+    tasks: number;
     /** Articles du catalogue POS créés. */
     products: number;
     /** Catégories personnalisées créées. */
@@ -173,16 +255,21 @@ export type DemoSeedSummary = {
 function emptyCounts(): DemoSeedSummary["counts"] {
   return {
     students: 0,
+    classes: 0,
     courses: 0,
+    attendances: 0,
+    travelProcedures: 0,
+    documents: 0,
     expenses: 0,
     payments: 0,
+    sales: 0,
+    evaluations: 0,
+    tasks: 0,
     products: 0,
     categories: 0,
     demoAccounts: 0,
   };
-}
-
-/**
+}/**
  * Jeton de boîte mail démo : unique au niveau global et propre à
  * l'organisation. Combine le slug (unique via `Organization.slug @unique`) et
  * un fragment de l'identifiant d'organisation : deux organisations ne peuvent
@@ -224,8 +311,7 @@ function demoReference(
 /**
  * Génère `count` codes étudiants uniques au format STU-YYYY-NNN, en partant
  * du suffixe numérique maximal déjà présent (toutes organisations confondues,
- * la contrainte `@unique` étant globale). Exécuté DANS la transaction pour
- * refléter l'état le plus récent de la base.
+ * la contrainte `@unique` étant globale). Exécuté DANS la transaction.
  */
 async function generateDemoStudentCodes(
   db: Prisma.TransactionClient,
@@ -257,8 +343,23 @@ async function generateDemoStudentCodes(
 }
 
 /**
+ * Génère les dates des séances passées : `count` dates espacées de ~3 jours,
+ * remontant à partir d'aujourd'hui (la plus ancienne en premier).
+ */
+function pastSessionDates(dayOffsetStart: number, count: number): Date[] {
+  const dates: Date[] = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const day = new Date();
+    day.setHours(9, 0, 0, 0);
+    day.setDate(day.getDate() - (dayOffsetStart + i * 3));
+    dates.push(day);
+  }
+  return dates;
+}
+
+/**
  * Corps du seeding : exécuté au sein d'UNE transaction interactive Prisma
- * (all-or-nothing). Tout est créé via le client transactionnel `tx`.
+ * (all-or-nothing). Chaque sous-étape minimise les allers-retours réseau.
  */
 async function runDemoSeedTransaction(
   tx: Prisma.TransactionClient,
@@ -267,6 +368,7 @@ async function runDemoSeedTransaction(
     createdById: string;
     year: number;
     registrationFee: number;
+    initialCashBalance: number;
     mailboxToken: string;
     demoEmails: { secretary: string; teacher: string };
     passwordHash: string;
@@ -277,13 +379,22 @@ async function runDemoSeedTransaction(
     createdById,
     year,
     registrationFee,
+    initialCashBalance,
     mailboxToken,
     demoEmails,
     passwordHash,
   } = ctx;
 
+  // 0. Trésorerie — solde de départ : pré-rempli uniquement si l'organisation
+  //    n'a pas déjà configuré son propre solde d'ouverture.
+  if (initialCashBalance === 0) {
+    await tx.organization.update({
+      where: { id: organizationId },
+      data: { initialCashBalance: DEMO_INITIAL_CASH_BALANCE },
+    });
+  }
+
   // 1. Comptes de démonstration : secrétaire (STAFF) et enseignant (TEACHER).
-  //    Emails uniques au niveau global (slug + jeton d'organisation).
   const [secretary, teacher] = await Promise.all([
     tx.user.create({
       data: {
@@ -307,43 +418,41 @@ async function runDemoSeedTransaction(
     }),
   ]);
 
-  // 2. Rôle personnalisé de démonstration (matrice de permissions) :
-  //    « Secrétaire Adjoint », pré-configuré (isSystem) et assigné au compte
-  //    secrétaire afin d'alimenter la page Rôles & Permissions dès la création
-  //    de l'organisation.
-  const secretaryRole = await tx.customRole.create({
-    data: {
-      organizationId,
-      name: "Secrétaire Adjoint",
-      description:
-        "Assiste la secrétaire : inscriptions, présences et dossiers de voyage.",
-      permissions: ["registration", "attendance", "travel"],
-      isSystem: true,
-    },
-  });
-  await tx.user.update({
-    where: { id: secretary.id },
-    data: { customRoleId: secretaryRole.id },
-  });
+  // 2. Rôles personnalisés de démonstration (matrice de permissions).
+  const [secretaryRole, teacherRole] = await Promise.all([
+    tx.customRole.create({
+      data: {
+        organizationId,
+        name: "Secrétaire Adjoint",
+        description:
+          "Assiste la secrétaire : inscriptions, présences et dossiers de voyage.",
+        permissions: ["registration", "attendance", "travel"],
+        isSystem: true,
+      },
+    }),
+    tx.customRole.create({
+      data: {
+        organizationId,
+        name: "Professeur Principal",
+        description:
+          "Encadre les enseignants : évaluations, présences et cours.",
+        permissions: ["evaluations", "attendance"],
+        isSystem: true,
+      },
+    }),
+  ]);
+  await Promise.all([
+    tx.user.update({
+      where: { id: secretary.id },
+      data: { customRoleId: secretaryRole.id },
+    }),
+    tx.user.update({
+      where: { id: teacher.id },
+      data: { customRoleId: teacherRole.id },
+    }),
+  ]);
 
-  // 2bis. Deuxième rôle personnalisé de démonstration : « Professeur Principal »
-  //       (évaluations + présences), assigné à l'enseignant de démonstration.
-  const teacherRole = await tx.customRole.create({
-    data: {
-      organizationId,
-      name: "Professeur Principal",
-      description:
-        "Encadre les enseignants : évaluations, présences et cours.",
-      permissions: ["evaluations", "attendance"],
-      isSystem: true,
-    },
-  });
-  await tx.user.update({
-    where: { id: teacher.id },
-    data: { customRoleId: teacherRole.id },
-  });
-
-  // 3. Catalogue : trois formations réalistes.
+  // 3. Catalogue pédagogique : TROIS cours.
   const [frenchCourse, englishCourse, germanCourse] = await Promise.all([
     tx.course.create({
       data: {
@@ -360,9 +469,9 @@ async function runDemoSeedTransaction(
       data: {
         organizationId,
         teacherId: teacher.id,
-        title: "Anglais Général — Niveau B1",
+        title: "Anglais Intensive — Niveau B1",
         code: "EN-B1",
-        description: "Anglais général intermédiaire (B1).",
+        description: "Anglais général intensif (B1).",
         price: 350000,
         durationWeeks: 12,
       },
@@ -371,18 +480,17 @@ async function runDemoSeedTransaction(
       data: {
         organizationId,
         teacherId: teacher.id,
-        title: "Allemand — Initiation A1",
-        code: "DE-A1",
-        description: "Préparation linguistique pour l'Allemagne (A1).",
+        title: "Allemand B1 — Visa",
+        code: "DE-B1",
+        description: "Préparation linguistique B1 pour l'Allemagne (visa).",
         price: 400000,
         durationWeeks: 10,
       },
     }),
   ]);
 
-
-  // 4. Cohorte A1 (matin) et B1 (après-midi), frais de scolarité configurés.
-  const [frenchClass, englishClass] = await Promise.all([
+  // 4. TROIS classes / cohortes.
+  const [frenchClass, englishClass, germanClass] = await Promise.all([
     tx.class.create({
       data: {
         organizationId,
@@ -403,399 +511,675 @@ async function runDemoSeedTransaction(
         tuitionFee: englishCourse.price,
       },
     }),
+    tx.class.create({
+      data: {
+        organizationId,
+        courseId: germanCourse.id,
+        teacherId: teacher.id,
+        name: "Allemand B1 — Visa Allemagne 2026",
+        schedule: "18h-21h",
+        tuitionFee: germanCourse.price,
+      },
+    }),
   ]);
-
   // 5. Codes étudiants générés DANS la transaction (séquence globale à jour).
   const studentCodes = await generateDemoStudentCodes(
     tx,
     DEMO_STUDENTS.length
   );
 
-  // 6. Étudiants : inscriptions, affectations de classe et paiements.
-  const createdStudents: Array<{
-    id: string;
-    code: string;
-    courseId: string;
-    totalCost: number;
-  }> = [];
-  let paymentCount = 0;
+  // 6. Étudiants (6 profils complets) — création parallèle.
+  const createdStudents = await Promise.all(
+    DEMO_STUDENTS.map(async (person, index) => {
+      const isFrench = index % 2 === 0;
+      const targetClass =
+        index >= 4 ? germanClass : isFrench ? frenchClass : englishClass;
+      const course =
+        targetClass === germanClass
+          ? germanCourse
+          : isFrench
+            ? frenchCourse
+            : englishCourse;
+      // Premiers élèves inscrits, derniers en cours de formation.
+      const status: StudentStatusValue =
+        index < 3 ? "ENROLLED" : "IN_PROGRESS";
+      const studentDiscountType: DiscountTypeValue =
+        index === 1 ? "PERCENTAGE" : "FIXED";
+      const discount = index === 1 ? 10 : 25000;
+      const netAmount =
+        studentDiscountType === "PERCENTAGE"
+          ? Math.round(targetClass.tuitionFee! * (1 - discount / 100))
+          : targetClass.tuitionFee! - discount;
+      const legacy = DEMO_LEGACY_PAYMENTS.get(index);
 
-  for (let index = 0; index < DEMO_STUDENTS.length; index += 1) {
-    const person = DEMO_STUDENTS[index];
-    const isFrench = index % 2 === 0;
-    const targetClass = isFrench ? frenchClass : englishClass;
-    const course = isFrench ? frenchCourse : englishCourse;
-    // Premiers élèves inscrits, derniers en cours de formation.
-    const status = index < 3 ? "ENROLLED" : "IN_PROGRESS";
-    // Un élève illustre une réduction en pourcentage.
-    const studentDiscountType: DiscountTypeValue =
-      index === 1 ? "PERCENTAGE" : "FIXED";
-    const discount = index === 1 ? 10 : 25000;
-    const netAmount =
-      studentDiscountType === "PERCENTAGE"
-        ? targetClass.tuitionFee! * (1 - discount / 100)
-        : targetClass.tuitionFee! - discount;
+      const student = await tx.student.create({
+        data: {
+          organizationId,
+          studentCode: studentCodes[index],
+          firstName: person.firstName,
+          lastName: person.lastName,
+          email: person.email,
+          phone: person.phone,
+          clientType: index === 2 ? "LANGUAGE_ONLY" : "LANGUAGE_AND_TRAVEL",
+          totalCost: targetClass.tuitionFee,
+          discount,
+          discountType: studentDiscountType,
+          netAmount,
+          // Paiements antérieurs hors système + indicateur de journal.
+          legacyPaidAmount: legacy?.amount ?? 0,
+          legacyAmountInCashJournal: legacy?.inCashJournal ?? false,
+          dateOfBirth: new Date(person.dateOfBirth),
+          address: person.address,
+          status,
+          hasPaidRegistrationFee: true,
+          currentClassId: targetClass.id,
+        },
+      });
 
-    const student = await tx.student.create({
-      data: {
-        organizationId,
-        studentCode: studentCodes[index],
-        firstName: person.firstName,
-        lastName: person.lastName,
-        email: person.email,
-        phone: person.phone,
-        clientType: index < 4 ? "LANGUAGE_AND_TRAVEL" : "LANGUAGE_ONLY",
-        totalCost: targetClass.tuitionFee,
-        discount,
-        discountType: studentDiscountType,
-        netAmount,
-        status,
-        hasPaidRegistrationFee: true,
-        currentClassId: targetClass.id,
-      },
-    });
-
-    createdStudents.push({
-      id: student.id,
-      code: student.studentCode,
-      courseId: course.id,
-      totalCost: targetClass.tuitionFee!,
-    });
-
-    // Affectation de classe + inscription au cours porteur.
-    await tx.classEnrollment.create({
-      data: { organizationId, studentId: student.id, classId: targetClass.id },
-    });
-    await tx.enrollment.create({
-      data: {
-        studentId: student.id,
+      return {
+        id: student.id,
+        code: student.studentCode,
         courseId: course.id,
-        progress: index < 3 ? 15 : 35,
-      },
-    });
+        classId: targetClass.id,
+        netAmount,
+      };
+    })
+  );
 
-    // Frais d'inscription encaissés + acompte de scolarité.
-    await tx.payment.create({
-      data: {
+  // 7. Inscriptions cours + affectations de classe + recettes (lots).
+  await Promise.all([
+    tx.classEnrollment.createMany({
+      data: createdStudents.map((student) => ({
         organizationId,
         studentId: student.id,
-        amount: registrationFee,
+        classId: student.classId,
+      })),
+    }),
+    tx.enrollment.createMany({
+      data: createdStudents.map((student, index) => ({
+        studentId: student.id,
+        courseId: student.courseId,
+        progress: index < 3 ? 15 : 35,
+      })),
+    }),
+  ]);
+
+  // Recettes : frais d'inscription + acomptes de scolarité (mois courant pour
+  // alimenter le journal de caisse) + paiements antérieurs « legacy ».
+  const today = new Date();
+  const currentMonth = today.getMonth();
+  const currentYear = today.getFullYear();
+
+  const studentPaymentRows: Prisma.PaymentCreateManyInput[] = [];
+  createdStudents.forEach((student, index) => {
+    studentPaymentRows.push({
+      organizationId,
+      studentId: student.id,
+      amount: registrationFee,
+      paymentMethod: "CASH",
+      status: "COMPLETED",
+      reference: demoReference("REG", index, mailboxToken),
+      description: "Frais d'inscription",
+      paidAt: new Date(year, 0, 8 + index),
+    });
+    studentPaymentRows.push({
+      organizationId,
+      studentId: student.id,
+      amount: Math.round(student.netAmount / 2),
+      paymentMethod: index % 2 === 0 ? "CASH" : "MOBILE_MONEY",
+      status: index === 5 ? "PARTIAL" : "COMPLETED",
+      reference: demoReference("PAY", index, mailboxToken),
+      description: "Acompte scolarité",
+      paidAt: new Date(currentYear, currentMonth, Math.min(1 + index, 22)),
+    });
+    const legacy = DEMO_LEGACY_PAYMENTS.get(index);
+    if (legacy?.inCashJournal) {
+      studentPaymentRows.push({
+        organizationId,
+        studentId: student.id,
+        amount: legacy.amount,
         paymentMethod: "CASH",
         status: "COMPLETED",
-        reference: demoReference("REG", index, mailboxToken),
-        description: "Frais d'inscription",
-        paidAt: new Date(year, 0, 8 + index),
-      },
-    });
-    await tx.payment.create({
-      data: {
-        organizationId,
-        studentId: student.id,
-        amount: Math.round((targetClass.tuitionFee! - discount) / 2),
-        paymentMethod: index % 2 === 0 ? "CASH" : "MOBILE_MONEY",
-        status: index === 5 ? "PARTIAL" : "COMPLETED",
-        reference: demoReference("PAY", index, mailboxToken),
-        description: "Acompte scolarité",
-        paidAt: new Date(year, 1, Math.min(3 + index, 27)),
-      },
-    });
-    paymentCount += 2;
+        reference: `LEGACY-${student.code}`,
+        description:
+          "Paiements antérieurs hors système (avant adoption du logiciel)",
+        paidAt: new Date(year, 0, 20),
+      });
+    }
+  });
+  let paymentCount = studentPaymentRows.length;
+  if (studentPaymentRows.length > 0) {
+    await tx.payment.createMany({ data: studentPaymentRows });
   }
-
-
-  // 7. Premier étudiant : dossier de voyage Canada + logement.
-  const travellerCanada = createdStudents[0];
-  const canadaWorkflow = await tx.workflow.create({
-    data: {
-      organizationId,
-      country: "Canada",
-      title: "Études supérieures au Canada",
-      description:
-        "Programme d'études supérieures avec admission dans un collège canadien.",
-      isDefault: true,
-      baseCost: 750000,
-      stages: {
-        create: [
-          {
-            organizationId,
-            title: "Constitution du dossier",
-            order: 1,
-            requiredDocuments: ["Passeport", "Diplômes", "Relevés de notes"],
-          },
-          {
-            organizationId,
-            title: "Test de langue",
-            order: 2,
-            requiredDocuments: ["Résultat officiel du test"],
-          },
-          {
-            organizationId,
-            title: "Demande d'admission",
-            order: 3,
-            requiredDocuments: ["Lettre d'admission", "Preuve de financement"],
-          },
-          {
-            organizationId,
-            title: "Demande de visa",
-            order: 4,
-            requiredDocuments: ["CAQ", "Visas"],
-          },
-          {
-            organizationId,
-            title: "Départ & installation",
-            order: 5,
-            requiredDocuments: ["Contrat de logement", "Assurance"],
-          },
-        ],
-      },
-    },
-  });
-
-  const canadaProcedure = await tx.travelProcedure.create({
-    data: {
-      organizationId,
-      studentId: travellerCanada.id,
-      advisorId: secretary.id,
-      workflowId: canadaWorkflow.id,
-      destination: "Canada",
-      targetProgram: "College — Sciences informatiques",
-      status: "ADMISSION_OBTAINED",
-      totalCost: canadaWorkflow.baseCost,
-      discount: 0,
-      netAmount: canadaWorkflow.baseCost,
-      currentStageOrder: 2,
-      currentStageDeadline: new Date(year, 6, 15),
-      notes:
-        "Admission obtenue. Démarrage des démarches CAQ puis demande de visa.",
-    },
-  });
-
-  await tx.payment.create({
-    data: {
-      organizationId,
-      studentId: travellerCanada.id,
-      travelProcedureId: canadaProcedure.id,
-      amount: 200000,
-      paymentMethod: "BANK_TRANSFER",
-      status: "COMPLETED",
-      reference: demoReference("TRV", 0, mailboxToken),
-      description: "Accompte dossier Canada",
-      paidAt: new Date(year, 2, 12),
-    },
-  });
-  paymentCount += 1;
-
-  await tx.housing.create({
-    data: {
-      organizationId,
-      studentId: travellerCanada.id,
-      name: "Résidence Leclerc — Toronto",
-      address: "24 Avenue Leclerc, Toronto",
-      city: "Toronto",
-      monthlyRent: 850,
-      deposit: 1700,
-      contractStart: new Date(year, 8, 1),
-      contractEnd: new Date(year + 1, 4, 31),
-      notes: "Appartement partagé à 15 min du collège.",
-    },
-  });
-
-  // 8. Second étudiant : dossier Allemagne (sans logement pour varier).
-  const travellerGermany = createdStudents[1];
-  const germanyWorkflow = await tx.workflow.create({
-    data: {
-      organizationId,
-      country: "Allemagne",
-      title: "Formation professionnelle en Allemagne",
-      description:
-        "Programme de formation professionnelle reconnu (Ausbildung).",
-      baseCost: 950000,
-      stages: {
-        create: [
-          {
-            organizationId,
-            title: "Constitution du dossier",
-            order: 1,
-            requiredDocuments: ["Passeport", "CV", "B1 requis"],
-          },
-          {
-            organizationId,
-            title: "Certification de langue",
-            order: 2,
-            requiredDocuments: ["Certificat Goethe B1"],
-          },
-          {
-            organizationId,
-            title: "Contrat de formation",
-            order: 3,
-            requiredDocuments: ["Contrat signé"],
-          },
-          {
-            organizationId,
-            title: "Visa & départ",
-            order: 4,
-            requiredDocuments: ["Visa", "Assurance"],
-          },
-        ],
-      },
-    },
-  });
-
-  await tx.travelProcedure.create({
-    data: {
-      organizationId,
-      studentId: travellerGermany.id,
-      advisorId: secretary.id,
-      workflowId: germanyWorkflow.id,
-      destination: "Allemagne",
-      targetProgram: "Ausbildung — Mécanique industrielle",
-      status: "VISA_APPLIED",
-      totalCost: germanyWorkflow.baseCost,
-      discount: 50000,
-      netAmount: germanyWorkflow.baseCost - 50000,
-      currentStageOrder: 3,
-      currentStageDeadline: new Date(year, 9, 1),
-      notes: "Visa déposé au consulat, audition prévue fin de mois.",
-    },
-  });
-
-
-  // 9. Évaluations par classe (modules + notes réalistes).
-  const evaluationA1 = await tx.evaluation.create({
-    data: {
-      organizationId,
+  // 8. Assiduité : séances PASSÉES pour toutes les classes, statuts variés
+  //    (PRESENT / ABSENT / LATE / EXCUSED) — une ligne par étudiant et séance.
+  const attendanceRows: Prisma.AttendanceCreateManyInput[] = [];
+  const classGroups: Array<{
+    courseId: string;
+    classId: string;
+    studentIds: string[];
+    dayOffset: number;
+  }> = [
+    {
+      courseId: frenchCourse.id,
       classId: frenchClass.id,
-      title: "Examen Continu N°1 — FR-A1",
-      date: new Date(year, 2, 15),
-      modules: {
-        create: [
-          { name: "Compréhension orale", maxScore: 100, passingScore: 60 },
-          { name: "Expression écrite", maxScore: 100, passingScore: 60 },
-          { name: "Expression orale", maxScore: 100, passingScore: 60 },
-        ],
-      },
+      studentIds: createdStudents
+        .filter((s) => s.classId === frenchClass.id)
+        .map((s) => s.id),
+      dayOffset: 21,
     },
-  });
+    {
+      courseId: englishCourse.id,
+      classId: englishClass.id,
+      studentIds: createdStudents
+        .filter((s) => s.classId === englishClass.id)
+        .map((s) => s.id),
+      dayOffset: 20,
+    },
+    {
+      courseId: germanCourse.id,
+      classId: germanClass.id,
+      studentIds: createdStudents
+        .filter((s) => s.classId === germanClass.id)
+        .map((s) => s.id),
+      dayOffset: 18,
+    },
+  ];
 
-  const frenchStudents = createdStudents.filter(
-    (student) => student.courseId === frenchCourse.id
-  );
-  const a1Modules = await tx.evaluationModule.findMany({
-    where: { evaluationId: evaluationA1.id },
-    select: { id: true },
-  });
-  for (let sIndex = 0; sIndex < frenchStudents.length; sIndex += 1) {
-    const student = frenchStudents[sIndex];
-    for (let mIndex = 0; mIndex < a1Modules.length; mIndex += 1) {
-      await tx.grade.create({
-        data: {
-          evaluationModuleId: a1Modules[mIndex].id,
-          studentId: student.id,
-          score: Math.min(100, 55 + ((sIndex + mIndex * 3) % 40)),
-        },
+  for (const group of classGroups) {
+    const dates = pastSessionDates(
+      group.dayOffset,
+      ATTENDANCE_SESSIONS_PER_CLASS
+    );
+    for (const studentId of group.studentIds) {
+      dates.forEach((date, sessionIndex) => {
+        let status: AttendanceStatusValue = "PRESENT";
+        if (sessionIndex === 2 && studentId === group.studentIds[0]) {
+          status = "ABSENT";
+        } else if (sessionIndex === 4 && studentId === group.studentIds[1]) {
+          status = "LATE";
+        } else if (sessionIndex === 3 && studentId === group.studentIds[2]) {
+          status = "EXCUSED";
+        }
+        attendanceRows.push({
+          organizationId,
+          courseId: group.courseId,
+          classId: group.classId,
+          studentId,
+          status,
+          date,
+          notes: status === "PRESENT" ? null : "Voir justificatif.",
+        });
       });
     }
   }
+  if (attendanceRows.length > 0) {
+    await tx.attendance.createMany({ data: attendanceRows });
+  }
 
-  // 10. Assiduité (cours du matin, classes cohérentes).
-  for (let sIndex = 0; sIndex < frenchStudents.length; sIndex += 1) {
-    const student = frenchStudents[sIndex];
-    await tx.attendance.create({
+  // 9. Workflows de voyage : Canada, Allemagne, France (Campus France).
+  const [canadaWorkflow, germanyWorkflow, franceWorkflow] = await Promise.all([
+    tx.workflow.create({
       data: {
         organizationId,
-        courseId: frenchCourse.id,
+        country: "Canada",
+        title: "Études supérieures au Canada",
+        description:
+          "Programme d'études supérieures avec admission dans un collège canadien.",
+        isDefault: true,
+        baseCost: 750000,
+        stages: {
+          create: [
+            {
+              organizationId,
+              title: "Constitution du dossier",
+              order: 1,
+              requiredDocuments: ["Passeport", "Diplômes", "Relevés de notes"],
+            },
+            {
+              organizationId,
+              title: "Test de langue",
+              order: 2,
+              requiredDocuments: ["Résultat officiel du test"],
+            },
+            {
+              organizationId,
+              title: "Demande d'admission",
+              order: 3,
+              requiredDocuments: ["Lettre d'admission", "Preuve de financement"],
+            },
+            {
+              organizationId,
+              title: "Demande de visa",
+              order: 4,
+              requiredDocuments: ["CAQ", "Visas"],
+            },
+            {
+              organizationId,
+              title: "Départ & installation",
+              order: 5,
+              requiredDocuments: ["Contrat de logement", "Assurance"],
+            },
+          ],
+        },
+      },
+    }),
+    tx.workflow.create({
+      data: {
+        organizationId,
+        country: "Allemagne",
+        title: "Formation professionnelle en Allemagne",
+        description:
+          "Programme de formation professionnelle reconnu (Ausbildung).",
+        baseCost: 950000,
+        stages: {
+          create: [
+            {
+              organizationId,
+              title: "Constitution du dossier",
+              order: 1,
+              requiredDocuments: ["Passeport", "CV", "B1 requis"],
+            },
+            {
+              organizationId,
+              title: "Certification de langue",
+              order: 2,
+              requiredDocuments: ["Certificat Goethe B1"],
+            },
+            {
+              organizationId,
+              title: "Contrat de formation",
+              order: 3,
+              requiredDocuments: ["Contrat signé"],
+            },
+            {
+              organizationId,
+              title: "Visa & départ",
+              order: 4,
+              requiredDocuments: ["Visa", "Assurance"],
+            },
+          ],
+        },
+      },
+    }),
+    tx.workflow.create({
+      data: {
+        organizationId,
+        country: "France",
+        title: "Études supérieures en France",
+        description:
+          "Campus France (DAP verte) puis demande de visa au consulat.",
+        baseCost: 850000,
+        stages: {
+          create: [
+            {
+              organizationId,
+              title: "Constitution du dossier",
+              order: 1,
+              requiredDocuments: ["Passeport", "Diplômes"],
+            },
+            {
+              organizationId,
+              title: "Campus France (DAP)",
+              order: 2,
+              requiredDocuments: ["Dossier Campus France validé"],
+            },
+            {
+              organizationId,
+              title: "Blocage de fonds (Blocked Account)",
+              order: 3,
+              requiredDocuments: ["Attestation de blocage de fonds"],
+            },
+            {
+              organizationId,
+              title: "Consulat & visa",
+              order: 4,
+              requiredDocuments: ["Visa long séjour"],
+            },
+            {
+              organizationId,
+              title: "Départ",
+              order: 5,
+              requiredDocuments: ["Billet d'avion", "Logement"],
+            },
+          ],
+        },
+      },
+    }),
+  ]);
+  // 10. TROIS dossiers de voyage (étudiants 0, 1 et 3).
+  const canadaStudent = createdStudents[0];
+  const germanyStudent = createdStudents[1];
+  const franceStudent = createdStudents[3];
+
+  const [canadaProcedure, germanyProcedure, franceProcedure] =
+    await Promise.all([
+      tx.travelProcedure.create({
+        data: {
+          organizationId,
+          studentId: canadaStudent.id,
+          advisorId: secretary.id,
+          workflowId: canadaWorkflow.id,
+          destination: "Canada",
+          targetProgram: "Collège — Sciences informatiques",
+          status: "ADMISSION_OBTAINED",
+          totalCost: canadaWorkflow.baseCost,
+          discount: 0,
+          netAmount: canadaWorkflow.baseCost,
+          currentStageOrder: 2,
+          currentStageDeadline: new Date(year, 6, 15),
+          notes:
+            "Admission obtenue. Démarrage des démarches CAQ puis demande de visa.",
+        },
+      }),
+      tx.travelProcedure.create({
+        data: {
+          organizationId,
+          studentId: germanyStudent.id,
+          advisorId: secretary.id,
+          workflowId: germanyWorkflow.id,
+          destination: "Allemagne",
+          targetProgram: "Ausbildung — Mécanique industrielle",
+          status: "VISA_APPLIED",
+          totalCost: germanyWorkflow.baseCost,
+          discount: 50000,
+          netAmount: germanyWorkflow.baseCost - 50000,
+          currentStageOrder: 3,
+          currentStageDeadline: new Date(year, 9, 1),
+          notes: "Visa déposé au consulat, audition prévue fin de mois.",
+        },
+      }),
+      tx.travelProcedure.create({
+        data: {
+          organizationId,
+          studentId: franceStudent.id,
+          advisorId: secretary.id,
+          workflowId: franceWorkflow.id,
+          destination: "France",
+          targetProgram: "Licence — Droit",
+          status: "VISA_APPLIED",
+          totalCost: franceWorkflow.baseCost,
+          discount: 0,
+          netAmount: franceWorkflow.baseCost,
+          currentStageOrder: 3,
+          currentStageDeadline: new Date(year, 10, 1),
+          notes:
+            "Campus France validé, blocage de fonds effectué, consulat en attente.",
+        },
+      }),
+    ]);
+
+  // Paiements voyage (recettes récentes → journal de trésorerie).
+  await tx.payment.createMany({
+    data: [
+      {
+        organizationId,
+        studentId: canadaStudent.id,
+        travelProcedureId: canadaProcedure.id,
+        amount: 200000,
+        paymentMethod: "BANK_TRANSFER",
+        status: "COMPLETED",
+        reference: demoReference("TRV", 0, mailboxToken),
+        description: "Accompte dossier Canada",
+        paidAt: new Date(year, 2, 12),
+      },
+      {
+        organizationId,
+        studentId: germanyStudent.id,
+        travelProcedureId: germanyProcedure.id,
+        amount: 150000,
+        paymentMethod: "MOBILE_MONEY",
+        status: "COMPLETED",
+        reference: demoReference("TRV", 1, mailboxToken),
+        description: "Accompte dossier Allemagne",
+        paidAt: new Date(currentYear, currentMonth, 4),
+      },
+      {
+        organizationId,
+        studentId: franceStudent.id,
+        travelProcedureId: franceProcedure.id,
+        amount: 100000,
+        paymentMethod: "BANK_TRANSFER",
+        status: "COMPLETED",
+        reference: demoReference("TRV", 2, mailboxToken),
+        description: "Accompte dossier France",
+        paidAt: new Date(currentYear, currentMonth, 6),
+      },
+    ],
+  });
+  paymentCount += 3;
+
+  // 11. Documents de voyage (pièces jointes) puis logements.
+  await tx.document.createMany({
+    data: [
+      {
+        organizationId,
+        title: "Passeport — Awa Traoré",
+        type: "PASSPORT",
+        fileUrl: "https://drive.demo.eduflow.app/canada/passeport-awa.pdf",
+        studentId: canadaStudent.id,
+        travelProcedureId: canadaProcedure.id,
+      },
+      {
+        organizationId,
+        title: "Lettre d'admission — Collège Toronto",
+        type: "DIPLOMA",
+        fileUrl: "https://drive.demo.eduflow.app/canada/admission.pdf",
+        studentId: canadaStudent.id,
+        travelProcedureId: canadaProcedure.id,
+      },
+      {
+        organizationId,
+        title: "Certificat Goethe B1",
+        type: "DIPLOMA",
+        fileUrl: "https://drive.demo.eduflow.app/allemagne/goethe-b1.pdf",
+        studentId: germanyStudent.id,
+        travelProcedureId: germanyProcedure.id,
+      },
+      {
+        organizationId,
+        title: "Attestation de blocage de fonds",
+        type: "OTHER",
+        fileUrl: "https://drive.demo.eduflow.app/france/blocage-fonds.pdf",
+        studentId: franceStudent.id,
+        travelProcedureId: franceProcedure.id,
+      },
+    ],
+  });
+
+  await Promise.all([
+    tx.housing.create({
+      data: {
+        organizationId,
+        studentId: canadaStudent.id,
+        name: "Résidence Leclerc — Toronto",
+        address: "24 Avenue Leclerc, Toronto",
+        city: "Toronto",
+        monthlyRent: 850,
+        deposit: 1700,
+        contractStart: new Date(year, 8, 1),
+        contractEnd: new Date(year + 1, 4, 31),
+        notes: "Appartement partagé à 15 min du collège.",
+      },
+    }),
+    tx.housing.create({
+      data: {
+        organizationId,
+        studentId: franceStudent.id,
+        name: "Cité universitaire — Paris",
+        address: "17 Boulevard Jourdan, Paris",
+        city: "Paris",
+        monthlyRent: 78000,
+        deposit: 156000,
+        contractStart: new Date(year, 8, 15),
+        contractEnd: new Date(year + 1, 5, 30),
+        notes: "Chambre individuelle proche du campus.",
+      },
+    }),
+  ]);
+  // 12. Évaluations internes & notes (une session par classe linguistique).
+  const [evaluationA1, evaluationB1] = await Promise.all([
+    tx.evaluation.create({
+      data: {
+        organizationId,
         classId: frenchClass.id,
+        title: "Examen Continu N°1 — FR-A1",
+        date: new Date(year, 2, 15),
+        modules: {
+          create: [
+            { name: "Compréhension orale", maxScore: 100, passingScore: 60 },
+            { name: "Expression écrite", maxScore: 100, passingScore: 60 },
+            { name: "Expression orale", maxScore: 100, passingScore: 60 },
+          ],
+        },
+      },
+    }),
+    tx.evaluation.create({
+      data: {
+        organizationId,
+        classId: englishClass.id,
+        title: "Examen Continu N°1 — EN-B1",
+        date: new Date(year, 2, 18),
+        modules: {
+          create: [
+            { name: "Listening", maxScore: 100, passingScore: 60 },
+            { name: "Writing", maxScore: 100, passingScore: 60 },
+            { name: "Speaking", maxScore: 100, passingScore: 60 },
+          ],
+        },
+      },
+    }),
+  ]);
+
+  const [a1Modules, b1Modules] = await Promise.all([
+    tx.evaluationModule.findMany({
+      where: { evaluationId: evaluationA1.id },
+      select: { id: true },
+    }),
+    tx.evaluationModule.findMany({
+      where: { evaluationId: evaluationB1.id },
+      select: { id: true },
+    }),
+  ]);
+
+  const gradeRows: Prisma.GradeCreateManyInput[] = [];
+  const a1Students = createdStudents.filter(
+    (student) => student.classId === frenchClass.id
+  );
+  const b1Students = createdStudents.filter(
+    (student) => student.classId === englishClass.id
+  );
+
+  a1Students.forEach((student, sIndex) => {
+    a1Modules.forEach((module, mIndex) => {
+      gradeRows.push({
+        evaluationModuleId: module.id,
         studentId: student.id,
-        status: sIndex === 2 ? "ABSENT" : "PRESENT",
-        date: new Date(year, 2, 10),
+        score: Math.min(100, 55 + ((sIndex + mIndex * 3) % 40)),
+      });
+    });
+  });
+  b1Students.forEach((student, sIndex) => {
+    b1Modules.forEach((module, mIndex) => {
+      gradeRows.push({
+        evaluationModuleId: module.id,
+        studentId: student.id,
+        score: Math.min(100, 58 + ((sIndex * 2 + mIndex * 4) % 38)),
+      });
+    });
+  });
+  if (gradeRows.length > 0) {
+    await tx.grade.createMany({ data: gradeRows });
+  }
+
+  // 13. Dépenses opérationnelles (mois courant) — loyer + internet compris.
+  await tx.expense.createMany({
+    data: [
+      {
+        organizationId,
+        createdById,
+        title: "Loyer des locaux",
+        category: "Loyer",
+        amount: 150000,
+        expenseDate: new Date(currentYear, currentMonth, 5),
+        notes: "Loyer mensuel du centre.",
+      },
+      {
+        organizationId,
+        createdById,
+        title: "Fournitures pédagogiques",
+        category: "Matériel pédagogique",
+        amount: 45000,
+        expenseDate: new Date(currentYear, currentMonth, 8),
+        notes: "Manuels et photocopies.",
+      },
+      {
+        organizationId,
+        createdById,
+        title: "Internet & téléphonie",
+        category: "Frais généraux",
+        amount: 20000,
+        expenseDate: new Date(currentYear, currentMonth, 15),
+        notes: "Abonnement fibre + forfait mobile.",
+      },
+      {
+        organizationId,
+        createdById,
+        title: "Salaires enseignants",
+        category: "Salaires",
+        amount: 250000,
+        expenseDate: new Date(currentYear, currentMonth, 25),
         notes: null,
       },
-    });
-  }
-
-  // 11. Dépenses réalistes du mois courant.
-  const today = new Date();
-  const currentMonth = today.getMonth();
-  await tx.expense.create({
-    data: {
-      organizationId,
-      createdById,
-      title: "Loyer des locaux",
-      category: "Loyer",
-      amount: 150000,
-      expenseDate: new Date(today.getFullYear(), currentMonth, 5),
-      notes: "Loyer mensuel du centre.",
-    },
-  });
-  await tx.expense.create({
-    data: {
-      organizationId,
-      createdById,
-      title: "Fournitures pédagogiques",
-      category: "Matériel pédagogique",
-      amount: 45000,
-      expenseDate: new Date(today.getFullYear(), currentMonth, 8),
-      notes: "Manuels et photocopies.",
-    },
-  });
-  await tx.expense.create({
-    data: {
-      organizationId,
-      createdById,
-      title: "Salaires enseignants",
-      category: "Salaires",
-      amount: 250000,
-      expenseDate: new Date(today.getFullYear(), currentMonth, 25),
-    },
+    ],
   });
 
-  // 12. Tâches de gestion réalistes.
-  await tx.task.create({
-    data: {
-      organizationId,
-      createdById,
-      assigneeId: secretary.id,
-      title: "Relancer les prospects FR-A1",
-      description:
-        "Contacter les prospects de la session prochaine pour confirmer leur inscription.",
-      status: "TODO",
-      priority: "HIGH",
-      dueDate: new Date(today.getFullYear(), currentMonth + 1, 5),
-    },
+  // 14. Tâches de gestion réalistes.
+  await tx.task.createMany({
+    data: [
+      {
+        organizationId,
+        createdById,
+        assigneeId: secretary.id,
+        title: "Relancer les prospects FR-A1",
+        description:
+          "Contacter les prospects de la session prochaine pour confirmer leur inscription.",
+        status: "TODO",
+        priority: "HIGH",
+        dueDate: new Date(currentYear, currentMonth + 1, 5),
+      },
+      {
+        organizationId,
+        createdById,
+        assigneeId: teacher.id,
+        studentId: createdStudents[2].id,
+        title: "Plan de rattrapage — Écrit B1",
+        description:
+          "Préparer un plan de rattrapage écrit pour l'étudiant en difficulté.",
+        status: "IN_PROGRESS",
+        priority: "MEDIUM",
+        dueDate: new Date(currentYear, currentMonth, 20),
+      },
+    ],
   });
-  await tx.task.create({
-    data: {
-      organizationId,
-      createdById,
-      assigneeId: teacher.id,
-      studentId: createdStudents[2].id,
-      title: "Plan de rattrapage — Écrit B1",
-      description:
-        "Préparer un plan de rattrapage écrit pour l'étudiant en difficulté.",
-      status: "IN_PROGRESS",
-      priority: "MEDIUM",
-      dueDate: new Date(today.getFullYear(), currentMonth, 20),
-    },
-  });
-
-  // 13. Catalogue de la caisse (POS) : catégories personnalisées puis
-  //     produits/services vendus au comptoir (livres, traductions assermentées,
-  //     photocopies). Certains produits sont volontairement SANS catégorie.
-  //     Sans contrainte d'unicité : aucune collision P2002 possible.
-  const demoCategoryIds = new Map<string, string>();
-  for (const categoryName of DEMO_PRODUCT_CATEGORIES) {
-    const category = await tx.productCategory.create({
-      data: { organizationId, name: categoryName },
-    });
-    demoCategoryIds.set(categoryName, category.id);
-  }
-
+  // 15. Catalogue de la caisse (POS) : catégories puis produits/services.
+  const categoryRows = await Promise.all(
+    DEMO_PRODUCT_CATEGORIES.map(async (categoryName) => {
+      const category = await tx.productCategory.create({
+        data: { organizationId, name: categoryName },
+      });
+      return { id: category.id, name: categoryName } as const;
+    })
+  );
+  const categoryIdByName = new Map(
+    categoryRows.map((category) => [category.name, category.id])
+  );
   await tx.productService.createMany({
     data: DEMO_PRODUCTS.map((product) => ({
       organizationId,
       name: product.name,
       categoryId: product.categoryName
-        ? demoCategoryIds.get(product.categoryName) ?? null
+        ? categoryIdByName.get(product.categoryName) ?? null
         : null,
       unitPrice: product.unitPrice,
       description: product.description,
@@ -803,28 +1187,85 @@ async function runDemoSeedTransaction(
     })),
   });
 
+  // On relit les produits créés pour référencer leurs prix dans les reçus POS.
+  const seededProducts = await tx.productService.findMany({
+    where: { organizationId },
+    select: { id: true, name: true, unitPrice: true },
+  });
+  const productByName = new Map(
+    seededProducts.map((product) => [product.name, product])
+  );
+
+  // 16. Reçus de vente comptoir (POS) — 4 ventes récentes (mois courant).
+  await Promise.all(
+    DEMO_SALES.map(async (draft, index) => {
+      const items = draft.items.map((item) => {
+        const product = productByName.get(item.productName);
+        if (!product) {
+          throw new Error(
+            `[demo-seed] Produit POS introuvable : ${item.productName}`
+          );
+        }
+        return {
+          productServiceId: product.id,
+          quantity: item.quantity,
+          unitPrice: product.unitPrice,
+          subtotal: product.unitPrice * item.quantity,
+        };
+      });
+      const totalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+
+      return tx.sale.create({
+        data: {
+          organizationId,
+          studentId:
+            draft.studentIndex != null
+              ? createdStudents[draft.studentIndex].id
+              : null,
+          createdById,
+          totalAmount,
+          discount: 0,
+          netAmount: totalAmount,
+          paymentMethod: draft.paymentMethod,
+          status: "COMPLETED",
+          guestName: draft.guestName ?? null,
+          guestPhone: draft.guestPhone ?? null,
+          createdAt: new Date(
+            currentYear,
+            currentMonth,
+            Math.min(2 + index, 24)
+          ),
+          items: { create: items },
+        },
+      });
+    })
+  );
+
   return {
     students: createdStudents.length,
+    classes: 3,
     courses: 3,
-    expenses: 3,
+    attendances: attendanceRows.length,
+    travelProcedures: 3,
+    documents: 4,
+    expenses: 4,
     payments: paymentCount,
+    sales: DEMO_SALES.length,
+    evaluations: 2,
+    tasks: 2,
     products: DEMO_PRODUCTS.length,
     categories: DEMO_PRODUCT_CATEGORIES.length,
     demoAccounts: 2,
   };
 }
-
 /**
- * Crée l'ensemble des données de démonstration pour une organisation
- * fraîchement inscrite.
+ * Crée l'ensemble des données de démonstration pour une organisation.
  *
- * Conçu pour être appelé SYNCHRONEment depuis `registerAction`, juste après
- * la création de l'organisation et de l'administrateur fondateur :
- * - la fonction ne lève JAMAIS d'exception pour un cas attendu (organisation
- *   introuvable ou déjà pourvue en données) : elle retourne un résumé
- *   informatif avec `seeded: false` ;
- * - les données sont créées au sein d'une transaction atomique : en cas
- *   d'échec, RIEN n'est persisté (aucune organisation à moitié remplie) ;
+ * Conçu pour être appelé au moment de l'onboarding (Google OAuth) ainsi que
+ * depuis l'action de ré-injection du tableau de bord :
+ * - aucune exception pour un cas attendu (organisation introuvable ou déjà
+ *   pourvue) : retour d'un résumé informatif avec `seeded: false` ;
+ * - les données sont créées au sein d'une transaction atomique ;
  * - les collisions uniques (P2002) déclenchent une relance automatique avec
  *   de nouvelles séquences et un nouveau jeton d'identifiants.
  *
@@ -837,10 +1278,15 @@ export async function seedDemoDataForOrganization(
 ): Promise<DemoSeedSummary> {
   const year = new Date().getFullYear();
 
-  // Récupère l'organisation pour ses paramètres par défaut (frais d'inscription).
+  // Récupère l'organisation pour ses paramètres par défaut (frais d'inscription)
+  // et son solde de caisse initial (trésorerie).
   const organization = await prisma.organization.findUnique({
     where: { id: organizationId },
-    select: { slug: true, defaultRegistrationFee: true },
+    select: {
+      slug: true,
+      defaultRegistrationFee: true,
+      initialCashBalance: true,
+    },
   });
 
   if (!organization) {
@@ -853,7 +1299,7 @@ export async function seedDemoDataForOrganization(
   const firstEmails = demoAccountEmails(
     demoMailboxToken(organization.slug, organizationId, 1)
   );
-    const [
+  const [
     existingDemoAccounts,
     existingStudents,
     existingCourses,
@@ -882,9 +1328,16 @@ export async function seedDemoDataForOrganization(
       reason: "ALREADY_SEEDED",
       counts: {
         students: existingStudents,
+        classes: 0,
         courses: existingCourses,
+        attendances: 0,
+        travelProcedures: 0,
+        documents: 0,
         expenses: existingExpenses,
         payments: existingPayments,
+        sales: 0,
+        evaluations: 0,
+        tasks: 0,
         products: existingProducts,
         categories: existingCategories,
         demoAccounts: existingDemoAccounts,
@@ -894,9 +1347,8 @@ export async function seedDemoDataForOrganization(
 
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
 
-  // Relance automatique : une collision unique (P2002 — course condition sur
-  // les codes étudiants globaux, par exemple) annule la transaction entière
-  // puis relance le seeding avec de nouvelles séquences / identifiants.
+  // Relance automatique : une collision unique (P2002) annule la transaction
+  // entière puis relance le seeding avec de nouvelles séquences / identifiants.
   let lastError: unknown;
   for (let attempt = 1; attempt <= DEMO_SEED_MAX_ATTEMPTS; attempt += 1) {
     const mailboxToken = demoMailboxToken(
@@ -914,6 +1366,7 @@ export async function seedDemoDataForOrganization(
             createdById,
             year,
             registrationFee: organization.defaultRegistrationFee,
+            initialCashBalance: organization.initialCashBalance,
             mailboxToken,
             demoEmails,
             passwordHash,
@@ -940,10 +1393,3 @@ export async function seedDemoDataForOrganization(
 
   throw lastError;
 }
-
-
-
-
-
-
-

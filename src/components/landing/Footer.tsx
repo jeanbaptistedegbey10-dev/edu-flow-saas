@@ -1,4 +1,9 @@
+"use client";
+
+
+import { type MouseEvent } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   GraduationCap,
   Globe,
@@ -20,6 +25,26 @@ const socialIcons: Record<string, React.ComponentType<{ className?: string }>> =
 };
 
 export default function Footer() {
+  const pathname = usePathname();
+  /** Vrai lorsque le Footer est affiché sur la page d'accueil. */
+  const isHome = pathname === "/";
+
+  /**
+   * Résout les liens du footer : les ancres du landing (« #features »,
+   * « #tarifs »…) doivent pointer vers « /#features » depuis les autres
+   * pages (mentions légales, contact…).
+   */
+  const resolveHref = (href: string) =>
+    href.startsWith("#") && !isHome ? `/${href}` : href;
+
+  /** Clic logo : retour fluide en haut de page lorsqu'on est déjà sur l'accueil. */
+  const handleLogoClick = (e: MouseEvent) => {
+    if (isHome) {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   return (
     <footer className="relative bg-ink-900 border-t border-white/10">
       {/* Top glow */}
@@ -30,7 +55,7 @@ export default function Footer() {
         <div className="py-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10">
           {/* Brand Column */}
           <div className="lg:col-span-2">
-            <Link href="/" className="flex items-center gap-2 mb-4">
+            <Link href="/" onClick={handleLogoClick} className="flex items-center gap-2 mb-4">
               <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-brand/20 border border-brand/30">
                 <GraduationCap className="w-5 h-5 text-brand-light" />
               </div>
@@ -67,12 +92,12 @@ export default function Footer() {
             <ul className="space-y-3">
               {FOOTER_LINKS.product.map((link) => (
                 <li key={link.label}>
-                  <a
-                    href={link.href}
+                  <Link
+                    href={resolveHref(link.href)}
                     className="text-sm text-gray-400 hover:text-white transition-colors"
                   >
                     {link.label}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -86,12 +111,12 @@ export default function Footer() {
             <ul className="space-y-3">
               {FOOTER_LINKS.company.map((link) => (
                 <li key={link.label}>
-                  <a
-                    href={link.href}
+                  <Link
+                    href={resolveHref(link.href)}
                     className="text-sm text-gray-400 hover:text-white transition-colors"
                   >
                     {link.label}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -105,12 +130,12 @@ export default function Footer() {
             <ul className="space-y-3">
               {FOOTER_LINKS.legal.map((link) => (
                 <li key={link.label}>
-                  <a
-                    href={link.href}
+                  <Link
+                    href={resolveHref(link.href)}
                     className="text-sm text-gray-400 hover:text-white transition-colors"
                   >
                     {link.label}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>

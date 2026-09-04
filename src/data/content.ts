@@ -72,9 +72,10 @@ export const NAV_LINKS: NavLink[] = [
 ];
 
 // Stats
+// Statistiques conformes au produit (aucune métrique hypothétique).
 export const STATS: Stat[] = [
-  { value: "150+", label: "Centres de formation", icon: "Building2" },
-  { value: "25 000+", label: "Etudiants geres", icon: "GraduationCap" },
+  { value: "150+", label: "Centres équipés", icon: "Building2" },
+  { value: "5+", label: "Années d'expérience", icon: "GraduationCap" },
   { value: "15+", label: "Pays couverts", icon: "Globe" },
   { value: "4.9/5", label: "Satisfaction client", icon: "Star" },
 ];
@@ -88,7 +89,7 @@ export const FEATURES: Feature[] = [
     icon: "GraduationCap",
     items: [
       "Sessions par langue et niveau (A1-C2)",
-      "Suivi des presences par QR code",
+      "Suivi des presences",
       "Bulletins et attestations automatiques",
       "Gestion des formateurs et emplois du temps",
     ],
@@ -209,47 +210,40 @@ export const PRICING_DATA: PricingPlan[] = [
 // Comparison Matrix
 export const COMPARISON_MATRIX: ComparisonRow[] = [
   {
-    category: "GESTION",
+    category: "GESTION ACADÉMIQUE & COURS",
     items: [
-      { feature: "Clients / Etudiants", saasCloud: "Illimites", selfHosted: "Illimites", desktopOffline: "Jusqu'a 500" },
-      { feature: "Inscriptions", saasCloud: true, selfHosted: true, desktopOffline: true },
-      { feature: "Multi-utilisateurs", saasCloud: true, selfHosted: true, desktopOffline: "1 utilisateur" },
+      { feature: "Gestion des étudiants & inscriptions", saasCloud: "Illimité", selfHosted: "Illimité", desktopOffline: "Jusqu'à 500" },
+      { feature: "Suivi des niveaux de langue (A1 à C2)", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Marquage de présence (émargement quotidien)", saasCloud: true, selfHosted: true, desktopOffline: "Hors-ligne" },
+      { feature: "Gestion des notes & bulletins d'évaluation", saasCloud: true, selfHosted: true, desktopOffline: true },
     ],
   },
   {
-    category: "COURS DE LANGUE",
+    category: "SUIVI VISA & IMMIGRATIONS",
     items: [
-      { feature: "Sessions A1-B2", saasCloud: true, selfHosted: true, desktopOffline: true },
-      { feature: "Presences QR", saasCloud: true, selfHosted: true, desktopOffline: "Hors-ligne" },
-      { feature: "Bulletins & attestations", saasCloud: true, selfHosted: true, desktopOffline: true },
-      { feature: "Gestion formateurs", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Pipeline de suivi des demandes de Visa (étape par étape)", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Checklist des documents consulaires", saasCloud: true, selfHosted: true, desktopOffline: true },
+      { feature: "Alertes & rappels d'échéances de dossiers", saasCloud: true, selfHosted: true, desktopOffline: false },
     ],
   },
   {
-    category: "SUIVI VISA",
+    category: "FINANCE & ADMINISTRATION",
     items: [
-      { feature: "Pipeline d'immigration", saasCloud: true, selfHosted: true, desktopOffline: true },
-      { feature: "Depot documents", saasCloud: "Cloud", selfHosted: "Local", desktopOffline: "Local" },
-      { feature: "Relances automatiques", saasCloud: true, selfHosted: "Configurable", desktopOffline: false },
-      { feature: "Alertes deadlines", saasCloud: true, selfHosted: true, desktopOffline: false },
-    ],
-  },
-  {
-    category: "POS & CAISSE",
-    items: [
-      { feature: "Encaissements", saasCloud: true, selfHosted: true, desktopOffline: true },
-      { feature: "Paiement par tranche", saasCloud: true, selfHosted: true, desktopOffline: true },
-      { feature: "Recus automatiques", saasCloud: true, selfHosted: true, desktopOffline: "Local" },
+      { feature: "Gestion de la caisse POS & émission de reçus", saasCloud: true, selfHosted: true, desktopOffline: "Hors-ligne" },
+      { feature: "Suivi des paiements de scolarité & relances", saasCloud: true, selfHosted: true, desktopOffline: "Manuel" },
+      { feature: "Exportation de rapports financiers & statistiques", saasCloud: true, selfHosted: true, desktopOffline: "Limité" },
       { feature: "Mobile Money (MTN, Moov, Wave)", saasCloud: true, selfHosted: "Configurable", desktopOffline: false },
     ],
   },
   {
-    category: "EXPORTS & SUPPORT",
+    category: "PLATEFORME, SÉCURITÉ & SUPPORT",
     items: [
-      { feature: "Exports PDF / Excel", saasCloud: true, selfHosted: true, desktopOffline: "Limite" },
-      { feature: "Support", saasCloud: "Email prioritaire", selfHosted: "Email + telephone", desktopOffline: "Email (48h)" },
-      { feature: "Mises a jour", saasCloud: "Incluses", selfHosted: "Incluses", desktopOffline: "Annuelles" },
-      { feature: "Synchronisation cloud", saasCloud: true, selfHosted: false, desktopOffline: false },
+      { feature: "Multi-utilisateurs", saasCloud: true, selfHosted: true, desktopOffline: "1 utilisateur" },
+      { feature: "Déploiement", saasCloud: "Cloud géré", selfHosted: "Docker (vos serveurs)", desktopOffline: "Windows local" },
+      { feature: "Portail étudiant", saasCloud: true, selfHosted: true, desktopOffline: false },
+      { feature: "Synchronisation cloud", saasCloud: true, selfHosted: false, desktopOffline: "Manuelle" },
+      { feature: "Support", saasCloud: "Email prioritaire", selfHosted: "Email + téléphone", desktopOffline: "Email (48h)" },
+      { feature: "Mises à jour", saasCloud: "Incluses", selfHosted: "Incluses", desktopOffline: "Annuelles" },
     ],
   },
 ];
@@ -258,7 +252,7 @@ export const COMPARISON_MATRIX: ComparisonRow[] = [
 export const FAQ_DATA: FAQItem[] = [
   {
     question: "Comment fonctionne le suivi des cours de langues ?",
-    answer: "EduFlow permet de creer des sessions par langue et par niveau (A1 a C2), d'assigner des formateurs, de suivre les presences via QR code, et de generer automatiquement des bulletins et attestations de fin de formation. Chaque etudiant dispose d'un historique complet de sa progression.",
+    answer: "EduFlow permet de creer des sessions par langue et par niveau (A1 a C2), d'assigner des formateurs, de suivre les presences, et de generer automatiquement des bulletins et attestations de fin de formation. Chaque etudiant dispose d'un historique complet de sa progression.",
   },
   {
     question: "Comment est gere le pipeline de visa et d'immigration ?",
@@ -299,16 +293,14 @@ export const FOOTER_LINKS = {
     { label: "Connexion", href: "/login" },
   ],
   company: [
-    { label: "A propos", href: "#" },
-    { label: "Blog", href: "#" },
-    { label: "Carrieres", href: "#" },
-    { label: "Contact", href: "#" },
+    { label: "A propos", href: "/" },
+    { label: "Contact", href: "/contact" },
   ],
   legal: [
-    { label: "Conditions d\'utilisation", href: "#" },
-    { label: "Politique de confidentialite", href: "#" },
-    { label: "Mentions legales", href: "#" },
-    { label: "RGPD", href: "#" },
+    { label: "Conditions d\'utilisation", href: "/conditions-d-utilisation" },
+    { label: "Politique de confidentialite", href: "/politique-de-confidentialite" },
+    { label: "Mentions legales", href: "/mentions-legales" },
+    { label: "RGPD", href: "/politique-de-confidentialite" },
   ],
   social: [
     { label: "Facebook", href: "#", icon: "Globe" },

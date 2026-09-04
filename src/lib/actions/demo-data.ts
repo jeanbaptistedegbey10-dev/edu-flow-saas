@@ -93,10 +93,13 @@ export async function injectDemoDataAction(
     }
 
     revalidatePath("/dashboard");
+    revalidatePath("/dashboard/students");
+    revalidatePath("/dashboard/classes");
+    revalidatePath("/dashboard/tresorerie");
 
     return {
       status: "success",
-      message: `Jeu de démonstration injecté : ${result.counts.students} élèves, ${result.counts.courses} cours, ${result.counts.payments} reçus de paiement.`,
+      message: `Jeu de démonstration injecté : ${result.counts.students} élèves, ${result.counts.classes} classes, ${result.counts.payments} paiements, ${result.counts.sales} ventes POS, ${result.counts.attendances} présences, ${result.counts.travelProcedures} dossiers voyage.`,
     };
   } catch (error: any) {
     // Relance les erreurs de redirection (NEXT_REDIRECT) pour que Next.js

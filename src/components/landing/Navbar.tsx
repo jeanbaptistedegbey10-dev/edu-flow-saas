@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type MouseEvent } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Menu, X, GraduationCap } from "lucide-react";
 import { NAV_LINKS } from "@/data/content";
@@ -8,6 +9,21 @@ import { NAV_LINKS } from "@/data/content";
 export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const pathname = usePathname();
+  /** Vrai lorsque la Navbar est affichée sur la page d'accueil. */
+  const isHome = pathname === "/";
+
+  /**
+   * Clic sur le logo : sur la page d'accueil, retour fluide en haut du Hero ;
+   * sur les autres pages, navigation classique vers « / ».
+   */
+  const handleLogoClick = (e: MouseEvent) => {
+    setIsMobileOpen(false);
+    if (isHome) {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -28,7 +44,7 @@ export default function Navbar() {
       <nav className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group">
+          <Link href="/" onClick={handleLogoClick} className="flex items-center gap-2 group">
             <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-brand/20 border border-brand/30 group-hover:bg-brand/30 transition-colors">
               <GraduationCap className="w-5 h-5 text-brand-light" />
             </div>
@@ -40,13 +56,13 @@ export default function Navbar() {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-8">
             {NAV_LINKS.map((link) => (
-              <a
+              <Link
                 key={link.href}
-                href={link.href}
+                href={isHome ? link.href : `/${link.href}`}
                 className="text-sm text-gray-300 hover:text-white transition-colors relative after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-brand after:transition-all hover:after:w-full"
               >
                 {link.label}
-              </a>
+              </Link>
             ))}
           </div>
 
@@ -84,14 +100,14 @@ export default function Navbar() {
         >
           <div className="py-4 space-y-3 border-t border-white/10">
             {NAV_LINKS.map((link) => (
-              <a
+              <Link
                 key={link.href}
-                href={link.href}
+                href={isHome ? link.href : `/${link.href}`}
                 onClick={() => setIsMobileOpen(false)}
                 className="block py-2 text-gray-300 hover:text-white transition-colors"
               >
                 {link.label}
-              </a>
+              </Link>
             ))}
             <div className="pt-3 space-y-2 border-t border-white/10">
               <Link
