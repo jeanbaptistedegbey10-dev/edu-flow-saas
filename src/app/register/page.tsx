@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 import { GraduationCapIcon } from "lucide-react";
 
 import { RegisterForm } from "@/components/auth/register-form";
@@ -30,7 +31,9 @@ export default function RegisterPage() {
 
         <Separator className="mb-6" />
 
-        <RegisterForm />
+        <Suspense fallback={null}>
+          <RegisterForm />
+        </Suspense>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Vous avez déjà un compte ?{" "}

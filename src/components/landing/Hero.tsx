@@ -130,9 +130,9 @@ export default function Hero() {
     <section className="relative min-h-screen flex items-center overflow-hidden bg-ink-900">
       {/* Background Gradient Orbs */}
       <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute top-1/4 -left-32 w-96 h-96 bg-brand/20 rounded-full blur-3xl animate-float" />
-        <div className="absolute top-1/3 -right-32 w-80 h-80 bg-mint/10 rounded-full blur-3xl animate-float-delayed" />
-        <div className="absolute bottom-1/4 left-1/3 w-72 h-72 bg-brand/10 rounded-full blur-3xl animate-pulse-glow" />
+        <div className="absolute top-1/4 left-0 w-64 sm:w-96 h-64 sm:h-96 bg-brand/20 rounded-full blur-3xl animate-float" />
+        <div className="absolute top-1/3 right-0 w-56 sm:w-80 h-56 sm:h-80 bg-mint/10 rounded-full blur-3xl animate-float-delayed" />
+        <div className="absolute bottom-1/4 left-1/3 w-48 sm:w-72 h-48 sm:h-72 bg-brand/10 rounded-full blur-3xl animate-pulse-glow" />
       </div>
 
       {/* Grid Pattern Overlay */}
@@ -145,7 +145,7 @@ export default function Hero() {
             {/* Animation principale Lottie — globe & avion (mobilité internationale) */}
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -top-28 -right-8 hidden h-40 w-40 opacity-95 animate-float lg:block xl:h-48 xl:w-48"
+              className="pointer-events-none absolute -top-28 right-0 hidden h-32 w-32 opacity-95 animate-float sm:h-40 sm:w-40 lg:block xl:h-48 xl:w-48"
             >
               <DotLottieReact
                 src="/lottie/globe-airplane.json"
@@ -367,9 +367,9 @@ export default function Hero() {
             </div>
 
             {/* Floating Badge */}
-            <div className="absolute -bottom-4 -left-4 glass-card px-4 py-2 flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-mint animate-pulse" />
-              <span className="text-sm text-gray-300">5+ annees d&apos;experience</span>
+            <div className="absolute -bottom-4 left-0 sm:-left-4 glass-card px-3 sm:px-4 py-2 flex items-center gap-2 max-w-[200px]">
+              <div className="w-3 h-3 rounded-full bg-mint animate-pulse shrink-0" />
+              <span className="text-xs sm:text-sm text-gray-300 truncate">5+ annees d&apos;experience</span>
             </div>
           </div>
         </div>

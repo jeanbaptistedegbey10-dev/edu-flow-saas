@@ -104,6 +104,16 @@ enum DocumentType {
   OTHER
 }
 
+enum ReferralStatus {
+  PENDING
+  CONVERTED
+}
+
+enum RegistrationFeePolicy {
+  ONCE_PER_STUDENT
+  EVERY_NEW_ENROLLMENT
+}
+
 // --------------------------------------
 // Documents & Pièces jointes
 // --------------------------------------
@@ -177,6 +187,8 @@ model Organization {
   ifu                    String?
   /// Frais d'inscription uniques facturés une seule fois par étudiant (FCFA).
   defaultRegistrationFee Float    @default(15000)
+  /// Politique de frais d'inscription : une seule fois par étudiant ou à chaque nouvelle inscription.
+  registrationFeePolicy RegistrationFeePolicy @default(ONCE_PER_STUDENT)
   /// Solde initial / solde de départ de la caisse (FCFA) : montant d'ouverture
   /// saisi lors de l'adoption du logiciel, intégré au calcul de trésorerie
   /// (Solde total = Solde initial + Encaissements − Dépenses).
@@ -242,11 +254,17 @@ model User {
   isActive       Boolean  @default(true)
   /// Rôle personnalisé (matrice de permissions) assigné à l'utilisateur.
   customRoleId   String?
+  /// Code de parrainage unique (hash court) — généré automatiquement à la création.
+  referralCode   String?  @unique
+  /// Utilisateur qui a parrainé ce compte (via un lien ?ref=CODE).
+  referredById   String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   customRole      CustomRole?       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  referredBy      User?             @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals       User[]            @relation("UserReferrals")
   taughtCourses   Course[]          @relation("TeacherCourses")
   taughtClasses   Class[]           @relation("TeacherClasses")
   createdExpenses Expense[]         @relation("ExpenseCreator")
@@ -258,6 +276,8 @@ model User {
   managedTravels  TravelProcedure[] @relation("TravelAdvisor")
   createdSales    Sale[]            @relation("SaleCreator")
   courseLogs      CourseLog[]       @relation("TeacherCourseLogs")
+  sentReferrals   Referral[]        @relation("ReferrerUser")
+  receivedReferrals Referral[]      @relation("ReferredUser")
 }
 
 // --------------------------------------
@@ -869,4 +889,24 @@ model Housing {
 
   @@index([organizationId])
   @@index([studentId])
+}
+
+// --------------------------------------
+// Programme de Parrainage (Referral)
+// --------------------------------------
+
+model Referral {
+  id           String         @id @default(cuid())
+  referrerId   String
+  referredId   String         @unique
+  status       ReferralStatus @default(PENDING)
+  rewardAmount Float          @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  referrer User @relation("ReferrerUser", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred User @relation("ReferredUser", fields: [referredId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId])
+  @@index([status])
 }

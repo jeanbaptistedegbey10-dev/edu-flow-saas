@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { Loader2Icon, SparklesIcon } from "lucide-react";
 
 /**
@@ -40,11 +41,20 @@ import { Button } from "@/components/ui/button";
 export function RegisterForm() {
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const searchParams = useSearchParams();
 
   async function handleGoogleSignIn() {
     setError(null);
     setPending(true);
     try {
+      // Capture le code de parrainage éventuel présent dans l'URL (?ref=CODE)
+      // et le stocke dans un cookie pour le serveur (auth.ts signIn callback).
+      const refCode = searchParams.get("ref");
+      if (refCode && refCode.trim().length > 0) {
+        document.cookie = `eduflow_ref=${encodeURIComponent(
+          refCode.trim()
+        )}; path=/; max-age=86400; SameSite=Lax`;
+      }
       await signIn("google", { callbackUrl: "/dashboard" });
     } catch {
       setError(

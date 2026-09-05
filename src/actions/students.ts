@@ -738,7 +738,7 @@ export async function createStudentAction(
   // Paramétrage des frais d'inscription de l'organisation active.
   const organization = await prisma.organization.findUnique({
     where: { id: organizationId },
-    select: { defaultRegistrationFee: true },
+    select: { defaultRegistrationFee: true, registrationFeePolicy: true },
   });
 
   if (!organization) {
@@ -1005,7 +1005,7 @@ export async function updateStudentAction(
     // Paramétrage des frais d'inscription de l'organisation active.
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { defaultRegistrationFee: true },
+      select: { defaultRegistrationFee: true, registrationFeePolicy: true },
     });
 
     if (!organization) {
@@ -1017,6 +1017,8 @@ export async function updateStudentAction(
     }
 
     const registrationFee = organization.defaultRegistrationFee;
+    const isEveryNewEnrollment =
+      organization.registrationFeePolicy === "EVERY_NEW_ENROLLMENT";
 
     // Étudiant « hérité » (paiements antérieurs > 0 ou case « Ne pas inclure
     // dans le journal de caisse actuel » cochée) : les frais d'inscription sont
@@ -1024,11 +1026,13 @@ export async function updateStudentAction(
     const registrationFeeExcluded =
       parsed.data.legacyExcludeFromJournal || parsed.data.legacyPaidAmount > 0;
 
-    // Frais d'inscription : uniquement s'ils n'ont jamais été réglés.
+    // Frais d'inscription :
+    // - ONCE_PER_STUDENT : uniquement s'ils n'ont jamais été réglés.
+    // - EVERY_NEW_ENROLLMENT : à chaque nouvelle inscription (nouvelle classe/cours).
     const appliesRegistrationFee =
-      !existing.hasPaidRegistrationFee &&
       registrationFee > 0 &&
-      !registrationFeeExcluded;
+      !registrationFeeExcluded &&
+      (isEveryNewEnrollment || !existing.hasPaidRegistrationFee);
 
     // Classe / cohorte ciblée (validation multi-tenant).
     // Sélection explicite « Aucune classe » ⇒ retrait de la cohorte active.

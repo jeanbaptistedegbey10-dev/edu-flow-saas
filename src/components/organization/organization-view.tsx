@@ -510,6 +510,53 @@ function OrganizationEditForm({ organization }: { organization: OrganizationInfo
         exports PDF.
       </p>
 
+      {/* Politique de frais d'inscription */}
+      <div className="space-y-3 pt-4 border-t">
+        <div>
+          <Label className="text-sm font-medium">
+            Politique de frais d&apos;inscription
+          </Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Quand les frais d&apos;inscription sont-ils factur&eacute;s ?
+          </p>
+        </div>
+        <div className="space-y-2">
+          <label className="flex items-start gap-2.5 rounded-lg border border-slate-200/80 p-3 cursor-pointer transition-colors hover:bg-muted/40 dark:border-slate-800">
+            <input
+              type="radio"
+              name="registrationFeePolicy"
+              value="ONCE_PER_STUDENT"
+              defaultChecked={organization.registrationFeePolicy === "ONCE_PER_STUDENT"}
+              className="mt-0.5 shrink-0 accent-primary"
+            />
+            <span className="grid gap-0.5">
+              <span className="text-sm font-medium">
+                Frais d&apos;inscription pay&eacute;s une seule fois par &eacute;tudiant
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Les frais sont factur&eacute;s uniquement &agrave; la premi&egrave;re inscription. Aucun nouveau frais pour les inscriptions suivantes.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 rounded-lg border border-slate-200/80 p-3 cursor-pointer transition-colors hover:bg-muted/40 dark:border-slate-800">
+            <input
+              type="radio"
+              name="registrationFeePolicy"
+              value="EVERY_NEW_ENROLLMENT"
+              defaultChecked={organization.registrationFeePolicy === "EVERY_NEW_ENROLLMENT"}
+              className="mt-0.5 shrink-0 accent-primary"
+            />
+            <span className="grid gap-0.5">
+              <span className="text-sm font-medium">
+                Frais d&apos;inscription pay&eacute;s &agrave; chaque nouveau cours / nouvelle classe
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Les frais sont factur&eacute;s automatiquement &agrave; chaque nouvelle inscription dans un cours ou une classe diff&eacute;rente.
+              </span>
+            </span>
+          </label>
+        </div>
+      </div>
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>
           {pending ? (

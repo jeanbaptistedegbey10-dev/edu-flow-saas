@@ -20,6 +20,7 @@ import {
   SubscriptionCheckout,
   type CheckoutPlan,
 } from "@/components/dashboard/billing/subscription-checkout";
+import { ReferralProgram } from "@/components/dashboard/billing/referral-program";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -466,6 +467,9 @@ export default async function BillingPage({
           </p>
         </section>
       )}
+
+      {/* Programme de Parrainage */}
+      <ReferralProgram baseUrl={process.env.NEXT_PUBLIC_BASE_URL ?? "https://eduflow.com"} />
     </main>
   );
 }

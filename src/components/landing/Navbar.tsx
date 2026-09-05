@@ -92,40 +92,66 @@ export default function Navbar() {
           </button>
         </div>
 
-        {/* Mobile Menu */}
+      </nav>
+
+      {/* Mobile Menu Backdrop */}
+      {isMobileOpen && (
         <div
-          className={`md:hidden overflow-hidden transition-all duration-300 ${
-            isMobileOpen ? "max-h-80 opacity-100" : "max-h-0 opacity-0"
-          }`}
-        >
-          <div className="py-4 space-y-3 border-t border-white/10">
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          onClick={() => setIsMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Mobile Menu Sheet */}
+      <div
+        className={`fixed right-0 top-0 z-50 h-full w-[280px] max-w-[80vw] transform transition-transform duration-300 md:hidden ${
+          isMobileOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex h-full flex-col bg-ink-900 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+            <span className="text-lg font-bold text-white">
+              Edu<span className="text-brand-light">Flow</span>
+            </span>
+            <button
+              onClick={() => setIsMobileOpen(false)}
+              className="p-2 text-gray-300 hover:text-white"
+              aria-label="Fermer le menu"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-5 py-6 space-y-4">
             {NAV_LINKS.map((link) => (
               <Link
                 key={link.href}
                 href={isHome ? link.href : `/${link.href}`}
                 onClick={() => setIsMobileOpen(false)}
-                className="block py-2 text-gray-300 hover:text-white transition-colors"
+                className="block py-2 text-base text-gray-300 hover:text-white transition-colors"
               >
                 {link.label}
               </Link>
             ))}
-            <div className="pt-3 space-y-2 border-t border-white/10">
+            <div className="pt-4 space-y-3 border-t border-white/10">
               <Link
                 href="/login"
-                className="block w-full text-center py-2 text-sm text-gray-300 hover:text-white border border-white/10 rounded-lg transition-colors"
+                onClick={() => setIsMobileOpen(false)}
+                className="block w-full text-center py-2.5 text-sm font-medium text-gray-300 hover:text-white border border-white/10 rounded-lg transition-colors"
               >
                 Connexion
               </Link>
               <Link
                 href="/register"
-                className="block w-full text-center py-2 text-sm font-medium text-white bg-brand hover:bg-brand-dark rounded-lg transition-all"
+                onClick={() => setIsMobileOpen(false)}
+                className="block w-full text-center py-2.5 text-sm font-medium text-white bg-brand hover:bg-brand-dark rounded-lg transition-all"
               >
                 Essai Gratuit
               </Link>
             </div>
           </div>
         </div>
-      </nav>
+      </div>
     </header>
   );
 }

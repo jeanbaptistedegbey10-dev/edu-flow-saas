@@ -1151,6 +1151,24 @@ export async function activateSubscriptionAfterPayment(
       `[payment][webhook] Abonnement ${pricing.label} activé pour ${organization.name} (jusqu'au ${periodEnd.toISOString()}).`
     );
 
+    // Parrainage : si l'administrateur de cette organisation a été parrainé,
+    // convertit la referral (le filleul a souscrit un paiement réussi).
+    try {
+      const { convertReferralOnPayment } = await import("@/actions/referral");
+      const orgAdmin = await prisma.user.findFirst({
+        where: { organizationId, role: "ADMIN", referredById: { not: null } },
+        select: { id: true },
+      });
+      if (orgAdmin) {
+        await convertReferralOnPayment(orgAdmin.id, webhook.amount ?? pricing.amount);
+      }
+    } catch (refError) {
+      console.error(
+        "[payment][webhook] Échec de la conversion de la referral :",
+        refError
+      );
+    }
+
     return {
       status: "success",
       message: `Abonnement ${pricing.label} activé jusqu'au ${periodEnd.toLocaleDateString("fr-FR")}.`,

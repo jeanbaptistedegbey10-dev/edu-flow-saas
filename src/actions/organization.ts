@@ -43,6 +43,8 @@ export type OrganizationInfoDTO = {
    * l'inscription d'un étudiant qui ne les a pas encore réglés.
    */
   defaultRegistrationFee: number;
+  /** Politique de frais d'inscription (une seule fois par étudiant ou à chaque inscription). */
+  registrationFeePolicy: string;
   /**
    * Solde initial / solde de départ de la caisse (FCFA) : montant d'ouverture
    * saisi à l'adoption du logiciel, intégré au calcul de trésorerie
@@ -64,7 +66,8 @@ export type OrganizationFormField =
   | "rccm"
   | "ifu"
   | "defaultRegistrationFee"
-  | "initialCashBalance";
+  | "initialCashBalance"
+  | "registrationFeePolicy";
 
 export type OrganizationFormState = {
   status: "idle" | "success" | "error";
@@ -107,6 +110,7 @@ export async function getOrganizationInfo(): Promise<OrganizationInfoDTO> {
         rccm: true,
         ifu: true,
         defaultRegistrationFee: true,
+        registrationFeePolicy: true,
         initialCashBalance: true,
         createdAt: true,
         _count: {
@@ -134,6 +138,7 @@ export async function getOrganizationInfo(): Promise<OrganizationInfoDTO> {
       rccm: organization.rccm,
       ifu: organization.ifu,
       defaultRegistrationFee: organization.defaultRegistrationFee,
+      registrationFeePolicy: organization.registrationFeePolicy,
       initialCashBalance: organization.initialCashBalance,
       createdAt: organization.createdAt,
       memberCount: organization._count.users,
@@ -284,6 +289,15 @@ export async function updateOrganizationAction(
   const initialCashBalance =
     rawInitialCashBalance !== "" ? Number(rawInitialCashBalance) : 0;
 
+  // Politique de frais d'inscription : ONCE_PER_STUDENT (défaut) ou EVERY_NEW_ENROLLMENT.
+  const rawRegistrationFeePolicy = String(
+    formData.get("registrationFeePolicy") ?? "ONCE_PER_STUDENT"
+  ).trim();
+  const registrationFeePolicy =
+    rawRegistrationFeePolicy === "EVERY_NEW_ENROLLMENT"
+      ? "EVERY_NEW_ENROLLMENT"
+      : "ONCE_PER_STUDENT";
+
   const fieldErrors: Partial<Record<OrganizationFormField, string>> = {};
 
   if (!name) {
@@ -393,6 +407,7 @@ export async function updateOrganizationAction(
         rccm: rccm || null,
         ifu: ifu || null,
         defaultRegistrationFee,
+        registrationFeePolicy,
         initialCashBalance,
       },
     });

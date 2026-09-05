@@ -1,6 +1,7 @@
-import { randomBytes } from "crypto";
+import { randomBytes, createHash } from "crypto";
 
 import bcrypt from "bcryptjs";
+import { cookies } from "next/headers";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
@@ -13,6 +14,17 @@ import {
   isPlatformSuperAdminEmail,
   PLATFORM_SUPER_ADMIN_EMAIL,
 } from "@/lib/platform-admin";
+
+/**
+ * Génère un code de parrainage court et unique (hash tronqué de l'id utilisateur).
+ */
+function generateReferralCode(userId: string): string {
+  return createHash("sha256")
+    .update(userId)
+    .digest("hex")
+    .slice(0, 8)
+    .toUpperCase();
+}
 
 // --------------------------------------
 // Configuration NextAuth v5 (Auth.js)
@@ -391,6 +403,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               },
             });
 
+            // Génère le code de parrainage unique pour le nouvel admin.
+            const referralCode = generateReferralCode(admin.id);
+            await tx.user.update({
+              where: { id: admin.id },
+              data: { referralCode },
+            });
+
             return {
               id: admin.id,
               organizationId: admin.organizationId,
@@ -408,6 +427,44 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               console.error(
                 "[auth/signIn] Échec du seeding de démonstration :",
                 seedError
+              );
+            }
+
+            // 4. Parrainage : si un cookie `eduflow_ref` est présent, lie le nouvel
+            //    utilisateur à son parrain et crée l'enregistrement Referral.
+            try {
+              const cookieStore = await cookies();
+              const refCookie = cookieStore.get("eduflow_ref");
+              if (refCookie?.value) {
+                const refCode = decodeURIComponent(refCookie.value).trim();
+                const referrer = await prisma.user.findUnique({
+                  where: { referralCode: refCode },
+                  select: { id: true },
+                });
+                if (referrer && referrer.id !== createdAdmin.id) {
+                  await prisma.user.update({
+                    where: { id: createdAdmin.id },
+                    data: { referredById: referrer.id },
+                  });
+                  await prisma.referral.create({
+                    data: {
+                      referrerId: referrer.id,
+                      referredId: createdAdmin.id,
+                      status: "PENDING",
+                      rewardAmount: 0,
+                    },
+                  });
+                  console.log(
+                    `[auth/signIn] Parrainage lié : parrain=${referrer.id}, filleul=${createdAdmin.id}`
+                  );
+                }
+                // Supprime le cookie après consommation.
+                cookieStore.delete("eduflow_ref");
+              }
+            } catch (refError) {
+              console.error(
+                "[auth/signIn] Échec du traitement du parrainage :",
+                refError
               );
             }
           }
