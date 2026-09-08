@@ -145,12 +145,12 @@ initialisation réussie.
 
 Le seed crée un compte d'administration :
 
-| Compte                            | Rôle        | Mot de passe  |
-| --------------------------------- | ----------- | ------------- |
-| `superadmin@eduflow.app`          | SUPER_ADMIN | `password123` |
-| `admin@excellence-formation.com`  | ADMIN       | `password123` |
-| `teacher@excellence-formation.com`| TEACHER     | `password123` |
-| `staff@excellence-formation.com`  | STAFF       | `password123` |
+| Compte                            | Rôle        | Connexion                       |
+| --------------------------------- | ----------- | ------------------------------- |
+| `jeanbaptistedegbey10@gmail.com`  | SUPER_ADMIN | Google OAuth (ou `password123` émis par le seed) |
+| `admin@excellence-formation.com`  | ADMIN       | `password123`                   |
+| `teacher@excellence-formation.com`| TEACHER     | `password123`                   |
+| `staff@excellence-formation.com`  | STAFF       | `password123`                   |
 
 ---
 

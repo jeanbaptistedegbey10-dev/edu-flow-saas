@@ -2,22 +2,23 @@
 // Compte Super Admin principal de la plateforme
 // --------------------------------------
 //
-// Email UNIQUE du Super Admin principal (configurable via la variable
-// d'environnement `SUPER_ADMIN_EMAIL`). Cet email est reconnu par :
-// - le seed (`prisma/seed.ts`) qui crée le compte initial ;
+// Email UNIQUE et CODÉ EN DUR du Super Admin principal. Cet email est reconnu
+// par :
+// - le seed (`prisma/seed.ts`) qui `upsert` le compte initial ;
 // - la logique RBAC de connexion Google (`src/auth.ts`) : la première
 //   connexion Google avec cet email provisionne un compte SUPER_ADMIN
 //   (organisation plateforme « EduFlow Platform »), et une connexion
 //   ultérieure rétablit le rôle SUPER_ADMIN si nécessaire.
 //
 // Module pur (aucune dépendance) : importable par le seed comme par auth.ts.
+//
+// SÉCURITÉ : cette valeur est la SEULE autorisée à porter le rôle
+// SUPER_ADMIN. Elle est volontairement codée en dur — aucune variable
+// d'environnement ne doit permettre de promouvoir un autre compte (principe
+// « super admin unique », sans vecteur de configuration).
 
-/** Email du Super Admin principal (défaut : jeanbaptistedegbey10@gmail.com). */
-export const PLATFORM_SUPER_ADMIN_EMAIL = (
-  process.env.SUPER_ADMIN_EMAIL ?? "jeanbaptistedegbey10@gmail.com"
-)
-  .trim()
-  .toLowerCase();
+/** Email UNIQUE du Super Admin principal (codé en dur). */
+export const PLATFORM_SUPER_ADMIN_EMAIL = "jeanbaptistedegbey10@gmail.com";
 
 /** `true` si l'email fourni est celui du Super Admin principal. */
 export function isPlatformSuperAdminEmail(

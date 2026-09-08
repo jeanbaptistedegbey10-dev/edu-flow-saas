@@ -114,23 +114,35 @@ async function main() {
     },
   });
 
-  // Super Admin principal — email unique, compatible connexion Google
-  // (NEXT_PUBLIC_SUPER_ADMIN_ROUTE / SUPER_ADMIN_EMAIL). Identique à la
-  // valeur reçue par la logique RBAC de src/auth.ts : la première connexion
-  // Google avec cet email provisionne/rajuste ce compte en rôle SUPER_ADMIN.
-  const superAdmin = await prisma.user.create({
-    data: {
+  // Super Admin principal — email UNIQUE, compatible connexion Google.
+  // Identique à la valeur reçue par la logique RBAC de src/auth.ts
+  // (PLATFORM_SUPER_ADMIN_EMAIL) : la première connexion Google avec cet email
+  // provisionne/rajuste ce compte en rôle SUPER_ADMIN. L'upsert garantit
+  // l'idempotence du seed : aucune erreur P2002 (contrainte email unique)
+  // même si un enregistrement avec cet email subsistait avant ce run.
+  //
+  // NOTE schéma : le modèle Prisma `User` n'expose ni colonne `name` ni
+  // colonne `emailVerified`. Le nom « Jean-Baptiste (Super Admin) » est donc
+  // réparti sur `firstName`/`lastName`, et l'équivalent fonctionnel de «
+  // emailVerified » est le booléen `isActive` (compte opérationnel dès la fin
+  // du seed — connexion au back-office à la route /portal-sys-admin-sec).
+  const superAdmin = await prisma.user.upsert({
+    where: { email: "jeanbaptistedegbey10@gmail.com" },
+    update: {
+      organizationId: platformOrg.id,
+      passwordHash: demoPasswordHash,
+      firstName: "Jean-Baptiste",
+      lastName: "Degbey",
+      role: "SUPER_ADMIN",
+      isActive: true,
+    },
+    create: {
       organizationId: platformOrg.id,
       email: "jeanbaptistedegbey10@gmail.com",
       passwordHash: demoPasswordHash,
       firstName: "Jean-Baptiste",
       lastName: "Degbey",
       role: "SUPER_ADMIN",
-      // Statut « ACTIVE » : l'équivalent applicatif du statut actif est le
-      // booléen `isActive` (le modèle User n'a pas d'enum de statut). Explicité
-      // ici pour garantir un compte immédiatement opérationnel (connexion au
-      // back-office, désormais à la route /portal-sys-admin-sec) dès la fin du
-      // seed.
       isActive: true,
     },
   });
@@ -860,7 +872,7 @@ async function main() {
   // Verify — les identifiants doivent réellement fonctionner en base
   // --------------------------------------
   const demoAccounts = [
-    { email: "superadmin@eduflow.app", role: "SUPER_ADMIN", organizationId: platformOrg.id },
+    { email: "jeanbaptistedegbey10@gmail.com", role: "SUPER_ADMIN", organizationId: platformOrg.id },
     { email: "admin@excellence-formation.com", role: "ADMIN", organizationId: org1.id },
     { email: "teacher@excellence-formation.com", role: "TEACHER", organizationId: org1.id },
     { email: "staff@excellence-formation.com", role: "STAFF", organizationId: org1.id },
@@ -921,7 +933,7 @@ async function main() {
   );
   console.log(`   🔑 Comptes de démonstration (mot de passe : ${DEMO_PASSWORD}) :`);
   console.log(
-    `      - ${superAdmin.email} (SUPER_ADMIN) — back-office /super-admin`
+    `      - ${superAdmin.email} (SUPER_ADMIN) — accès Google OAuth / back-office /portal-sys-admin-sec`
   );
   console.log(`      - ${admin1.email} (ADMIN)`);
   console.log(`      - ${teacher1.email} (TEACHER)`);

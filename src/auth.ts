@@ -200,6 +200,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
+        // GARDE-FOU « Super Admin unique » : le rôle SUPER_ADMIN est réservé à
+        // l'email hardcodé de la plateforme (PLATFORM_SUPER_ADMIN_EMAIL). Si un
+        // autre compte le portait encore (seed antérieur, donnée corrompue), il
+        // est immédiatement rétrogradé en ADMIN — aucun identifiant ne doit
+        // pouvoir exposer le back-office Super-Admin hors de l'email autorisé.
+        let resolvedRole = user.role;
+
+        if (
+          user.role === "SUPER_ADMIN" &&
+          !isPlatformSuperAdminEmail(user.email)
+        ) {
+          console.warn(
+            `[auth/authorize] SÉCURITÉ : compte ${email} portant un rôle SUPER_ADMIN illégitime → rétrogradation en ADMIN.`
+          );
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { role: "ADMIN" },
+          });
+          resolvedRole = "ADMIN";
+        }
+
         // Les champs `role` et `organizationId` sont propagés dans le token JWT
         // via le callback `jwt` ci-dessous (voir src/types/next-auth.d.ts).
         return {
@@ -207,7 +228,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
           image: user.avatarUrl ?? undefined,
-          role: user.role,
+          role: resolvedRole,
           organizationId: user.organizationId,
         };
       },
@@ -345,10 +366,32 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // 1. Compte existant → simple connexion (+ avatar si manquant).
           const existingUser = await prisma.user.findUnique({
             where: { email },
-            select: { id: true, organizationId: true, avatarUrl: true },
+            select: {
+              id: true,
+              organizationId: true,
+              role: true,
+              avatarUrl: true,
+            },
           });
 
           if (existingUser) {
+            // GARDE-FOU « Super Admin unique » : le rôle SUPER_ADMIN est
+            // réservé à l'email hardcodé de la plateforme. Si un autre email le
+            // porte encore (donnée antérieure), on le rétrograde en ADMIN et on
+            // journalise l'événement avant d'autoriser la connexion.
+            if (
+              existingUser.role === "SUPER_ADMIN" &&
+              !isPlatformSuperAdminEmail(email)
+            ) {
+              console.warn(
+                `[auth/signIn] SÉCURITÉ : compte Google ${email} portant un rôle SUPER_ADMIN illégitime → rétrogradation en ADMIN.`
+              );
+              await prisma.user.update({
+                where: { id: existingUser.id },
+                data: { role: "ADMIN" },
+              });
+            }
+
             if (!existingUser.avatarUrl && user.image) {
               await prisma.user.update({
                 where: { id: existingUser.id },
@@ -530,6 +573,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 token.id = dbUser.id;
                 token.role = dbUser.role;
                 token.organizationId = dbUser.organizationId;
+
+                // GARDE-FOU « Super Admin unique » (défense en profondeur) :
+                // le rôle SUPER_ADMIN n'est propagé dans le JWT QUE pour
+                // l'email hardcodé de la plateforme. Toute autre email le voit
+                // neutralisé en ADMIN, même si la ligne base l'annonce.
+                if (
+                  dbUser.role === "SUPER_ADMIN" &&
+                  !isPlatformSuperAdminEmail(email)
+                ) {
+                  console.warn(
+                    `[auth/jwt] SÉCURITÉ : rôle SUPER_ADMIN neutralisé pour ${email}.`
+                  );
+                  token.role = "ADMIN";
+                }
               }
             } catch (error) {
               console.error(
