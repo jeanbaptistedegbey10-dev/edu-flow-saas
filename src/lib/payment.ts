@@ -1152,7 +1152,8 @@ export async function activateSubscriptionAfterPayment(
     );
 
     // Parrainage : si l'administrateur de cette organisation a été parrainé,
-    // convertit la referral (le filleul a souscrit un paiement réussi).
+    // convertit la referral une seule fois — le parrain reçoit une RÉCOMPENSE
+    // FIXE de 10 000 FCFA (voir src/actions/referral.ts).
     try {
       const { convertReferralOnPayment } = await import("@/actions/referral");
       const orgAdmin = await prisma.user.findFirst({

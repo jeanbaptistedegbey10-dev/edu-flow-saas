@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { auth } from "@/auth";
 import {
+  getOrganizationDataPresence,
   injectDemoDataForOrganization,
   resetOrganizationData,
 } from "@/lib/demo-data";
@@ -38,10 +39,16 @@ export { INITIAL_ACTION_STATE };
 
 /**
  * Injecte le jeu de données de démonstration dans l'organisation courante.
- * Idempotent : retourne `ALREADY_SEEDED` si des données existent déjà.
+ *
+ * - Organisation VIDE : injection directe ;
+ * - Organisation AVEC données : l'écrasement exige la saisie de « CONFIRMER »
+ *   dans le champ `confirmation` — vérifiée CÔTÉ SERVEUR (le garde-fou ne
+ *   dépend jamais du client seul). Une fois confirmée, l'organisation est
+ *   purgée puis ré-injectée.
  */
 export async function injectDemoDataAction(
-  _prevState: DemoDataActionState
+  _prevState: DemoDataActionState,
+  formData?: FormData
 ): Promise<DemoDataActionState> {
   console.log("[demo-data] injectDemoDataAction — début");
 
@@ -72,7 +79,40 @@ export async function injectDemoDataAction(
       };
     }
 
-    // 4. Opérations de données — encapsulées dans le même try/catch global.
+    // 4. ÉCRASEMENT CONFIRMÉ : si l'organisation contient déjà des données,
+    //    l'injection les remplace. Une confirmation mot-clé (CONFIRMER) est
+    //    exigée côté serveur — le garde-fou ne repose jamais sur le seul client.
+    const presence = await getOrganizationDataPresence(context.organizationId);
+
+    if (presence.hasData) {
+      const confirmation = String(
+        formData?.get("confirmation") ?? ""
+      ).trim();
+
+      if (confirmation !== "CONFIRMER") {
+        return {
+          status: "error",
+          message:
+            "Votre organisation contient déjà des données. Tapez CONFIRMER pour les remplacer par le jeu de démonstration (écrasement définitif).",
+        };
+      }
+
+      const reset = await resetOrganizationData(context.organizationId);
+
+      if (!reset.ok) {
+        console.error(
+          "[injectDemoDataAction] Écrasement préalable refusé :",
+          reset.reason
+        );
+        return {
+          status: "error",
+          message:
+            "Impossible d'écraser les données existantes. Veuillez réessayer.",
+        };
+      }
+    }
+
+    // 5. Opérations de données — encapsulées dans le même try/catch global.
     const result = await injectDemoDataForOrganization(
       context.organizationId,
       context.id
@@ -122,9 +162,13 @@ export async function injectDemoDataAction(
  * (étudiants, cours, classes, paiements, dépenses, ventes…) en 1 clic.
  * Réservé aux administrateurs (ADMIN / SUPER_ADMIN). L'organisation et les
  * comptes administrateurs sont conservés.
+ *
+ * Deletion guard + confirmation mot-clé « SUPPRIMER » rejouées côté serveur :
+ * aucune donnée → refus ; confirmation absente/incorrecte → refus.
  */
 export async function resetDemoDataAction(
-  _prevState: DemoDataActionState
+  _prevState: DemoDataActionState,
+  formData?: FormData
 ): Promise<DemoDataActionState> {
   console.log("[demo-data] resetDemoDataAction — début");
 
@@ -163,7 +207,30 @@ export async function resetDemoDataAction(
       };
     }
 
-    // 5. Opérations de données — encapsulées dans le même try/catch global.
+    // 5. Deletion guard : aucune donnée → on refuse (bouton désactivé côté UI,
+    //    mais la garde est rejouée côté serveur pour couvrir tout appel direct).
+    const presence = await getOrganizationDataPresence(context.organizationId);
+
+    if (!presence.hasData) {
+      return {
+        status: "error",
+        message:
+          "Aucune donnée à supprimer : votre organisation est déjà vide.",
+      };
+    }
+
+    // 6. Confirmation mot-clé obligatoire (SUPPRIMER) côté serveur.
+    const confirmation = String(formData?.get("confirmation") ?? "").trim();
+
+    if (confirmation !== "SUPPRIMER") {
+      return {
+        status: "error",
+        message:
+          "Confirmation incorrecte. Tapez SUPPRIMER pour supprimer définitivement toutes les données.",
+      };
+    }
+
+    // 7. Opérations de données — encapsulées dans le même try/catch global.
     const result = await resetOrganizationData(context.organizationId);
 
     if (!result.ok) {

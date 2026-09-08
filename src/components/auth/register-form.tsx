@@ -49,11 +49,12 @@ export function RegisterForm() {
     try {
       // Capture le code de parrainage éventuel présent dans l'URL (?ref=CODE)
       // et le stocke dans un cookie pour le serveur (auth.ts signIn callback).
+      // Durée de vie : 90 jours, comme le cookie posé par le proxy (src/proxy.ts).
       const refCode = searchParams.get("ref");
       if (refCode && refCode.trim().length > 0) {
         document.cookie = `eduflow_ref=${encodeURIComponent(
           refCode.trim()
-        )}; path=/; max-age=86400; SameSite=Lax`;
+        )}; path=/; max-age=${60 * 60 * 24 * 90}; SameSite=Lax`;
       }
       await signIn("google", { callbackUrl: "/dashboard" });
     } catch {

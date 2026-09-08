@@ -175,7 +175,7 @@ export function ReferralProgram({ baseUrl }: { baseUrl: string }) {
         </div>
       ) : (
         <p className="text-xs text-muted-foreground italic">
-          Partagez votre lien pour parrainer d&apos;autres centres et gagner 10 % sur leur premier abonnement.
+          Partagez votre lien pour parrainer d&apos;autres centres et gagner 10 000 FCFA fixes sur leur premier abonnement.
         </p>
       )}
     </section>

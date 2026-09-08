@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { getSuperAdminRoute } from "@/lib/super-admin-route";
+import { getOrganizationDataPresence } from "@/lib/demo-data";
 import {
   getAttendanceTrendAction,
   getDashboardStatsAction,
@@ -71,6 +72,12 @@ export default async function DashboardPage() {
   // démonstration reste réservée aux administrateurs du centre.
   const isAdmin = role === "ADMIN";
 
+  // Deletion guard de la carte démo : l'organisation contient-elle des données
+  // (démonstration ou réelles) ? Sans donnée, « Supprimer la démo » est inactif.
+  const dataPresence = await getOrganizationDataPresence(
+    session?.user?.organizationId
+  );
+
   return (
     <div className="grid gap-6">
       <DashboardOverview
@@ -81,7 +88,7 @@ export default async function DashboardPage() {
       />
 
       {/* Gestion des données de démonstration (injection / réinitialisation) */}
-      <DemoDataCard isAdmin={isAdmin} />
+      <DemoDataCard isAdmin={isAdmin} hasData={dataPresence.hasData} />
     </div>
   );
 }

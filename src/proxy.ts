@@ -47,6 +47,17 @@ const HOME_PATH = "/";
 const DASHBOARD_PATH = "/dashboard";
 
 /**
+ * Cookie de parrainage : posé quand un visiteur arrive avec `?ref=CODE` sur
+ * l'accueil ou la page d'inscription. Consommé (puis supprimé) par le
+ * callback `signIn` (src/auth.ts) lors de la création du compte filleul.
+ */
+const REFERRAL_COOKIE_NAME = "eduflow_ref";
+/** Durée de vie du cookie de parrainage : 90 jours (en secondes). */
+const REFERRAL_COOKIE_MAX_AGE = 60 * 60 * 24 * 90;
+/** Chemins sur lesquels le paramètre `?ref=` est capturé par le proxy. */
+const REFERRAL_TRACKED_PATHS: readonly string[] = [HOME_PATH, "/register"];
+
+/**
  * Route d'administration obfusquée (NEXT_PUBLIC_SUPER_ADMIN_ROUTE,
  * défaut `/portal-sys-admin-sec`). Les variables NEXT_PUBLIC_* sont inlinées
  * au build : la valeur est donc figée au déploiement — cohérente avec le
@@ -158,7 +169,7 @@ function clearInvalidSessionCookies(
   return response;
 }
 
-export async function proxy(request: NextRequest) {
+async function handleProxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   let token = await resolveSessionToken(request);
@@ -272,6 +283,32 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+/**
+ * Point d'entrée du proxy (Next.js 16, ex-middleware).
+ *
+ * Délègue la logique d'accès à `handleProxy`, puis capture le paramètre
+ * `?ref=CODE` sur l'accueil et la page d'inscription pour persister le cookie
+ * de parrainage `eduflow_ref` (90 jours). Le cookie est posé sur TOUTE réponse
+ * (next ou redirection) afin de survivre au flux OAuth Google — le callback
+ * `signIn` (src/auth.ts) le consomme à la création du compte filleul.
+ */
+export async function proxy(request: NextRequest): Promise<NextResponse> {
+  const response = await handleProxy(request);
+
+  const { pathname } = request.nextUrl;
+  const refCode = request.nextUrl.searchParams.get("ref")?.trim();
+
+  if (refCode && REFERRAL_TRACKED_PATHS.includes(pathname)) {
+    response.cookies.set(REFERRAL_COOKIE_NAME, refCode, {
+      path: "/",
+      maxAge: REFERRAL_COOKIE_MAX_AGE,
+      sameSite: "lax",
+    });
+  }
+
+  return response;
+}
+
 export const config = {
   // Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/* et sur la
   // route d'administration obfusquée (par défaut /portal-sys-admin-sec/*),
@@ -295,5 +332,5 @@ export const config = {
   // /dashboard → /login → /dashboard → … (ERR_TOO_MANY_REDIRECTS), liée à un
   // désaccord entre getToken() (proxy) et auth() (page /login). La page /login
   // n'effectue plus, elle-même, aucune redirection serveur → /dashboard.
-  matcher: ["/", "/dashboard/:path*", "/portal-sys-admin-sec/:path*"],
+  matcher: ["/", "/register", "/dashboard/:path*", "/portal-sys-admin-sec/:path*"],
 };

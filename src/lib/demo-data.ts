@@ -227,3 +227,49 @@ export async function resetOrganizationData(
     return { ok: false, reason: "UNKNOWN" };
   }
 }
+/** Résultat du contrôle de présence de données d'une organisation. */
+export type OrganizationDataPresence = {
+  /** `true` si l'organisation contient la moindre donnée (démo ou réelle). */
+  hasData: boolean;
+  /** Nombre de comptes non-administrateurs (comptes de démonstration inclus). */
+  demoAccounts: number;
+};
+
+/**
+ * Indique si une organisation contient des données (démonstration ou métier) :
+ * comptes non-administrateurs, élèves, cours ou classes. Le jeu de
+ * démonstration vivant dans les MÊMES tables que les données réelles (aucun
+ * indicateur `isDemo` en base), la présence de données est le signal utilisé
+ * par la carte « Données de démonstration » pour :
+ *  - activer/désactiver la suppression (« Supprimer la démo » — deletion guard) ;
+ *  - exiger la confirmation mot-clé avant écrasement / suppression.
+ */
+export async function getOrganizationDataPresence(
+  organizationId: string | null | undefined
+): Promise<OrganizationDataPresence> {
+  if (!organizationId) {
+    return { hasData: false, demoAccounts: 0 };
+  }
+
+  try {
+    const [demoAccounts, students, courses, classes] = await Promise.all([
+      prisma.user.count({
+        where: {
+          organizationId,
+          role: { notIn: ["ADMIN", "SUPER_ADMIN"] },
+        },
+      }),
+      prisma.student.count({ where: { organizationId } }),
+      prisma.course.count({ where: { organizationId } }),
+      prisma.class.count({ where: { organizationId } }),
+    ]);
+
+    return {
+      hasData: demoAccounts > 0 || students > 0 || courses > 0 || classes > 0,
+      demoAccounts,
+    };
+  } catch (error) {
+    console.error("[demo-data] Échec du contrôle de présence :", error);
+    return { hasData: false, demoAccounts: 0 };
+  }
+}

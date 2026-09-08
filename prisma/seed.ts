@@ -10,6 +10,25 @@ const demoPasswordHash = bcrypt.hashSync(DEMO_PASSWORD, 10);
 async function main() {
   console.log("🌱 Seeding database...");
 
+  // --------------------------------------
+  // Garde-fou anti-écrasement en production
+  // --------------------------------------
+  // Le seed supprime TOUTES les données existantes. Exécuté automatiquement
+  // pendant un build / un déploiement en production (NODE_ENV=production), il
+  // écraserait une base réelle sans le vouloir (« automatic database reset »).
+  // On refuse donc tant que la base contient des organisations, sauf demande
+  // EXPLICITE via EDUFLOW_SEED_FORCE=1 (reset volontaire d'exploitation).
+  if (process.env.NODE_ENV === "production") {
+    const existingOrganizations = await prisma.organization.count();
+
+    if (existingOrganizations > 0 && process.env.EDUFLOW_SEED_FORCE !== "1") {
+      throw new Error(
+        "[seed] Base non vide en production — refus d'écraser les données. " +
+          "Définissez EDUFLOW_SEED_FORCE=1 UNIQUEMENT pour un reset volontaire."
+      );
+    }
+  }
+
   // Clean existing data (in dependency order)
   await prisma.saleItem.deleteMany();
   await prisma.sale.deleteMany();

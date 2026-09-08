@@ -3,7 +3,15 @@
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
+import { REFERRAL_REWARD_AMOUNT } from "@/lib/referral";
 import { getValidatedSessionContext } from "@/lib/session";
+
+// --------------------------------------
+// Récompense de parrainage
+// --------------------------------------
+// `REFERRAL_REWARD_AMOUNT` (10 000 FCFA) vit dans `@/lib/referral` :
+// la contrainte Next.js interdit d'exporter des constantes depuis un
+// fichier « use server » (build « Only async functions are allowed »).
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -129,7 +137,14 @@ export async function getReferralStats(
  * Met à jour le statut d'une referral en CONVERTED lorsque le filleul
  * souscrit un paiement réussi. Appelée par le webhook de paiement
  * (src/lib/payment.ts → activateSubscriptionAfterPayment).
- * Montant de la récompense = 10 % du montant du premier abonnement (FCFA).
+ *
+ * Montant de la récompense = 10 000 FCFA FIXES (voir REFERRAL_REWARD_AMOUNT),
+ * indépendant du montant du premier abonnement. La conversion n'est effectuée
+ * qu'une seule fois (une referral déjà CONVERTED est ignorée).
+ *
+ * @param userId        Identifiant du filleul (utilisateur administrateur parrainé).
+ * @param paymentAmount Montant du paiement (conservé pour compatibilité d'appel ;
+ *                      la récompense étant fixe, il n'entre plus dans le calcul).
  */
 export async function convertReferralOnPayment(
   userId: string,
@@ -145,7 +160,8 @@ export async function convertReferralOnPayment(
       return;
     }
 
-    const rewardAmount = Math.round(paymentAmount * 0.1); // 10 % de récompense
+    void paymentAmount; // récompense fixe — le montant du paiement n'est plus utilisé.
+    const rewardAmount = REFERRAL_REWARD_AMOUNT; // 10 000 FCFA fixes
 
     await prisma.referral.update({
       where: { id: referral.id },
@@ -156,7 +172,7 @@ export async function convertReferralOnPayment(
     });
 
     console.log(
-      `[referral] Referral ${referral.id} convertie : récompense=${rewardAmount} FCFA`
+      `[referral] Referral ${referral.id} convertie : récompense fixe=${rewardAmount} FCFA`
     );
   } catch (error) {
     console.error(
