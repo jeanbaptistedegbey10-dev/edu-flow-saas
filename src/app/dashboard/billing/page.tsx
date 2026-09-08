@@ -469,7 +469,7 @@ export default async function BillingPage({
       )}
 
       {/* Programme de Parrainage */}
-      <ReferralProgram baseUrl={process.env.NEXT_PUBLIC_BASE_URL ?? "https://eduflow.com"} />
+      <ReferralProgram />
     </main>
   );
 }

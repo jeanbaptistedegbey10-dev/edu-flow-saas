@@ -3,7 +3,7 @@
 import * as React from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { Loader2Icon, SparklesIcon } from "lucide-react";
+import { GiftIcon, Loader2Icon, LockIcon, SparklesIcon } from "lucide-react";
 
 /**
  * Inline Google logo icon (multi-color brand mark).
@@ -28,6 +28,31 @@ function GoogleIcon({ className }: { className?: string }) {
 
 import { Button } from "@/components/ui/button";
 
+/** Nom du cookie de parrainage — cohérent avec src/proxy.ts et src/auth.ts. */
+const REFERRAL_COOKIE_NAME = "eduflow_ref";
+/** Durée de vie du cookie de parrainage : 90 jours (en secondes). */
+const REFERRAL_COOKIE_MAX_AGE = 60 * 60 * 24 * 90;
+
+/**
+ * Lit le cookie `eduflow_ref` côté client. Utilisé en secours quand le
+ * paramètre d'URL `?ref=` est absent mais que le cookie a déjà été posé
+ * (par le proxy ou un passage précédent sur /register?ref=CODE).
+ */
+function readReferralCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const entry = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${REFERRAL_COOKIE_NAME}=`));
+  if (!entry) return null;
+  try {
+    return (
+      decodeURIComponent(entry.split("=").slice(1).join("=")).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Inscription — UNIQUE voie de création de compte Organisme / Admin (Phase 1).
  *
@@ -41,21 +66,36 @@ import { Button } from "@/components/ui/button";
 export function RegisterForm() {
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [referralCode, setReferralCode] = React.useState<string>("");
   const searchParams = useSearchParams();
+
+  // Code de parrainage éventuel détecté dans l'URL `/register?ref=CODE`.
+  const refParam = searchParams.get("ref")?.trim() ?? "";
+
+  // Au montage : le code de parrainage est automatiquement détecté, affiché
+  // dans un champ verrouillé et persisté dans le cookie `eduflow_ref` pour le
+  // serveur (auth.ts signIn callback). Priorité au paramètre d'URL `?ref=CODE` ;
+  // sinon, le cookie déjà posé par le proxy (src/proxy.ts) est relu en secours.
+  // Durée de vie : 90 jours, comme le cookie posé côté proxy.
+  React.useEffect(() => {
+    if (refParam) {
+      setReferralCode(refParam);
+      document.cookie = `${REFERRAL_COOKIE_NAME}=${encodeURIComponent(
+        refParam
+      )}; path=/; max-age=${REFERRAL_COOKIE_MAX_AGE}; SameSite=Lax`;
+    } else {
+      const stored = readReferralCookie();
+      if (stored) setReferralCode(stored);
+    }
+  }, [refParam]);
 
   async function handleGoogleSignIn() {
     setError(null);
     setPending(true);
     try {
-      // Capture le code de parrainage éventuel présent dans l'URL (?ref=CODE)
-      // et le stocke dans un cookie pour le serveur (auth.ts signIn callback).
-      // Durée de vie : 90 jours, comme le cookie posé par le proxy (src/proxy.ts).
-      const refCode = searchParams.get("ref");
-      if (refCode && refCode.trim().length > 0) {
-        document.cookie = `eduflow_ref=${encodeURIComponent(
-          refCode.trim()
-        )}; path=/; max-age=${60 * 60 * 24 * 90}; SameSite=Lax`;
-      }
+      // Le code de parrainage éventuel a déjà été détecté et verrouillé au
+      // montage — le cookie `eduflow_ref` est donc déjà posé pour le callback
+      // signIn (src/auth.ts) à la création du compte filleul.
       await signIn("google", { callbackUrl: "/dashboard" });
     } catch {
       setError(
@@ -71,6 +111,31 @@ export function RegisterForm() {
         <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </p>
+      ) : null}
+
+      {referralCode ? (
+        <div className="rounded-lg border bg-muted/30 p-3">
+          <div className="flex items-center gap-2">
+            <GiftIcon className="size-4 text-primary" />
+            <span className="text-xs font-medium text-muted-foreground">
+              Code de parrainage appliqué
+            </span>
+          </div>
+          <div className="relative mt-2.5">
+            <LockIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              readOnly
+              value={referralCode}
+              aria-label="Code de parrainage (verrouillé)"
+              className="w-full rounded-md border bg-background py-2 pl-9 pr-3 font-mono text-sm font-semibold text-foreground"
+            />
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Votre parrain recevra <strong>10 000 FCFA</strong> lors de votre
+            premier abonnement. Code verrouillé — non modifiable.
+          </p>
+        </div>
       ) : null}
 
       <Button

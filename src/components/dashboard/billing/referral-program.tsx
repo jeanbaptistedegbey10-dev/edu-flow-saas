@@ -34,7 +34,23 @@ type ReferralStats = {
   referrals: ReferralDTO[];
 };
 
-export function ReferralProgram({ baseUrl }: { baseUrl: string }) {
+/**
+ * URL de base DYNAMIQUE de l'application.
+ *
+ * Côté client, on utilise l'origine réelle (`window.location.origin`) pour que
+ * le lien de parrainage pointe toujours vers l'instance courante (localhost,
+ * déploiement Vercel, self-hosted Docker…), quel que soit le domaine public.
+ * Sinon (rendu serveur / environnement non navigateur), on retombe sur
+ * `NEXT_PUBLIC_APP_URL` puis une chaîne vide.
+ */
+function getReferralBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_APP_URL || "";
+}
+
+export function ReferralProgram() {
   const [stats, setStats] = React.useState<ReferralStats | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [copied, setCopied] = React.useState(false);
@@ -45,7 +61,7 @@ export function ReferralProgram({ baseUrl }: { baseUrl: string }) {
     async function load() {
       setLoading(true);
       try {
-        const data = await getReferralStats(baseUrl);
+        const data = await getReferralStats(getReferralBaseUrl());
         if (active && data) setStats(data);
       } catch {
         // ignore
@@ -55,13 +71,13 @@ export function ReferralProgram({ baseUrl }: { baseUrl: string }) {
     }
     load();
     return () => { active = false; };
-  }, [baseUrl]);
+  }, []);
 
   const handleActivate = async () => {
     setActivating(true);
     try {
       await ensureReferralCode();
-      const data = await getReferralStats(baseUrl);
+      const data = await getReferralStats(getReferralBaseUrl());
       if (data) setStats(data);
     } catch {
       // ignore
@@ -175,7 +191,9 @@ export function ReferralProgram({ baseUrl }: { baseUrl: string }) {
         </div>
       ) : (
         <p className="text-xs text-muted-foreground italic">
-          Partagez votre lien pour parrainer d&apos;autres centres et gagner 10 000 FCFA fixes sur leur premier abonnement.
+          Partagez votre lien pour parrainer d&apos;autres centres et gagnez{" "}
+          <strong className="font-semibold text-foreground">10 000 FCFA</strong> sur leur
+          premier abonnement.
         </p>
       )}
     </section>
