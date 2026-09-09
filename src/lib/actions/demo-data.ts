@@ -139,91 +139,22 @@ async function resolveDemoMutationContext(
 // ---------------------------------------------------------------------------
 // Étapes de nettoyage pas-à-pas (une requête HTTP par étape)
 // ---------------------------------------------------------------------------
+// ORDRE « Leaves to Root » : les dépendances (Task, Payment, Document…) sont
+// supprimées EN PREMIER, puis les cours/évaluations, enfin les racines
+// (étudiants, utilisateurs). Cet ordre évite les violations de contraintes
+// foreign key (P2003/P2014), notamment Task.createdBy → User (onDelete: Restrict).
 
 /**
- * ÉTAPE 1 — Nettoyage des étudiants et de la scolarité.
+ * ÉTAPE 1 — Dépendances & financier (Feuilles / Leaves).
  *
- * Requête courte (< 3 s, transaction Prisma bornée) et idempotente : notes,
- * affectations de classes, inscriptions aux cours, logements puis étudiants.
+ * Requête courte (< 3 s, transaction Prisma bornée) et idempotente :
+ * paiements, ventes POS, documents, salaires, dépenses, tâches, étapes voyage,
+ * dossiers voyage & workflows, catalogue POS, comptes non-admin puis rôles.
+ *
+ * DOIT ÊTRE EXÉCUTÉ EN PREMIER : supprime les tâches (Task) avant les
+ * utilisateurs (User) pour respecter la contrainte `onDelete: Restrict`.
  * Vérifications serveur : session, garde d'écriture, rôle admin et
  * confirmation mot-clé (SUPPRIMER ou CONFIRMER selon le flux appelant).
- */
-export async function resetStudentsStepAction(
-  _prevState: DemoDataActionState,
-  formData?: FormData
-): Promise<DemoDataActionState> {
-  try {
-    const resolved = await resolveDemoMutationContext(formData);
-    if (!resolved.ok) return resolved.state;
-
-    const counts = await resetStudentsAndSchoolingData(
-      resolved.organizationId
-    );
-
-    revalidatePath("/dashboard");
-
-    return {
-      status: "success",
-      message: "Élèves et scolarité nettoyés.",
-      counts,
-    };
-  } catch (error: any) {
-    if (isNextRedirectError(error)) throw error;
-
-    console.error("[resetStudentsStepAction] Échec de l'étape 1 :", error);
-    return {
-      status: "error",
-      message:
-        error?.message ||
-        "Une erreur est survenue lors du nettoyage des étudiants et de la scolarité.",
-    };
-  }
-}
-
-/**
- * ÉTAPE 2 — Suppression des cours, évaluations et présences.
- *
- * Requête courte (< 3 s, transaction Prisma bornée) et idempotente :
- * présences, cahier de texte, sessions d'évaluation, classes puis cours.
- */
-export async function resetCoursesStepAction(
-  _prevState: DemoDataActionState,
-  formData?: FormData
-): Promise<DemoDataActionState> {
-  try {
-    const resolved = await resolveDemoMutationContext(formData);
-    if (!resolved.ok) return resolved.state;
-
-    const counts = await resetCoursesAndAssessmentsData(
-      resolved.organizationId
-    );
-
-    revalidatePath("/dashboard");
-
-    return {
-      status: "success",
-      message: "Cours, évaluations et présences supprimés.",
-      counts,
-    };
-  } catch (error: any) {
-    if (isNextRedirectError(error)) throw error;
-
-    console.error("[resetCoursesStepAction] Échec de l'étape 2 :", error);
-    return {
-      status: "error",
-      message:
-        error?.message ||
-        "Une erreur est survenue lors de la suppression des cours, évaluations et présences.",
-    };
-  }
-}
-
-/**
- * ÉTAPE 3 — Réinitialisation des données financières et paramètres.
- *
- * Requête courte (< 3 s, transaction Prisma bornée) et idempotente :
- * paiements, ventes POS, documents, salaires, dépenses, tâches, dossiers
- * voyage & workflows, catalogue POS, comptes non-admin puis rôles.
  */
 export async function resetFinancialStepAction(
   _prevState: DemoDataActionState,
@@ -241,18 +172,100 @@ export async function resetFinancialStepAction(
 
     return {
       status: "success",
-      message: "Données financières et paramètres réinitialisés.",
+      message: `Données financières et dépendances supprimées : ${counts.payments} paiements, ${counts.tasks} tâches.`,
       counts,
     };
   } catch (error: any) {
     if (isNextRedirectError(error)) throw error;
 
-    console.error("[resetFinancialStepAction] Échec de l'étape 3 :", error);
+    console.error("[resetFinancialStepAction] Échec de l'étape 1 (dépendances/financier) :", error);
     return {
       status: "error",
       message:
         error?.message ||
-        "Une erreur est survenue lors de la réinitialisation des données financières et paramètres.",
+        "Une erreur est survenue lors de la suppression des dépendances et données financières.",
+    };
+  }
+}
+
+/**
+ * ÉTAPE 2 — Cours, évaluations et présences (Intermédiaires).
+ *
+ * Requête courte (< 3 s, transaction Prisma bornée) et idempotente :
+ * présences, cahier de texte, sessions d'évaluation, classes puis cours.
+ *
+ * S'EXÉCUTE APRÈS les dépendances (Étape 1) et AVANT les racines (Étape 3).
+ */
+export async function resetCoursesStepAction(
+  _prevState: DemoDataActionState,
+  formData?: FormData
+): Promise<DemoDataActionState> {
+  try {
+    const resolved = await resolveDemoMutationContext(formData);
+    if (!resolved.ok) return resolved.state;
+
+    const counts = await resetCoursesAndAssessmentsData(
+      resolved.organizationId
+    );
+
+    revalidatePath("/dashboard");
+
+    return {
+      status: "success",
+      message: `Cours, évaluations et présences supprimés : ${counts.courses} cours, ${counts.classes} classes.`,
+      counts,
+    };
+  } catch (error: any) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[resetCoursesStepAction] Échec de l'étape 2 (cours/évaluations) :", error);
+    return {
+      status: "error",
+      message:
+        error?.message ||
+        "Une erreur est survenue lors de la suppression des cours, évaluations et présences.",
+    };
+  }
+}
+
+/**
+ * ÉTAPE 3 — Étudiants & scolarité (Racines / Root records).
+ *
+ * Requête courte (< 3 s, transaction Prisma bornée) et idempotente : notes,
+ * affectations de classes, inscriptions aux cours, logements, étudiants puis
+ * parrainages.
+ *
+ * DOIT ÊTRE EXÉCUTÉ EN DERNIER : les étudiants sont référencés par de nombreuses
+ * tables enfants qui doivent avoir été supprimées auparavant (Étapes 1 et 2).
+ */
+export async function resetStudentsStepAction(
+  _prevState: DemoDataActionState,
+  formData?: FormData
+): Promise<DemoDataActionState> {
+  try {
+    const resolved = await resolveDemoMutationContext(formData);
+    if (!resolved.ok) return resolved.state;
+
+    const counts = await resetStudentsAndSchoolingData(
+      resolved.organizationId
+    );
+
+    revalidatePath("/dashboard");
+
+    return {
+      status: "success",
+      message: `Élèves et scolarité nettoyés : ${counts.students} élèves, ${counts.housings} logements.`,
+      counts,
+    };
+  } catch (error: any) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[resetStudentsStepAction] Échec de l'étape 3 (étudiants/scolarité) :", error);
+    return {
+      status: "error",
+      message:
+        error?.message ||
+        "Une erreur est survenue lors du nettoyage des étudiants et de la scolarité.",
     };
   }
 }
@@ -464,29 +477,34 @@ export async function resetDemoDataAction(
     }
 
     // 7. Opérations de données — trois étapes EXÉCUTÉES SÉQUENTIELLEMENT
-    //    (une requête HTTP par étape) pour éviter les conflits de verrouillage
-    //    foreign key. Chaque étape est entourée d'un try/catch qui retourne un
-    //    état d'erreur explicite au lieu de propager une exception non gérée.
-    let step1Result: Awaited<ReturnType<typeof resetStudentsAndSchoolingData>>;
+    //    (une requête HTTP par étape) dans l'ordre « Leaves to Root » :
+    //      Étape 1 = dépendances/financier (Task, Payment, Document, User non-admin…)
+    //      Étape 2 = cours, évaluations, présences, classes
+    //      Étape 3 = étudiants, parrainages (racines)
+    //    Cet ordre évite les violations de contraintes foreign key (P2003/P2014),
+    //    notamment Task.createdBy → User (onDelete: Restrict).
+    //    Chaque étape est entourée d'un try/catch qui retourne un état d'erreur
+    //    explicite au lieu de propager une exception non gérée (Minified React error #441).
+    let step1Result: Awaited<ReturnType<typeof resetFinancialAndSettingsData>>;
     let step2Result: Awaited<ReturnType<typeof resetCoursesAndAssessmentsData>>;
-    let step3Result: Awaited<ReturnType<typeof resetFinancialAndSettingsData>>;
+    let step3Result: Awaited<ReturnType<typeof resetStudentsAndSchoolingData>>;
 
     try {
-      step1Result = await resetStudentsAndSchoolingData(context.organizationId);
+      step1Result = await resetFinancialAndSettingsData(context.organizationId);
     } catch (error: unknown) {
-      console.error("[resetDemoDataAction] Étape 1 échouée :", error);
+      console.error("[resetDemoDataAction] Étape 1 (financier/dépendances) échouée :", error);
       return {
         status: "error",
         message:
           (error instanceof Error && error.message) ||
-          "Échec de l'étape 1 (nettoyage des étudiants et de la scolarité).",
+          "Échec de l'étape 1 (suppression des données financières et dépendances).",
       };
     }
 
     try {
       step2Result = await resetCoursesAndAssessmentsData(context.organizationId);
     } catch (error: unknown) {
-      console.error("[resetDemoDataAction] Étape 2 échouée :", error);
+      console.error("[resetDemoDataAction] Étape 2 (cours/évaluations) échouée :", error);
       return {
         status: "error",
         message:
@@ -496,14 +514,14 @@ export async function resetDemoDataAction(
     }
 
     try {
-      step3Result = await resetFinancialAndSettingsData(context.organizationId);
+      step3Result = await resetStudentsAndSchoolingData(context.organizationId);
     } catch (error: unknown) {
-      console.error("[resetDemoDataAction] Étape 3 échouée :", error);
+      console.error("[resetDemoDataAction] Étape 3 (étudiants/scolarité) échouée :", error);
       return {
         status: "error",
         message:
           (error instanceof Error && error.message) ||
-          "Échec de l'étape 3 (réinitialisation des données financières et paramètres).",
+          "Échec de l'étape 3 (suppression des étudiants et de la scolarité).",
       };
     }
 

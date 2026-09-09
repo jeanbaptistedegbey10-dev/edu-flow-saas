@@ -99,6 +99,7 @@ export type DemoDataResetCounts = {
   attendances: number;
   documents: number;
   travelProcedures: number;
+  travelSteps: number;
   demoUsers: number;
   // Détail par étape (retourné par chaque sous-opération).
   classEnrollments: number;
@@ -133,6 +134,7 @@ function emptyResetCounts(): DemoDataResetCounts {
     attendances: 0,
     documents: 0,
     travelProcedures: 0,
+    travelSteps: 0,
     demoUsers: 0,
     classEnrollments: 0,
     enrollments: 0,
@@ -168,11 +170,14 @@ export function mergeResetCounts(...steps: DemoDataResetCounts[]): DemoDataReset
 const RESET_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
 
 /**
- * ÉTAPE 1 — Étudiants & scolarité.
+ * ÉTAPE 3 — Étudiants & scolarité (Racines / Root records).
  *
  * Supprime : notes, affectations de classes, inscriptions aux cours, logements
- * étudiants, puis les étudiants eux-mêmes (les tables « enfants » restantes —
- * présences, documents, paiements… — sont propagées par cascade / mises à null).
+ * étudiants, puis les étudiants eux-mêmes et les parrainages.
+ *
+ * DOIT ÊTRE EXÉCUTÉ EN DERNIER : les étudiants sont référencés par de nombreuses
+ * tables enfants (présences, documents, paiements, étapes voyage…) qui doivent
+ * avoir été supprimées auparavant (Étapes 1 et 2).
  *
  * Transaction courte et idempotente : ré-exécutable sans effet de bord.
  */
@@ -217,10 +222,12 @@ export async function resetStudentsAndSchoolingData(
 }
 
 /**
- * ÉTAPE 2 — Cours, évaluations & présences.
+ * ÉTAPE 2 — Cours, évaluations & présences (Intermédiaires / Intermediate records).
  *
  * Supprime : présences, cahier de texte, sessions d'évaluation (modules et
  * notes restantes par cascade), puis classes et cours.
+ *
+ * S'exécute APRÈS les dépendances (Étape 1) et AVANT les racines (Étape 3).
  */
 export async function resetCoursesAndAssessmentsData(
   organizationId: string
@@ -260,13 +267,17 @@ export async function resetCoursesAndAssessmentsData(
 }
 
 /**
- * ÉTAPE 3 — Données financières & paramètres.
+ * ÉTAPE 1 — Données financières, dépendances & paramètres (Feuilles / Leaves).
  *
- * Supprime : paiements, ventes POS, documents, salaires, dépenses, tâches,
+ * Supprime les enregistrements enfants / dépendances AVANT les racines :
+ * paiements, ventes POS, documents, salaires, dépenses, tâches, étapes voyage,
  * dossiers voyage & workflows, catalogue POS, comptes non-administrateurs puis
  * rôles personnalisés. Les tables liées à un `User` par une contrainte
  * `Restrict` (ventes, dépenses, tâches) sont purgées AVANT la suppression des
  * comptes de démonstration.
+ *
+ * DOIT ÊTRE EXÉCUTÉ EN PREMIER pour respecter les contraintes `Restrict`
+ * (notamment `Task.createdBy` → `User`).
  */
 export async function resetFinancialAndSettingsData(
   organizationId: string
@@ -275,23 +286,23 @@ export async function resetFinancialAndSettingsData(
     async (tx) => {
       const counts = emptyResetCounts();
 
-      // Paiements (recettes comptabilisées).
+      // 1. Paiements (recettes comptabilisées) — dépendent de Student/Enrollment.
       counts.payments = (
         await tx.payment.deleteMany({ where: { organizationId } })
       ).count;
 
-      // POS — lignes de vente (avant produits, contrainte Restrict) puis reçus.
+      // 2. POS — lignes de vente (avant produits, contrainte Restrict) puis reçus.
       await tx.saleItem.deleteMany({ where: { sale: { organizationId } } });
       counts.sales = (
         await tx.sale.deleteMany({ where: { organizationId } })
       ).count;
 
-      // Pièces jointes / documents (visa et étudiants).
+      // 3. Pièces jointes / documents (visa et étudiants).
       counts.documents = (
         await tx.document.deleteMany({ where: { organizationId } })
       ).count;
 
-      // Salaires puis dépenses (avant suppression des comptes, Restrict).
+      // 4. Salaires puis dépenses (avant suppression des comptes, Restrict).
       counts.payrolls = (
         await tx.payroll.deleteMany({ where: { organizationId } })
       ).count;
@@ -299,12 +310,12 @@ export async function resetFinancialAndSettingsData(
         await tx.expense.deleteMany({ where: { organizationId } })
       ).count;
 
-      // Tâches (créées par un User → Restrict).
+      // 5. Tâches (créées par un User → Restrict) — DOIT AVANT User.
       counts.tasks = (
         await tx.task.deleteMany({ where: { organizationId } })
       ).count;
 
-      // Pipeline voyage : étapes, modèles de workflow puis dossiers.
+      // 6. Pipeline voyage : modèles de workflow, étapes de workflow puis dossiers.
       counts.workflowStages = (
         await tx.workflowStage.deleteMany({ where: { organizationId } })
       ).count;
@@ -315,7 +326,7 @@ export async function resetFinancialAndSettingsData(
         await tx.travelProcedure.deleteMany({ where: { organizationId } })
       ).count;
 
-      // Catalogue POS : produits (avant catégories) puis catégories.
+      // 7. Catalogue POS : produits (avant catégories) puis catégories.
       counts.productServices = (
         await tx.productService.deleteMany({ where: { organizationId } })
       ).count;
@@ -323,8 +334,8 @@ export async function resetFinancialAndSettingsData(
         await tx.productCategory.deleteMany({ where: { organizationId } })
       ).count;
 
-      // Comptes de démonstration non-administrateurs (les ADMIN /
-      // SUPER_ADMIN sont conservés) puis rôles personnalisés.
+      // 8. Comptes de démonstration non-administrateurs (les ADMIN /
+      //    SUPER_ADMIN sont conservés) — APRÈS Task (Restrict).
       counts.demoUsers = (
         await tx.user.deleteMany({
           where: {
@@ -333,6 +344,8 @@ export async function resetFinancialAndSettingsData(
           },
         })
       ).count;
+
+      // 9. Rôles personnalisés.
       counts.customRoles = (
         await tx.customRole.deleteMany({ where: { organizationId } })
       ).count;
@@ -367,10 +380,12 @@ export async function resetOrganizationData(
   }
 
   try {
+    // Ordre « Leaves to Root » : dépendances d'abord (Task avant User via Restrict),
+    // puis intermédiaires (cours/évaluations), enfin racines (étudiants/utilisateurs).
     const deleted = mergeResetCounts(
-      await resetStudentsAndSchoolingData(organizationId),
+      await resetFinancialAndSettingsData(organizationId),
       await resetCoursesAndAssessmentsData(organizationId),
-      await resetFinancialAndSettingsData(organizationId)
+      await resetStudentsAndSchoolingData(organizationId)
     );
 
     return { ok: true, deleted };
