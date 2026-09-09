@@ -42,6 +42,16 @@ export type StudentDTO = {
   /** Classe / cohorte active de l'étudiant. */
   currentClassId: string | null;
   currentClassName: string | null;
+  /** Indique si l'étudiant est autonome (s'assume lui-même financièrement). */
+  isSelfFinanced: boolean;
+  /** Nom du parent / tuteur (requis si non autonome). */
+  parentName: string | null;
+  /** Lien avec l'étudiant (Père, Mère, Tuteur, etc.). */
+  parentRelation: string | null;
+  /** Numéro de téléphone principal du parent / tuteur. */
+  parentPhone1: string | null;
+  /** Numéro de téléphone secondaire du parent / tuteur (optionnel). */
+  parentPhone2: string | null;
   createdAt: Date;
 };
 
@@ -55,7 +65,12 @@ export type StudentFormField =
   | "discount"
   | "discountType"
   | "legacyPaidAmount"
-  | "classId";
+  | "classId"
+  | "isSelfFinanced"
+  | "parentName"
+  | "parentRelation"
+  | "parentPhone1"
+  | "parentPhone2";
 
 export type StudentFormState = {
   status: "idle" | "success" | "error";
@@ -241,6 +256,11 @@ type ParsedStudentInput =
         netAmount: number | null;
         legacyPaidAmount: number;
         legacyExcludeFromJournal: boolean;
+        isSelfFinanced: boolean;
+        parentName: string | null;
+        parentRelation: string | null;
+        parentPhone1: string | null;
+        parentPhone2: string | null;
       };
     }
   | { ok: false; fieldErrors: Partial<Record<StudentFormField, string>> };
@@ -251,6 +271,11 @@ function parseStudentForm(formData: FormData): ParsedStudentInput {
   const email = String(formData.get("email") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();
   const status = String(formData.get("status") ?? "").trim();
+  const isSelfFinanced = formData.get("isSelfFinanced") === "on";
+  const parentName = String(formData.get("parentName") ?? "").trim();
+  const parentRelation = String(formData.get("parentRelation") ?? "").trim();
+  const parentPhone1 = String(formData.get("parentPhone1") ?? "").trim();
+  const parentPhone2 = String(formData.get("parentPhone2") ?? "").trim();
 
   const fieldErrors: Partial<Record<StudentFormField, string>> = {};
 
@@ -280,6 +305,19 @@ function parseStudentForm(formData: FormData): ParsedStudentInput {
     fieldErrors.status = "Le statut sélectionné est invalide.";
   }
 
+  // Validation des champs parentaux si l'étudiant n'est pas autonome
+  if (!isSelfFinanced) {
+    if (!parentName) {
+      fieldErrors.parentName = "Le nom du parent / tuteur est requis.";
+    }
+    if (!parentRelation) {
+      fieldErrors.parentRelation = "Le lien avec l'étudiant est requis.";
+    }
+    if (!parentPhone1) {
+      fieldErrors.parentPhone1 = "Le téléphone du parent / tuteur est requis.";
+    }
+  }
+
   const financials = parseFinancialFields(formData, fieldErrors);
 
   if (Object.keys(fieldErrors).length > 0) {
@@ -294,6 +332,11 @@ function parseStudentForm(formData: FormData): ParsedStudentInput {
       email: email || null,
       phone,
       status: status as StudentStatus,
+      isSelfFinanced,
+      parentName: parentName || null,
+      parentRelation: parentRelation || null,
+      parentPhone1: parentPhone1 || null,
+      parentPhone2: parentPhone2 || null,
       ...financials,
     },
   };
@@ -485,6 +528,16 @@ export type StudentDetailDTO = {
   currentClassName: string | null;
   /** Intitulé du cours porteur de la classe active (bulletins, attestations). */
   currentCourseTitle: string | null;
+  /** Indique si l'étudiant est autonome (s'assume lui-même financièrement). */
+  isSelfFinanced: boolean;
+  /** Nom du parent / tuteur (requis si non autonome). */
+  parentName: string | null;
+  /** Lien avec l'étudiant (Père, Mère, Tuteur, etc.). */
+  parentRelation: string | null;
+  /** Numéro de téléphone principal du parent / tuteur. */
+  parentPhone1: string | null;
+  /** Numéro de téléphone secondaire du parent / tuteur (optionnel). */
+  parentPhone2: string | null;
   payments: StudentPaymentDTO[];
 };
 
@@ -522,6 +575,11 @@ export async function getStudentDetail(
         legacyAmountInCashJournal: true,
         hasPaidRegistrationFee: true,
         currentClassId: true,
+        isSelfFinanced: true,
+        parentName: true,
+        parentRelation: true,
+        parentPhone1: true,
+        parentPhone2: true,
         currentClass: {
           select: {
             name: true,
@@ -589,6 +647,11 @@ export async function getStudentDetail(
       legacyAmountInCashJournal,
       hasPaidRegistrationFee: student.hasPaidRegistrationFee,
       currentClassId: student.currentClassId,
+      isSelfFinanced: student.isSelfFinanced,
+      parentName: student.parentName,
+      parentRelation: student.parentRelation,
+      parentPhone1: student.parentPhone1,
+      parentPhone2: student.parentPhone2,
       currentClassName: student.currentClass?.name ?? null,
       currentCourseTitle: student.currentClass?.course.title ?? null,
       paidAmount,
@@ -674,6 +737,11 @@ export async function getStudents(): Promise<StudentDTO[]> {
         legacyAmountInCashJournal: true,
         hasPaidRegistrationFee: true,
         currentClassId: true,
+        isSelfFinanced: true,
+        parentName: true,
+        parentRelation: true,
+        parentPhone1: true,
+        parentPhone2: true,
         currentClass: { select: { name: true } },
         createdAt: true,
       },
@@ -695,6 +763,11 @@ export async function getStudents(): Promise<StudentDTO[]> {
       legacyAmountInCashJournal: student.legacyAmountInCashJournal,
       hasPaidRegistrationFee: student.hasPaidRegistrationFee,
       currentClassId: student.currentClassId,
+      isSelfFinanced: student.isSelfFinanced,
+      parentName: student.parentName,
+      parentRelation: student.parentRelation,
+      parentPhone1: student.parentPhone1,
+      parentPhone2: student.parentPhone2,
       currentClassName: student.currentClass?.name ?? null,
       createdAt: student.createdAt,
     }));
@@ -817,12 +890,14 @@ export async function createStudentAction(
             discount: financials.discount,
             discountType: financials.discountType,
             netAmount: financials.netAmount,
-            // Paiements antérieurs hors système : mémorisés sur la fiche
-            // (informatifs par défaut, exclus du journal de caisse courant).
             legacyPaidAmount: financials.legacyPaidAmount,
             legacyAmountInCashJournal: legacyInJournal,
-            // Les frais d'inscription sont réglés dès la création.
             hasPaidRegistrationFee: true,
+            isSelfFinanced: parsed.data.isSelfFinanced,
+            parentName: parsed.data.parentName,
+            parentRelation: parsed.data.parentRelation,
+            parentPhone1: parsed.data.parentPhone1,
+            parentPhone2: parsed.data.parentPhone2,
             ...(targetClass ? { currentClassId: targetClass.id } : {}),
           },
         });

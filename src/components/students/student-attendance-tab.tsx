@@ -1,8 +1,10 @@
+import * as React from "react";
 import {
   CalendarDaysIcon,
   CalendarX2Icon,
   ClipboardListIcon,
   Clock4Icon,
+  EyeIcon,
   MailCheckIcon,
 } from "lucide-react";
 
@@ -20,6 +22,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 // Formatage déterministe (locale + fuseau fixes) pour éviter tout écart
@@ -35,7 +45,98 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 const BADGE_BASE_CLASSES =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
 
-/** Carte statistique compacte du bandeau de synthèse. */
+/** Modal d'affichage du justificatif pour une absence/excuse. */
+function JustificationModal({
+  entry,
+  open,
+  onOpenChange,
+}: {
+  entry: StudentAttendanceEntryDTO | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  if (!entry) return null;
+
+  const hasJustification = entry.notes && entry.notes.trim().length > 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <EyeIcon className="size-4" />
+            Voir justificatif
+          </DialogTitle>
+          <DialogDescription>
+            Détails de l'émargement du {dateFormatter.format(entry.date)}.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          {/* Informations de base */}
+          <div className="grid gap-2 rounded-md border bg-muted/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">
+                Date
+              </span>
+              <span className="text-sm font-medium">
+                {dateFormatter.format(entry.date)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">
+                Cours
+              </span>
+              <span className="text-sm font-medium">{entry.courseTitle}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">
+                Classe
+              </span>
+              <span className="text-sm font-medium">
+                {entry.className ?? "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">
+                Statut
+              </span>
+              <span
+                className={cn(
+                  BADGE_BASE_CLASSES,
+                  getAttendanceStatusBadgeClass(entry.status)
+                )}
+              >
+                {getAttendanceStatusLabel(entry.status)}
+              </span>
+            </div>
+          </div>
+
+          {/* Justificatif */}
+          {hasJustification ? (
+            <div className="rounded-md border bg-amber-50/50 p-3 dark:bg-amber-500/10">
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                Justification / Remarque
+              </p>
+              <p className="mt-1 text-sm text-amber-900 dark:text-amber-300">
+                {entry.notes}
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-md border bg-muted/40 p-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                Aucune justification fournie
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Aucune remarque ou document joint pour cet émargement.
+              </p>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 function AttendanceStatCard({
   icon,
   label,
@@ -100,6 +201,17 @@ export function StudentAttendanceTab({
       ? Math.round((presentishCount / entries.length) * 100)
       : null;
 
+  // État local pour la modale de justificatif
+  const [selectedEntry, setSelectedEntry] = React.useState<
+    StudentAttendanceEntryDTO | null
+  >(null);
+  const [modalOpen, setModalOpen] = React.useState(false);
+
+  const handleViewJustification = (entry: StudentAttendanceEntryDTO) => {
+    setSelectedEntry(entry);
+    setModalOpen(true);
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {/* Synthèse des émargements */}
@@ -161,6 +273,7 @@ export function StudentAttendanceTab({
                 <TableHead>Classe</TableHead>
                 <TableHead>Statut</TableHead>
                 <TableHead>Remarque</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -190,8 +303,22 @@ export function StudentAttendanceTab({
                       {getAttendanceStatusLabel(entry.status)}
                     </span>
                   </TableCell>
-                  <TableCell className="max-w-[260px] truncate text-muted-foreground">
+                  <TableCell className="max-w-[200px] truncate text-muted-foreground">
                     {entry.notes ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {entry.status !== "PRESENT" &&
+                      entry.notes != null && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleViewJustification(entry)}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <EyeIcon className="size-3.5" />
+                          Voir justificatif
+                        </Button>
+                      )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -199,6 +326,13 @@ export function StudentAttendanceTab({
           </Table>
         )}
       </section>
+
+      {/* Modal de justificatif */}
+      <JustificationModal
+        entry={selectedEntry}
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+      />
     </div>
   );
 }

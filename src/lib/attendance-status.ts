@@ -26,12 +26,12 @@ export const ATTENDANCE_STATUS_BADGE_CLASSES: Record<AttendanceStatus, string> =
 
 /**
  * Statuts proposés lors de la prise de présence rapide.
- * Le statut LATE reste disponible dans le modèle de données mais n'est pas
- * exposé dans l'interface simplifiée (PRESENT / ABSENT / EXCUSED).
+ * Le statut LATE est désormais inclus pour permettre un suivi plus précis.
  */
 export const ATTENDANCE_QUICK_STATUSES: readonly AttendanceStatus[] = [
   "PRESENT",
   "ABSENT",
+  "LATE",
   "EXCUSED",
 ];
 

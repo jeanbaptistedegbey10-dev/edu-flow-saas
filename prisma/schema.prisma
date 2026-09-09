@@ -314,6 +314,18 @@ model Student {
   hasPaidRegistrationFee Boolean       @default(false)
   /// Classe / cohorte active de l'étudiant (dernière affectation).
   currentClassId         String?
+  /// Indique si l'étudiant est autonome (s'assume lui-même financièrement).
+  isSelfFinanced         Boolean       @default(false)
+  /// Nom du parent / tuteur (requis si non autonome).
+  parentName             String?
+  /// Lien avec l'étudiant (Père, Mère, Tuteur, etc.).
+  parentRelation         String?
+  /// Numéro de téléphone principal du parent / tuteur.
+  parentPhone1           String?
+  /// Numéro de téléphone secondaire du parent / tuteur (optionnel).
+  parentPhone2           String?
+  /// Token d'accès public non modifiable pour le rapport parent.
+  publicReportToken      String?       @unique
   createdAt              DateTime      @default(now())
   updatedAt              DateTime      @updatedAt
 
