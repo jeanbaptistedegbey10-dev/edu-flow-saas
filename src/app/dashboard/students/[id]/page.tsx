@@ -6,7 +6,10 @@ import {
   BanknoteIcon,
   CalendarDaysIcon,
   ClipboardCheckIcon,
+  DownloadIcon,
+  FileTextIcon,
   HistoryIcon,
+  LinkIcon,
   MailIcon,
   PhoneIcon,
   ReceiptTextIcon,
@@ -17,7 +20,7 @@ import {
   getStudentAttendanceHistory,
   type StudentAttendanceEntryDTO,
 } from "@/actions/attendance";
-import { getStudentDetail } from "@/actions/students";
+import { ensureStudentReportToken, getStudentDetail } from "@/actions/students";
 import { getStudentAcademicRecord } from "@/actions/evaluations";
 import { getCurrentOrganizationProfile } from "@/actions/payments";
 import {
@@ -117,9 +120,10 @@ export default async function StudentDetailPage({
   let organization;
   let documents;
   let attendanceEntries: StudentAttendanceEntryDTO[] = [];
+  let reportTokenResult: Awaited<ReturnType<typeof ensureStudentReportToken>> | null = null;
 
   try {
-    [student, academicRecord, organization, documents, attendanceEntries] =
+    [student, academicRecord, organization, documents, attendanceEntries, reportTokenResult] =
       await Promise.all([
         getStudentDetail(id),
         getStudentAcademicRecord(id),
@@ -128,10 +132,19 @@ export default async function StudentDetailPage({
         getDocumentsByOwner({ studentId: id }),
         // Historique des émargements (onglet « Assiduité »).
         getStudentAttendanceHistory(id),
+        // Token d'accès public non modifiable (rapport parent).
+        ensureStudentReportToken(id),
       ]);
   } catch {
     notFound();
   }
+
+  const reportToken =
+    reportTokenResult?.ok && reportTokenResult.token ? reportTokenResult.token : null;
+  const parentLink = reportToken
+    ? `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/reports/student/${reportToken}`
+    : null;
+  const downloadPdfUrl = reportToken ? `/reports/student/${reportToken}/pdf?format=pdf` : null;
 
   const hasFinancials = student.netAmount !== null;
   const isFullyPaid =
@@ -188,6 +201,37 @@ export default async function StudentDetailPage({
                   <ClipboardCheckIcon className="size-4 shrink-0" />
                   Classe : {student.currentClassName}
                 </span>
+              ) : null}
+            </div>
+
+            {/* Actions rapport parent + PDF */}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {downloadPdfUrl ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={downloadPdfUrl}>
+                    <DownloadIcon className="size-4" />
+                    Télécharger Rapport PDF
+                  </Link>
+                </Button>
+              ) : null}
+              {parentLink ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        await navigator.clipboard.writeText(parentLink!);
+                      } catch {
+                        /* presse-papiers indisponible */
+                      }
+                    })();
+                  }}
+                >
+                  <LinkIcon className="size-4" />
+                  Copier le lien parent
+                </Button>
               ) : null}
             </div>
           </div>

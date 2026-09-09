@@ -463,17 +463,52 @@ export async function resetDemoDataAction(
       };
     }
 
-    // 7. Opérations de données — trois étapes courtes (transactions bornées),
-    //    exécutées EN PARALLÈLE pour minimiser le temps total d'exécution (anti-timeout).
-    const [step1, step2, step3] = await Promise.all([
-      resetStudentsAndSchoolingData(context.organizationId),
-      resetCoursesAndAssessmentsData(context.organizationId),
-      resetFinancialAndSettingsData(context.organizationId),
-    ]);
+    // 7. Opérations de données — trois étapes EXÉCUTÉES SÉQUENTIELLEMENT
+    //    (une requête HTTP par étape) pour éviter les conflits de verrouillage
+    //    foreign key. Chaque étape est entourée d'un try/catch qui retourne un
+    //    état d'erreur explicite au lieu de propager une exception non gérée.
+    let step1Result: Awaited<ReturnType<typeof resetStudentsAndSchoolingData>>;
+    let step2Result: Awaited<ReturnType<typeof resetCoursesAndAssessmentsData>>;
+    let step3Result: Awaited<ReturnType<typeof resetFinancialAndSettingsData>>;
 
-    // Chaque étape est transactionnelle et idempotente ; on fusionne les compteurs.
-    // Si une étape lève une exception, elle remontera au try/catch global de l'action.
-    const counts = mergeResetCounts(step1, step2, step3);
+    try {
+      step1Result = await resetStudentsAndSchoolingData(context.organizationId);
+    } catch (error: unknown) {
+      console.error("[resetDemoDataAction] Étape 1 échouée :", error);
+      return {
+        status: "error",
+        message:
+          (error instanceof Error && error.message) ||
+          "Échec de l'étape 1 (nettoyage des étudiants et de la scolarité).",
+      };
+    }
+
+    try {
+      step2Result = await resetCoursesAndAssessmentsData(context.organizationId);
+    } catch (error: unknown) {
+      console.error("[resetDemoDataAction] Étape 2 échouée :", error);
+      return {
+        status: "error",
+        message:
+          (error instanceof Error && error.message) ||
+          "Échec de l'étape 2 (suppression des cours, évaluations et présences).",
+      };
+    }
+
+    try {
+      step3Result = await resetFinancialAndSettingsData(context.organizationId);
+    } catch (error: unknown) {
+      console.error("[resetDemoDataAction] Étape 3 échouée :", error);
+      return {
+        status: "error",
+        message:
+          (error instanceof Error && error.message) ||
+          "Échec de l'étape 3 (réinitialisation des données financières et paramètres).",
+      };
+    }
+
+    // Fusion des compteurs des trois étapes (toutes ont réussi).
+    const counts = mergeResetCounts(step1Result, step2Result, step3Result);
 
     revalidatePath("/dashboard");
 

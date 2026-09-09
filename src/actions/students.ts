@@ -1,6 +1,7 @@
 "use server";
 
 import { Prisma, type DiscountType, type StudentStatus } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 
@@ -1305,6 +1306,54 @@ export async function updateStudentAction(
     return {
       status: "error",
       message: "Une erreur est survenue lors de la mise à jour de l'étudiant.",
+    };
+  }
+}
+
+/**
+ * Génère (si nécessaire) et retourne le token d'accès public non modifiable
+ * d'un étudiant. Ce token permet de créer un lien parent inaltérable qui
+ * donne accès en lecture seule au rapport de l'étudiant sans connexion.
+ */
+export async function ensureStudentReportToken(
+  studentId: string
+): Promise<{ ok: true; token: string } | { ok: false; message: string }> {
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    const existing = await prisma.student.findFirst({
+      where: { id: studentId, organizationId },
+      select: { id: true, publicReportToken: true },
+    });
+
+    if (!existing) {
+      return {
+        ok: false,
+        message: "Étudiant introuvable dans votre organisation.",
+      };
+    }
+
+    if (existing.publicReportToken) {
+      return { ok: true, token: existing.publicReportToken };
+    }
+
+    const token = randomUUID();
+
+    await prisma.student.update({
+      where: { id: studentId },
+      data: { publicReportToken: token },
+    });
+
+    return { ok: true, token };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[ensureStudentReportToken] Échec :", error);
+
+    return {
+      ok: false,
+      message:
+        "Impossible de générer le lien parent pour le moment.",
     };
   }
 }

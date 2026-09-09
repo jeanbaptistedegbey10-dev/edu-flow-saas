@@ -108,6 +108,11 @@ function EditStudentForm({
   const [legacyPaidAmountInput, setLegacyPaidAmountInput] = React.useState(
     student.legacyPaidAmount > 0 ? String(student.legacyPaidAmount) : ""
   );
+  // Autonomie de l'étudiant : si coché, les champs de contact parent deviennent
+  // facultatifs (l'étudiant s'assume financièrement lui-même).
+  const [isSelfFinanced, setIsSelfFinanced] = React.useState(
+    student.isSelfFinanced
+  );
 
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
   const classFeeLocked = selectedClass !== null;
@@ -487,6 +492,102 @@ function EditStudentForm({
             </span>
           </div>
           <input type="hidden" name="netAmount" value={netAmount ?? ""} />
+        </fieldset>
+
+        {/* Autonomie de l'étudiant / contact parent */}
+        <fieldset className="rounded-lg border p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Responsable financier
+          </legend>
+
+          <div className="grid gap-3">
+            <label className="flex items-start gap-3 rounded-md border border-muted bg-muted/30 p-3">
+              <input
+                type="checkbox"
+                name="isSelfFinanced"
+                checked={isSelfFinanced}
+                onChange={(event) => setIsSelfFinanced(event.target.checked)}
+                className="mt-0.5 size-4 shrink-0 accent-indigo-600"
+              />
+              <div>
+                <span className="text-sm font-medium">
+                  L'étudiant est autonome / s'assume lui-même
+                </span>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Si coché, les champs de contact parent deviennent facultatifs.
+                </p>
+              </div>
+            </label>
+
+            {!isSelfFinanced ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-parentName">
+                    Nom du parent / tuteur *
+                  </Label>
+                  <Input
+                    id="edit-parentName"
+                    name="parentName"
+                    placeholder="Ex : Monsieur Traoré"
+                    defaultValue={student.parentName ?? ""}
+                    aria-invalid={Boolean(fieldErrors.parentName)}
+                  />
+                  <FieldError message={fieldErrors.parentName} />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-parentRelation">
+                    Lien avec l'étudiant
+                  </Label>
+                  <Select name="parentRelation" defaultValue={student.parentRelation ?? ""}>
+                    <SelectTrigger id="edit-parentRelation" className="w-full">
+                      <SelectValue placeholder="Sélectionner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Père">Père</SelectItem>
+                      <SelectItem value="Mère">Mère</SelectItem>
+                      <SelectItem value="Tuteur">Tuteur</SelectItem>
+                      <SelectItem value="Garant">Garant</SelectItem>
+                      <SelectItem value="Autre">Autre</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FieldError message={fieldErrors.parentRelation} />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-parentPhone1">
+                    Téléphone principal du parent *
+                  </Label>
+                  <Input
+                    id="edit-parentPhone1"
+                    name="parentPhone1"
+                    type="tel"
+                    placeholder="Ex : +225 05 00 00 00 10"
+                    autoComplete="tel"
+                    defaultValue={student.parentPhone1 ?? ""}
+                    aria-invalid={Boolean(fieldErrors.parentPhone1)}
+                  />
+                  <FieldError message={fieldErrors.parentPhone1} />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-parentPhone2">
+                    Téléphone secondaire (optionnel)
+                  </Label>
+                  <Input
+                    id="edit-parentPhone2"
+                    name="parentPhone2"
+                    type="tel"
+                    placeholder="Ex : +225 05 00 00 00 11"
+                    autoComplete="tel"
+                    defaultValue={student.parentPhone2 ?? ""}
+                    aria-invalid={Boolean(fieldErrors.parentPhone2)}
+                  />
+                  <FieldError message={fieldErrors.parentPhone2} />
+                </div>
+              </div>
+            ) : null}
+          </div>
         </fieldset>
 
         <DialogFooter className="sticky bottom-0 z-20 -mx-4 -mb-4 border-t bg-background pt-3">

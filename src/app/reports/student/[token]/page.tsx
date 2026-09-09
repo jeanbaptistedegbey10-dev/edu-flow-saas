@@ -1,10 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getStudentAttendanceHistory } from "@/actions/attendance";
-import { getStudentDetail } from "@/actions/students";
 import StudentReportView from "@/components/reports/student-report-view";
-import { generateStudentReportPDF } from "@/lib/student-report-pdf";
-import { pdf } from "@react-pdf/renderer";
 
 export default async function StudentReportPage({
   params,
@@ -31,7 +28,6 @@ export default async function StudentReportPage({
       parentPhone1: true,
       parentPhone2: true,
       currentClass: { select: { name: true } },
-      currentCourse: { select: { title: true } },
       travelProcedures: {
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -49,15 +45,18 @@ export default async function StudentReportPage({
 
   if (!organization) notFound();
 
+  const studentId = student.id;
+  const organizationId = student.organizationId;
+
   const [attendanceEntries, payments, academicRecord] = await Promise.all([
-    getStudentAttendanceHistory(student.id),
+    getStudentAttendanceHistory(studentId),
     prisma.payment.findMany({
-      where: { studentId: student.id, organizationId: student.organizationId, status: "COMPLETED" },
+      where: { studentId, organizationId, status: "COMPLETED" },
       select: { amount: true },
     }),
     prisma.evaluation.findMany({
-      where: { organizationId: student.organizationId, studentId: student.id },
-      include: { grades: { where: { studentId: student.id } }, module: { select: { name: true } } },
+      where: { organizationId, class: { enrollments: { some: { studentId } } } },
+      include: { modules: { include: { grades: { where: { studentId } } } } },
       orderBy: { date: "desc" },
     }),
   ]);
@@ -73,51 +72,36 @@ export default async function StudentReportPage({
     excused: attendanceEntries.filter((e) => e.status === "EXCUSED").length,
   };
 
-  const recentAttendance = attendanceEntries.slice(0, 10).map((e) => ({
-    date: new Date(e.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }),
-    status: e.status,
-    course: e.courseTitle,
-  }));
-
   const grades = academicRecord.flatMap((ev) =>
-    ev.grades.map((g) => ({ module: ev.module.name, score: g.score, maxScore: ev.maxScore }))
+    ev.modules.flatMap((mod) =>
+      mod.grades.map((g) => ({ module: mod.name, score: g.score, maxScore: mod.maxScore }))
+    )
   );
 
   const travelStatus = student.travelProcedures[0]?.status ?? null;
 
-  const url = new URL(request?.url ?? "");
-  if (url.searchParams.get("format") === "pdf") {
-    const pdfBlob = await pdf(
-      generateStudentReportPDF({
-        student: {
-          lastName: student.lastName, firstName: student.firstName, studentCode: student.studentCode,
-          email: student.email, phone: student.phone, status: student.status, netAmount: student.netAmount,
-        },
-        attendanceSummary: attendanceCounts,
-        attendanceHistory: recentAttendance,
-        totalPaid,
-        balance,
-        grades,
-        travelStatus: travelStatus ? travelStatus.replace(/_/g, " ") : null,
-        organizationName: organization.name,
-        generatedAt: new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }),
-      })
-    ).then((b) => b);
+  const studentData = {
+    studentCode: student.studentCode,
+    firstName: student.firstName,
+    lastName: student.lastName,
+    email: student.email,
+    phone: student.phone,
+    status: student.status,
+    netAmount: student.netAmount,
+    isSelfFinanced: student.isSelfFinanced,
+    parentName: student.parentName,
+    parentRelation: student.parentRelation,
+    parentPhone1: student.parentPhone1,
+    parentPhone2: student.parentPhone2,
+    currentClassName: student.currentClass?.name ?? null,
+  };
 
-    return new Response(pdfBlob, {
-      headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="rapport-${student.studentCode}.pdf"` },
-    });
-  }
+  const generatedAt = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+  const parentLink = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/reports/student/${token}`;
 
   return (
     <StudentReportView
-      student={{
-        id: student.id, studentCode: student.studentCode, firstName: student.firstName, lastName: student.lastName,
-        email: student.email, phone: student.phone, status: student.status, netAmount: student.netAmount,
-        isSelfFinanced: student.isSelfFinanced, parentName: student.parentName, parentRelation: student.parentRelation,
-        parentPhone1: student.parentPhone1, parentPhone2: student.parentPhone2,
-        currentClassName: student.currentClass?.name ?? null, currentCourseTitle: student.currentCourse?.title ?? null,
-      }}
+      student={studentData}
       attendanceSummary={attendanceCounts}
       attendanceHistory={attendanceEntries.map((e) => ({
         ...e,
@@ -128,7 +112,8 @@ export default async function StudentReportPage({
       grades={grades}
       travelStatus={travelStatus ? travelStatus.replace(/_/g, " ") : null}
       organizationName={organization.name}
-      generatedAt={new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}
+      generatedAt={generatedAt}
+      parentLink={parentLink}
     />
   );
 }
