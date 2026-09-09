@@ -14,6 +14,21 @@ import { prisma } from "@/lib/prisma";
 // celui injecté automatiquement à l'inscription) ; la réinitialisation retire
 // toutes les données métier de l'organisation tout en conservant l'organisation
 // elle-même et ses comptes administrateurs.
+//
+// ---------------------------------------------------------------
+// Découpage « sans timeout » (Serverless Vercel)
+// ---------------------------------------------------------------
+// La réinitialisation est découpée en TROIS étapes courtes et indépendantes :
+//   - resetStudentsAndSchoolingData      (Étape 1 : étudiants & scolarité) ;
+//   - resetCoursesAndAssessmentsData     (Étape 2 : cours, éval. & présences) ;
+//   - resetFinancialAndSettingsData      (Étape 3 : finances & paramètres).
+// Chaque étape vit dans SA PROPRE transaction (< 3 s) et est idempotente :
+// même sur une base volumineuse, aucune requête unique ne s'approche du budget
+// d'exécution des fonctions Vercel. Les Server Actions de la carte « Données
+// de démonstration » invoquent ces étapes SÉQUENTIELLEMENT (une requête HTTP
+// par étape) et affichent une liste de contrôle progressant en temps réel.
+// `resetOrganizationData` reste disponible en orchestration « tout en un »
+// (compatibilité) — elle enchaîne simplement les trois étapes ci-dessus.
 
 /** Résultat typé d'une injection de données de démonstration. */
 export type DemoDataInjectResult =
@@ -73,6 +88,7 @@ export async function injectDemoDataForOrganization(
 
 /** Détail des suppressions effectuées lors d'une réinitialisation. */
 export type DemoDataResetCounts = {
+  // Totaux « historiques » agrégés (utilisés par le message final).
   students: number;
   classes: number;
   courses: number;
@@ -84,27 +100,259 @@ export type DemoDataResetCounts = {
   documents: number;
   travelProcedures: number;
   demoUsers: number;
+  // Détail par étape (retourné par chaque sous-opération).
+  classEnrollments: number;
+  enrollments: number;
+  housings: number;
+  grades: number;
+  evaluations: number;
+  courseLogs: number;
+  payrolls: number;
+  productServices: number;
+  productCategories: number;
+  workflows: number;
+  workflowStages: number;
+  customRoles: number;
 };
 
 /** Résultat typé d'une réinitialisation des données métier. */
 export type DemoDataResetResult =
   | { ok: true; deleted: DemoDataResetCounts }
   | { ok: false; reason: "NOT_FOUND" | "UNKNOWN" | "ADMIN_REQUIRED" };
+
+/** Crée un objet de comptes remis à zéro (toutes les clés présentes). */
+function emptyResetCounts(): DemoDataResetCounts {
+  return {
+    students: 0,
+    classes: 0,
+    courses: 0,
+    payments: 0,
+    expenses: 0,
+    sales: 0,
+    tasks: 0,
+    attendances: 0,
+    documents: 0,
+    travelProcedures: 0,
+    demoUsers: 0,
+    classEnrollments: 0,
+    enrollments: 0,
+    housings: 0,
+    grades: 0,
+    evaluations: 0,
+    courseLogs: 0,
+    payrolls: 0,
+    productServices: 0,
+    productCategories: 0,
+    workflows: 0,
+    workflowStages: 0,
+    customRoles: 0,
+  };
+}
+
+/** Cumule plusieurs jeux de comptes (étapes successives) en un seul. */
+export function mergeResetCounts(...steps: DemoDataResetCounts[]): DemoDataResetCounts {
+  const merged = emptyResetCounts();
+  const acc = merged as Record<string, number>;
+  for (const step of steps) {
+    for (const [key, value] of Object.entries(step)) {
+      acc[key] += value;
+    }
+  }
+  return merged;
+}
+
+/**
+ * Options de transaction des étapes courtes — volontairement bornées pour
+ * rester sous le budget d'exécution des Serverless (chaque étape < 3 s).
+ */
+const RESET_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
+
+/**
+ * ÉTAPE 1 — Étudiants & scolarité.
+ *
+ * Supprime : notes, affectations de classes, inscriptions aux cours, logements
+ * étudiants, puis les étudiants eux-mêmes (les tables « enfants » restantes —
+ * présences, documents, paiements… — sont propagées par cascade / mises à null).
+ *
+ * Transaction courte et idempotente : ré-exécutable sans effet de bord.
+ */
+export async function resetStudentsAndSchoolingData(
+  organizationId: string
+): Promise<DemoDataResetCounts> {
+  return prisma.$transaction(
+    async (tx) => {
+      const counts = emptyResetCounts();
+
+      // Notes (Grade) avant les évaluations — filtrées par étudiant.
+      counts.grades = (
+        await tx.grade.deleteMany({
+          where: { student: { organizationId } },
+        })
+      ).count;
+
+      // Affectations de classes (historique) puis inscriptions aux cours.
+      counts.classEnrollments = (
+        await tx.classEnrollment.deleteMany({ where: { organizationId } })
+      ).count;
+      counts.enrollments = (
+        await tx.enrollment.deleteMany({
+          where: { student: { organizationId } },
+        })
+      ).count;
+
+      // Logements étudiants (hébergement rattaché à la scolarité).
+      counts.housings = (
+        await tx.housing.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Étudiants en dernier (d'autres tables référencent cet identifiant).
+      counts.students = (
+        await tx.student.deleteMany({ where: { organizationId } })
+      ).count;
+
+      return counts;
+    },
+    RESET_TX_OPTIONS
+  );
+}
+
+/**
+ * ÉTAPE 2 — Cours, évaluations & présences.
+ *
+ * Supprime : présences, cahier de texte, sessions d'évaluation (modules et
+ * notes restantes par cascade), puis classes et cours.
+ */
+export async function resetCoursesAndAssessmentsData(
+  organizationId: string
+): Promise<DemoDataResetCounts> {
+  return prisma.$transaction(
+    async (tx) => {
+      const counts = emptyResetCounts();
+
+      // Présences (Attendance) — enfants des étudiants / cours / classes.
+      counts.attendances = (
+        await tx.attendance.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Cahier de texte.
+      counts.courseLogs = (
+        await tx.courseLog.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Sessions d'évaluation (cascade vers modules & notes éventuelles).
+      counts.evaluations = (
+        await tx.evaluation.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Affectations de classes résiduelles (sécurité) puis classes et cours.
+      await tx.classEnrollment.deleteMany({ where: { organizationId } });
+      counts.classes = (
+        await tx.class.deleteMany({ where: { organizationId } })
+      ).count;
+      counts.courses = (
+        await tx.course.deleteMany({ where: { organizationId } })
+      ).count;
+
+      return counts;
+    },
+    RESET_TX_OPTIONS
+  );
+}
+
+/**
+ * ÉTAPE 3 — Données financières & paramètres.
+ *
+ * Supprime : paiements, ventes POS, documents, salaires, dépenses, tâches,
+ * dossiers voyage & workflows, catalogue POS, comptes non-administrateurs puis
+ * rôles personnalisés. Les tables liées à un `User` par une contrainte
+ * `Restrict` (ventes, dépenses, tâches) sont purgées AVANT la suppression des
+ * comptes de démonstration.
+ */
+export async function resetFinancialAndSettingsData(
+  organizationId: string
+): Promise<DemoDataResetCounts> {
+  return prisma.$transaction(
+    async (tx) => {
+      const counts = emptyResetCounts();
+
+      // Paiements (recettes comptabilisées).
+      counts.payments = (
+        await tx.payment.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // POS — lignes de vente (avant produits, contrainte Restrict) puis reçus.
+      await tx.saleItem.deleteMany({ where: { sale: { organizationId } } });
+      counts.sales = (
+        await tx.sale.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Pièces jointes / documents (visa et étudiants).
+      counts.documents = (
+        await tx.document.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Salaires puis dépenses (avant suppression des comptes, Restrict).
+      counts.payrolls = (
+        await tx.payroll.deleteMany({ where: { organizationId } })
+      ).count;
+      counts.expenses = (
+        await tx.expense.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Tâches (créées par un User → Restrict).
+      counts.tasks = (
+        await tx.task.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Pipeline voyage : étapes, modèles de workflow puis dossiers.
+      counts.workflowStages = (
+        await tx.workflowStage.deleteMany({ where: { organizationId } })
+      ).count;
+      counts.workflows = (
+        await tx.workflow.deleteMany({ where: { organizationId } })
+      ).count;
+      counts.travelProcedures = (
+        await tx.travelProcedure.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Catalogue POS : produits (avant catégories) puis catégories.
+      counts.productServices = (
+        await tx.productService.deleteMany({ where: { organizationId } })
+      ).count;
+      counts.productCategories = (
+        await tx.productCategory.deleteMany({ where: { organizationId } })
+      ).count;
+
+      // Comptes de démonstration non-administrateurs (les ADMIN /
+      // SUPER_ADMIN sont conservés) puis rôles personnalisés.
+      counts.demoUsers = (
+        await tx.user.deleteMany({
+          where: {
+            organizationId,
+            role: { notIn: ["ADMIN", "SUPER_ADMIN"] },
+          },
+        })
+      ).count;
+      counts.customRoles = (
+        await tx.customRole.deleteMany({ where: { organizationId } })
+      ).count;
+
+      return counts;
+    },
+    RESET_TX_OPTIONS
+  );
+}
 /**
  * Supprime TOUTES les données métier de l'organisation (étudiants, cours,
  * classes, paiements, ventes POS, présences, documents, dossiers voyage,
  * dépenses, tâches, catalogue POS, comptes de démonstration non-admin…).
  * L'organisation et ses comptes ADMIN / SUPER_ADMIN sont conservés.
  *
- * S'exécute dans UNE transaction unique (tout ou rien) en suivant un ordre de
- * suppression strictement adapté aux contraintes de clés étrangères :
- *
- *   Attendance → Payments → POS Sales → Visa Documents → Visa Process →
- *   Course Enrollments → Students → Classes → Expenses → Tasks →
- *   Catalogue POS → Comptes démo → Rôles.
- *
- * Chaque `deleteMany` étant exécuté séquentiellement dans l'ordre des
- * dépendances, aucune violation de contrainte (FK) ne peut survenir.
+ * Orchestration « tout en un » décomposée en TROIS transactions courtes et
+ * indépendantes (Étapes 1 à 3), chacune exécutée en moins de 3 s. C'est le
+ * même découpage que les Server Actions pas-à-pas de la carte « Données de
+ * démonstration » : chaque étape est idempotente, ce qui permet une reprise
+ * simple en cas d'échec partiel.
  */
 export async function resetOrganizationData(
   organizationId: string
@@ -119,107 +367,11 @@ export async function resetOrganizationData(
   }
 
   try {
-    const deleted = await prisma.$transaction(async (tx) => {
-      const counts: DemoDataResetCounts = {
-        students: 0,
-        classes: 0,
-        courses: 0,
-        payments: 0,
-        expenses: 0,
-        sales: 0,
-        tasks: 0,
-        attendances: 0,
-        documents: 0,
-        travelProcedures: 0,
-        demoUsers: 0,
-      };
-
-      // 1. Présences (Attendance) — enfants des étudiants / cours / classes.
-      counts.attendances = (
-        await tx.attendance.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 2. Notes (Grade) avant les évaluations (chaîne de cascade).
-      await tx.grade.deleteMany({
-        where: { evaluationModule: { evaluation: { organizationId } } },
-      });
-
-      // 3. Paiements (recettes comptabilisées).
-      counts.payments = (
-        await tx.payment.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 4. POS — lignes de vente (SaleItem) puis reçus de vente (Sale).
-      await tx.saleItem.deleteMany({
-        where: { sale: { organizationId } },
-      });
-      counts.sales = (
-        await tx.sale.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 5. Pièces jointes / documents (visa et étudiants).
-      counts.documents = (
-        await tx.document.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 6. Cahier de texte, salaires, évaluations.
-      await tx.courseLog.deleteMany({ where: { organizationId } });
-      await tx.payroll.deleteMany({ where: { organizationId } });
-      await tx.evaluation.deleteMany({ where: { organizationId } });
-
-      // 7. Inscriptions aux cours et affectations de classe (historique).
-      await tx.classEnrollment.deleteMany({ where: { organizationId } });
-      await tx.enrollment.deleteMany({
-        where: { student: { organizationId } },
-      });
-
-      // 8. Pipeline voyage : workflow (étapes puis modèles) et dossiers.
-      await tx.workflowStage.deleteMany({ where: { organizationId } });
-      await tx.workflow.deleteMany({ where: { organizationId } });
-      counts.travelProcedures = (
-        await tx.travelProcedure.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 9. Logements étudiants.
-      await tx.housing.deleteMany({ where: { organizationId } });
-
-      // 10. Tâches puis dépenses (créées par un User → Restrict).
-      counts.tasks = (
-        await tx.task.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.expenses = (
-        await tx.expense.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 11. Catalogue POS : produits (avant catégories, Restrict SaleItem).
-      await tx.productService.deleteMany({ where: { organizationId } });
-      await tx.productCategory.deleteMany({ where: { organizationId } });
-
-      // 12. Étudiants → classes → cours.
-      counts.students = (
-        await tx.student.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.classes = (
-        await tx.class.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.courses = (
-        await tx.course.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 13. Comptes de démonstration non-administrateurs (les ADMIN /
-      //     SUPER_ADMIN sont conservés) puis rôles personnalisés.
-      counts.demoUsers = (
-        await tx.user.deleteMany({
-          where: {
-            organizationId,
-            role: { notIn: ["ADMIN", "SUPER_ADMIN"] },
-          },
-        })
-      ).count;
-      await tx.customRole.deleteMany({ where: { organizationId } });
-
-      return counts;
-    });
+    const deleted = mergeResetCounts(
+      await resetStudentsAndSchoolingData(organizationId),
+      await resetCoursesAndAssessmentsData(organizationId),
+      await resetFinancialAndSettingsData(organizationId)
+    );
 
     return { ok: true, deleted };
   } catch (error) {
@@ -227,6 +379,7 @@ export async function resetOrganizationData(
     return { ok: false, reason: "UNKNOWN" };
   }
 }
+
 /** Résultat du contrôle de présence de données d'une organisation. */
 export type OrganizationDataPresence = {
   /** `true` si l'organisation contient la moindre donnée (démo ou réelle). */
