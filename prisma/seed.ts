@@ -289,6 +289,68 @@ async function main() {
   });
 
   // --------------------------------------
+  // Classes (cohortes liées aux cours)
+  // --------------------------------------
+  const class1 = await prisma.class.create({
+    data: {
+      organizationId: org1.id,
+      courseId: course1.id,
+      name: "Anglais Professionnel - Groupe A",
+      schedule: "Lun-Mer 09:00-12:00",
+      tuitionFee: 150000,
+    },
+  });
+
+  const class2 = await prisma.class.create({
+    data: {
+      organizationId: org1.id,
+      courseId: course2.id,
+      name: "Allemand Intensif - Groupe A",
+      schedule: "Lun-Ven 14:00-17:00",
+      tuitionFee: 250000,
+    },
+  });
+
+  // --------------------------------------
+  // Class Sessions (séances concrètes)
+  // --------------------------------------
+  const session1 = await prisma.classSession.create({
+    data: {
+      organizationId: org1.id,
+      classId: class1.id,
+      subjectName: "Anglais Professionnel",
+      chapter: "Module 1: Business Greetings",
+      sessionDate: new Date("2026-08-18"),
+      startTime: new Date("2026-08-18T09:00:00.000Z"),
+      endTime: new Date("2026-08-18T12:00:00.000Z"),
+    },
+  });
+
+  const session2 = await prisma.classSession.create({
+    data: {
+      organizationId: org1.id,
+      classId: class1.id,
+      subjectName: "Anglais Professionnel",
+      chapter: "Module 1: Business Greetings",
+      sessionDate: new Date("2026-08-20"),
+      startTime: new Date("2026-08-20T09:00:00.000Z"),
+      endTime: new Date("2026-08-20T12:00:00.000Z"),
+    },
+  });
+
+  const session3 = await prisma.classSession.create({
+    data: {
+      organizationId: org2.id,
+      classId: class2.id,
+      subjectName: "Allemand Intensif",
+      chapter: "Module 1: Grundlagen",
+      sessionDate: new Date("2026-08-19"),
+      startTime: new Date("2026-08-19T14:00:00.000Z"),
+      endTime: new Date("2026-08-19T17:00:00.000Z"),
+    },
+  });
+
+  // --------------------------------------
   // Enrollments
   // --------------------------------------
   await prisma.enrollment.create({
@@ -711,37 +773,42 @@ async function main() {
     data: [
       {
         organizationId: org1.id,
-        courseId: course1.id,
+        sessionId: session1.id,
+        classId: class1.id,
         studentId: student1.id,
         status: "PRESENT",
         date: new Date("2026-08-18T09:00:00.000Z"),
       },
       {
         organizationId: org1.id,
-        courseId: course1.id,
+        sessionId: session1.id,
+        classId: class1.id,
         studentId: student2.id,
         status: "PRESENT",
         date: new Date("2026-08-18T09:00:00.000Z"),
       },
       {
         organizationId: org1.id,
-        courseId: course1.id,
+        sessionId: session2.id,
+        classId: class1.id,
         studentId: student1.id,
         status: "PRESENT",
         date: new Date("2026-08-20T09:00:00.000Z"),
       },
       {
         organizationId: org1.id,
-        courseId: course1.id,
+        sessionId: session2.id,
+        classId: class1.id,
         studentId: student2.id,
         status: "ABSENT",
         date: new Date("2026-08-20T09:00:00.000Z"),
         notes: "Absence non justifiée",
       },
       {
-        organizationId: org1.id,
-        courseId: course2.id,
-        studentId: student1.id,
+        organizationId: org2.id,
+        sessionId: session3.id,
+        classId: class2.id,
+        studentId: student3.id,
         status: "EXCUSED",
         date: new Date("2026-08-19T14:00:00.000Z"),
         notes: "Certificat médical fourni",

@@ -703,7 +703,7 @@ async function runDemoSeedTransaction(
         }
         attendanceRows.push({
           organizationId,
-          courseId: group.courseId,
+          sessionId: group.courseId,
           classId: group.classId,
           studentId,
           status,

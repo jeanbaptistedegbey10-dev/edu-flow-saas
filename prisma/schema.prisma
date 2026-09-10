@@ -234,6 +234,7 @@ model Organization {
   productCategories ProductCategory[]
   sales            Sale[]
   attendances      Attendance[]
+  classSessions    ClassSession[]
   courseLogs       CourseLog[]
   evaluations      Evaluation[]
   documents        Document[]
@@ -360,7 +361,6 @@ model Course {
   enrollments  Enrollment[]
   classes      Class[]
   courseLogs   CourseLog[]
-  attendances  Attendance[]
 }
 
 // --------------------------------------
@@ -388,6 +388,7 @@ model Class {
   enrollments  ClassEnrollment[]
   students     Student[]         @relation("StudentCurrentClass")
   attendances  Attendance[]
+  sessions     ClassSession[]
   evaluations  Evaluation[]
 }
 
@@ -427,26 +428,60 @@ model Enrollment {
 // Pedagogical Models (Présences & Cahier de texte)
 // --------------------------------------
 
+/// Séance concrète d'une classe / cohorte (créneau émargé) : matière traitée,
+/// chapitre au programme (cahier de texte), date et horaires. Toutes les
+/// présences (`Attendance`) sont rattachées strictement à une séance.
+model ClassSession {
+  id             String   @id @default(cuid())
+  organizationId String
+  classId        String
+  subjectName    String
+  /// Chapitre traité pendant la séance (cahier de texte) — requis.
+  chapter        String
+  /// Date de la séance (journée, minuit UTC) — les dates passées sont
+  /// acceptées pour le suivi historique.
+  sessionDate    DateTime
+  startTime      DateTime
+  endTime        DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  class        Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  attendances  Attendance[]
+
+  @@index([classId, sessionDate])
+  @@index([organizationId])
+}
+
 model Attendance {
   id             String           @id @default(cuid())
   organizationId String
-  courseId       String
+  /// Séance émargée (`ClassSession`) — les présences ne sont rattachées
+  /// qu'à une séance concrète d'une classe, plus à un cours générique.
+  sessionId      String
   /// Classe / cohorte concernée (traceabilité du créneau émargé).
   classId        String?
   studentId      String
   status         AttendanceStatus @default(PRESENT)
+  /// Heure d'arrivée effective — renseignée pour le statut `LATE`.
+  arrivalTime    DateTime?
+  /// Journée de la séance (dénormalisée depuis `ClassSession.sessionDate`,
+  /// minuit UTC) pour le tri et les agrégats mensuels.
   date           DateTime         @default(now())
   notes          String?
   createdAt      DateTime         @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  course       Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  session      ClassSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   class        Class?       @relation(fields: [classId], references: [id], onDelete: SetNull)
   student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  @@unique([courseId, studentId, date])
-  @@index([courseId, date])
+  @@unique([sessionId, studentId])
+  @@index([sessionId])
+  @@index([sessionId, date])
   @@index([classId])
+  @@index([studentId, date])
 }
 
 model CourseLog {

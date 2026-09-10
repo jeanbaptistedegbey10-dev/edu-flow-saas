@@ -281,7 +281,10 @@ export function StudentAttendanceTab({
             </TableHeader>
             <TableBody>
               {entries.map((entry) => (
-                <TableRow key={entry.id}>
+                <TableRow
+                  key={entry.id}
+                  className="cursor-pointer transition-all hover:bg-muted hover:scale-[1.005] active:scale-[0.995]"
+                >
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     <span className="flex items-center gap-1.5">
                       <CalendarDaysIcon className="size-3.5 shrink-0" />
@@ -316,7 +319,7 @@ export function StudentAttendanceTab({
                           variant="ghost"
                           size="sm"
                           onClick={() => handleViewJustification(entry)}
-                          className="text-muted-foreground hover:text-foreground"
+                          className="text-muted-foreground hover:text-foreground transition-all hover:shadow-sm hover:scale-[1.01] active:scale-[0.99]"
                         >
                           <EyeIcon className="size-3.5" />
                           Voir justificatif

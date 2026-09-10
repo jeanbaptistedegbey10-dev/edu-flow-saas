@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -55,6 +55,7 @@ function todayIso(): string {
 type AttendanceEntry = {
   status: AttendanceStatus;
   notes: string;
+  arrivalTime?: string;
 };
 
 const STATUS_BUTTON_CLASSES: Record<AttendanceStatus, string> = {
@@ -72,6 +73,10 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
     classes[0]?.id ?? ""
   );
   const [selectedDate, setSelectedDate] = React.useState<string>(todayIso());
+  const [startTime, setStartTime] = React.useState<string>("");
+  const [endTime, setEndTime] = React.useState<string>("");
+  const [subjectName, setSubjectName] = React.useState<string>("");
+  const [chapter, setChapter] = React.useState<string>("");
 
   const [students, setStudents] = React.useState<EnrolledStudentDTO[]>([]);
   const [entries, setEntries] = React.useState<
@@ -83,6 +88,16 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
     kind: "success" | "error";
     message: string;
   } | null>(null);
+
+  /** Indique si le formulaire est prêt à être soumis (chapitre + date + heures remplis). */
+  const isSubmitReady = React.useMemo(() => {
+    return (
+      chapter.trim().length > 0 &&
+      selectedDate.length > 0 &&
+      startTime.trim().length > 0 &&
+      endTime.trim().length > 0
+    );
+  }, [chapter, selectedDate, startTime, endTime]);
 
   const hasClasses = classes.length > 0;
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
@@ -164,7 +179,12 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
   const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
     setEntries((previous) => ({
       ...previous,
-      [studentId]: { ...(previous[studentId] ?? { notes: "" }), status },
+      [studentId]: {
+        ...(previous[studentId] ?? { notes: "", arrivalTime: undefined }),
+        status,
+        arrivalTime:
+          status === "LATE" ? (previous[studentId]?.arrivalTime ?? "") : undefined,
+      },
     }));
   };
 
@@ -175,6 +195,17 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
       [studentId]: {
         ...(previous[studentId] ?? { status: "PRESENT" as AttendanceStatus }),
         notes,
+      },
+    }));
+  };
+
+  /** Met à jour l'heure d'arrivée d'un étudiant (pour le statut LATE). */
+  const handleArrivalTimeChange = (studentId: string, arrivalTime: string) => {
+    setEntries((previous) => ({
+      ...previous,
+      [studentId]: {
+        ...(previous[studentId] ?? { status: "PRESENT" as AttendanceStatus }),
+        arrivalTime,
       },
     }));
   };
@@ -201,10 +232,19 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
       const formData = new FormData();
       formData.set("classId", selectedClassId);
       formData.set("date", selectedDate);
+      formData.set("subjectName", subjectName);
+      formData.set("chapter", chapter);
+      formData.set("startTime", startTime);
+      formData.set("endTime", endTime);
 
       for (const [studentId, entry] of Object.entries(entries)) {
         formData.set(`status_${studentId}`, entry.status);
         formData.set(`notes_${studentId}`, entry.notes);
+
+        // Si le statut est LATE, ajouter l'heure d'arrivée
+        if (entry.status === "LATE" && entry.arrivalTime) {
+          formData.set(`arrival_${studentId}`, entry.arrivalTime);
+        }
       }
 
       const result = await saveAttendanceAction(formData);
@@ -290,8 +330,8 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
         ) : null}
       </div>
 
-      {/* Barre de sélection : classe + date */}
-      <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-800">
+      {/* Barre de sélection : classe + date + session */}
+      <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-6 dark:border-slate-800">
         <div className="grid gap-2 lg:col-span-2">
           <Label htmlFor="class-select">Classe / Cohorte</Label>
           <Select
@@ -336,24 +376,86 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
           />
         </div>
 
-        <div className="flex items-end">
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            onClick={handleMarkAllPresent}
-            disabled={loadingRoster || students.length === 0}
-          >
-            <CheckCircle2Icon data-icon="inline-start" />
-            Tout présent
-          </Button>
+        <div className="grid gap-2">
+          <Label htmlFor="start-time">Heure de début</Label>
+          <Input
+            id="start-time"
+            type="time"
+            value={startTime}
+            onChange={(event) => {
+              setStartTime(event.target.value);
+              setFeedback(null);
+            }}
+          />
         </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="end-time">Heure de fin</Label>
+          <Input
+            id="end-time"
+            type="time"
+            value={endTime}
+            onChange={(event) => {
+              setEndTime(event.target.value);
+              setFeedback(null);
+            }}
+          />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="subject-name">Matière</Label>
+          <Input
+            id="subject-name"
+            type="text"
+            value={subjectName}
+            onChange={(event) => {
+              setSubjectName(event.target.value);
+              setFeedback(null);
+            }}
+            placeholder="Ex: Mathématiques"
+          />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="chapter">Chapitre <span className="text-red-500">*</span></Label>
+          <Input
+            id="chapter"
+            type="text"
+            value={chapter}
+            onChange={(event) => {
+              setChapter(event.target.value);
+              setFeedback(null);
+            }}
+            placeholder="Ex: Nombres réels"
+          />
+          <p className="text-xs text-muted-foreground">
+            Champ obligatoire pour valider l'enregistrement.
+          </p>
+        </div>
+      </div>
+
+      {/* Bouton "Tout présent" */}
+      <div className="flex items-end">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={handleMarkAllPresent}
+          disabled={loadingRoster || students.length === 0}
+        >
+          <CheckCircle2Icon data-icon="inline-start" />
+          Tout présent
+        </Button>
       </div>
 
       {/* Feuille d'émargement */}
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <input type="hidden" name="classId" value={selectedClassId} />
         <input type="hidden" name="date" value={selectedDate} />
+        <input type="hidden" name="subjectName" value={subjectName} />
+        <input type="hidden" name="chapter" value={chapter} />
+        <input type="hidden" name="startTime" value={startTime} />
+        <input type="hidden" name="endTime" value={endTime} />
 
         <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm dark:border-slate-800">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
@@ -402,6 +504,7 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
                     <TableHead>Étudiant</TableHead>
                     <TableHead>Statut</TableHead>
                     <TableHead>Remarque</TableHead>
+                    <TableHead>Arrivée (retard)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -409,7 +512,10 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
                     const entry = entries[student.studentId];
 
                     return (
-                      <TableRow key={student.studentId}>
+                      <TableRow
+                        key={student.studentId}
+                        className="cursor-pointer transition-all hover:bg-muted hover:scale-[1.005] active:scale-[0.995]"
+                      >
                         <TableCell>
                           <div className="flex flex-col gap-0.5">
                             <span className="font-medium">
@@ -440,7 +546,7 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
                                     handleStatusChange(student.studentId, status)
                                   }
                                   className={cn(
-                                    "rounded-md border border-input px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted",
+                                    "rounded-md border border-input px-2.5 py-1 text-xs font-medium transition-all hover:bg-muted hover:shadow-sm hover:scale-[1.01] active:scale-[0.99]",
                                     STATUS_BUTTON_CLASSES[status]
                                   )}
                                 >
@@ -464,6 +570,23 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
                             aria-label={`Remarque pour ${student.firstName} ${student.lastName}`}
                             className="max-w-xs"
                           />
+                        </TableCell>
+                        <TableCell>
+                          {entry?.status === "LATE" ? (
+                            <Input
+                              type="time"
+                              value={entry.arrivalTime ?? ""}
+                              onChange={(event) =>
+                                handleArrivalTimeChange(
+                                  student.studentId,
+                                  event.target.value,
+                                )
+                              }
+                              placeholder="HH:MM"
+                              aria-label={`Heure d'arrivée pour ${student.firstName} ${student.lastName}`}
+                              className="max-w-xs"
+                            />
+                          ) : null}
                         </TableCell>
                       </TableRow>
                     );
@@ -492,7 +615,16 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
                   </p>
                 )}
 
-                <Button type="submit" disabled={saving || loadingRoster}>
+                <Button
+                  type="submit"
+                  disabled={saving || loadingRoster || !isSubmitReady}
+                  className={cn(
+                    "transition-all",
+                    isSubmitReady
+                      ? "bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 hover:shadow-md hover:scale-[1.01] active:scale-[0.99] text-white"
+                      : "bg-muted opacity-60 cursor-not-allowed"
+                  )}
+                >
                   {saving ? (
                     <Loader2Icon data-icon="inline-start" className="animate-spin" />
                   ) : (
@@ -519,3 +651,5 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
     </div>
   );
 }
+
+

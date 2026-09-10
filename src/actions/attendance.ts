@@ -177,6 +177,17 @@ function parseAttendanceDay(raw: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** Construit un horodatage complet (date + heure) en UTC à partir d'une
+ * date ISO (« YYYY-MM-DD ») et d'une heure (« HH:MM »).
+ */
+function buildSessionDateTime(dateIso: string, timeIso: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIso) || !/^\d{2}:\d{2}$/.test(timeIso)) {
+    return null;
+  }
+  const date = new Date(`${dateIso}T${timeIso}:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 // --------------------------------------
 // Server Actions — Présences
 // --------------------------------------
@@ -341,10 +352,24 @@ export async function getClassAttendanceForDate(
   const nextDay = new Date(date.getTime() + 24 * 60 * 60 * 1000);
 
   try {
+    // Récupère les IDs des séances de cette classe pour cette date.
+    const sessions = await prisma.classSession.findMany({
+      where: {
+        classId,
+        sessionDate: { gte: date, lt: nextDay },
+      },
+      select: { id: true },
+    });
+
+    const sessionIds = sessions.map((s) => s.id);
+
+    if (sessionIds.length === 0) {
+      return [];
+    }
+
     const records = await prisma.attendance.findMany({
       where: {
-        courseId,
-        date: { gte: date, lt: nextDay },
+        sessionId: { in: sessionIds },
         student: { currentClassId: classId },
       },
       select: {
@@ -438,10 +463,24 @@ export async function getAttendanceForDate(
   const nextDay = new Date(date.getTime() + 24 * 60 * 60 * 1000);
 
   try {
+    // Récupère les IDs des séances pour ce cours à cette date.
+    const sessions = await prisma.classSession.findMany({
+      where: {
+        class: { courseId },
+        sessionDate: { gte: date, lt: nextDay },
+      },
+      select: { id: true },
+    });
+
+    const sessionIds = sessions.map((s) => s.id);
+
+    if (sessionIds.length === 0) {
+      return [];
+    }
+
     const records = await prisma.attendance.findMany({
       where: {
-        courseId,
-        date: { gte: date, lt: nextDay },
+        sessionId: { in: sessionIds },
       },
       select: {
         studentId: true,
@@ -486,6 +525,10 @@ export async function saveAttendanceAction(
   try {
     const classId = String(formData.get("classId") ?? "").trim();
     const rawDay = String(formData.get("date") ?? "").trim();
+    const subjectName = String(formData.get("subjectName") ?? "").trim();
+    const chapter = String(formData.get("chapter") ?? "").trim();
+    const startHour = String(formData.get("startTime") ?? "").trim();
+    const endHour = String(formData.get("endTime") ?? "").trim();
 
     if (!classId) {
       return { ok: false, message: "Identifiant de la classe manquant." };
@@ -499,13 +542,22 @@ export async function saveAttendanceAction(
       };
     }
 
-    const { user, courseId } = await assertClassAccess(classId);
+    // Chapter est requis pour la séance
+    if (!chapter) {
+      return {
+        ok: false,
+        message: "Le chapitre de la séance est requis.",
+      };
+    }
+
+    const { user } = await assertClassAccess(classId);
 
     // Extraction des statuts soumis depuis le FormData.
     const entries: Array<{
       studentId: string;
       status: AttendanceStatus;
       notes: string | null;
+      arrivalTime?: Date;
     }> = [];
 
     for (const [key, value] of formData.entries()) {
@@ -523,10 +575,24 @@ export async function saveAttendanceAction(
 
       const notes = String(formData.get(`notes_${studentId}`) ?? "").trim();
 
+      // Si le statut est LATE, récupérer l'heure d'arrivée
+      const arrivalKey = `arrival_${studentId}`;
+      let arrivalTime: Date | undefined;
+      if (status === "LATE") {
+        const arrivalRaw = String(formData.get(arrivalKey) ?? "").trim();
+        if (arrivalRaw) {
+          const arrivalDate = buildSessionDateTime(rawDay, arrivalRaw);
+          if (arrivalDate) {
+            arrivalTime = arrivalDate;
+          }
+        }
+      }
+
       entries.push({
         studentId,
         status,
         notes: notes || null,
+        arrivalTime,
       });
     }
 
@@ -558,27 +624,51 @@ export async function saveAttendanceAction(
       }
     }
 
+    // Créer la ClassSession
+    const startTime = buildSessionDateTime(rawDay, startHour);
+    const endTime = buildSessionDateTime(rawDay, endHour);
+
+    if (!startTime || !endTime) {
+      return {
+        ok: false,
+        message: "Les heures de début et de fin sont invalides.",
+      };
+    }
+
+    const session = await prisma.classSession.create({
+      data: {
+        organizationId: user.organizationId,
+        classId,
+        subjectName: subjectName || "Cours",
+        chapter,
+        sessionDate: date,
+        startTime,
+        endTime,
+      },
+    });
+
     await prisma.$transaction(
       entries.map((entry) =>
         prisma.attendance.upsert({
           where: {
-            courseId_studentId_date: {
-              courseId,
+            sessionId_studentId: {
+              sessionId: session.id,
               studentId: entry.studentId,
-              date,
             },
           },
           create: {
             organizationId: user.organizationId,
-            courseId,
+            sessionId: session.id,
             classId,
             studentId: entry.studentId,
             status: entry.status,
+            arrivalTime: entry.arrivalTime,
             date,
             notes: entry.notes,
           },
           update: {
             status: entry.status,
+            arrivalTime: entry.arrivalTime,
             notes: entry.notes,
           },
         })
@@ -586,7 +676,7 @@ export async function saveAttendanceAction(
     );
 
     revalidatePath("/dashboard/attendance");
-    revalidatePath(`/dashboard/courses/${courseId}`);
+    revalidatePath(`/dashboard/classes/${classId}`);
 
     return { ok: true, savedCount: entries.length };
   } catch (error) {
@@ -922,8 +1012,16 @@ export async function getStudentAttendanceHistory(
         date: true,
         status: true,
         notes: true,
-        course: { select: { title: true } },
-        class: { select: { name: true } },
+        session: {
+          select: {
+            class: {
+              select: {
+                course: { select: { title: true } },
+                name: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -932,8 +1030,8 @@ export async function getStudentAttendanceHistory(
       date: record.date,
       status: record.status,
       notes: record.notes,
-      courseTitle: record.course.title,
-      className: record.class?.name ?? null,
+      courseTitle: record.session?.class.course.title ?? null,
+      className: record.session?.class.name ?? null,
     }));
   } catch (error) {
     if (isNextRedirectError(error)) throw error;

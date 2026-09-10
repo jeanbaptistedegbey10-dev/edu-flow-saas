@@ -210,10 +210,14 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
           date: { gte: monthStart, lt: monthEnd },
           ...(isTeacherRole
             ? {
-                OR: [
-                  { course: { teacherId: user.id } },
-                  { class: { teacherId: user.id } },
-                ],
+                session: {
+                  class: {
+                    OR: [
+                      { teacherId: user.id },
+                      { course: { teacherId: user.id } },
+                    ],
+                  },
+                },
               }
             : {}),
         },
@@ -258,10 +262,14 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
           organizationId: user.organizationId,
           ...(isTeacherRole
             ? {
-                OR: [
-                  { course: { teacherId: user.id } },
-                  { class: { teacherId: user.id } },
-                ],
+                session: {
+                  class: {
+                    OR: [
+                      { teacherId: user.id },
+                      { course: { teacherId: user.id } },
+                    ],
+                  },
+                },
               }
             : {}),
         },
@@ -272,7 +280,7 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
           date: true,
           status: true,
           student: { select: { id: true, firstName: true, lastName: true } },
-          class: { select: { name: true } },
+          session: { select: { class: { select: { name: true } } } },
         },
       }),
     ]);
@@ -374,7 +382,7 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
         id: row.id,
         studentId: row.student.id,
         studentName: `${row.student.firstName} ${row.student.lastName}`,
-        className: row.class?.name ?? null,
+        className: row.session?.class.name ?? null,
         date: row.date,
         status: row.status,
       }));
