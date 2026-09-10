@@ -809,6 +809,27 @@ export async function createStudentAction(
 
   const organizationId = await getCurrentOrganizationId();
 
+  // Contrôle d'unicité de l'email — le champ n'a pas de contrainte @unique
+  // au niveau du schéma (il est optionnel), mais l'application exige que deux
+  // étudiants d'une même organisation ne partagent pas la même adresse email.
+  if (parsed.data.email) {
+    const existing = await prisma.student.findFirst({
+      where: {
+        organizationId,
+        email: parsed.data.email,
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return {
+        status: "error",
+        message: "Un étudiant avec cet email existe déjà.",
+        fieldErrors: { email: "Cet email est déjà utilisé." },
+      };
+    }
+  }
+
   // Paramétrage des frais d'inscription de l'organisation active.
   const organization = await prisma.organization.findUnique({
     where: { id: organizationId },
@@ -1003,21 +1024,73 @@ export async function createStudentAction(
     } catch (error) {
       lastError = error;
 
+      // P2002 = violation de contrainte d'unicité.
       const isUniqueViolation =
-        error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002";
 
-      if (!isUniqueViolation) break;
+      if (isUniqueViolation) {
+        // La contrainte peut porter sur l'email (déjà vérifié ci-dessus en
+        // lecture, mais une course concurrente reste possible) ou sur le code
+        // étudiant généré aléatoirement — ce dernier cas est réessayé.
+        const target = error.meta?.target;
+        const targets = Array.isArray(target)
+          ? (target as string[])
+          : typeof target === "string"
+            ? [target]
+            : [];
+
+        if (targets.includes("email")) {
+          // L'email existe déjà — pas de retry, message explicite.
+          return {
+            status: "error",
+            message: "Un étudiant avec cet email existe déjà.",
+            fieldErrors: { email: "Cet email est déjà utilisé." },
+          };
+        }
+
+        // Contrainte sur studentCode (ou autre) — on relance une tentative
+        // avec un nouveau code généré (boucle for).
+        continue;
+      }
+
+      // Autre type d'erreur Prisma (P2025, P2003, etc.) — on sort de la boucle.
+      break;
     }
   }
 
   console.error("[createStudentAction] Échec de création :", lastError);
 
+  // Messages d'erreur contextuels selon le type d'erreur Prisma rencontrée.
+  let detailMessage =
+    "Une erreur est survenue lors de la création de l'étudiant.";
+
+  if (lastError instanceof Prisma.PrismaClientKnownRequestError) {
+    switch (lastError.code) {
+      case "P2002":
+        detailMessage =
+          "Conflit d'unicité détecté lors de la création : veuillez réessayer.";
+        break;
+      case "P2003":
+        detailMessage =
+          "Référence invalide (classe ou cours introuvable) : veuillez vérifier votre sélection.";
+        break;
+      case "P2025":
+        detailMessage =
+          "Enregistrement introuvable lors de la création : la classe sélectionnée a peut-être été modifiée.";
+        break;
+      default:
+        detailMessage = `Erreur de base de données (${lastError.code}) : ${lastError.message}`;
+    }
+  } else if (lastError instanceof Error) {
+    detailMessage = lastError.message;
+  }
+
   return {
     status: "error",
-    message: "Une erreur est survenue lors de la création de l'étudiant.",
+    message: detailMessage,
   };
 }
-
 /**
  * Met à jour un étudiant existant de l'organisation active.
  * Conçu pour être utilisé avec `useActionState` : reçoit l'état précédent et un `FormData`

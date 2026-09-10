@@ -68,7 +68,7 @@ type DemoFlowState = {
   errorMessage: string | null;
 };
 
-/** Étape 1 — nettoyage des étudiants et de la scolarité. */
+/** Étape 3 — étudiants et scolarité (racines, supprimés en dernier). */
 const STEP_STUDENTS: DemoFlowStep = {
   key: "students",
   label: "Nettoyage des étudiants et de la scolarité...",
@@ -80,7 +80,7 @@ const STEP_COURSES: DemoFlowStep = {
   label: "Suppression des cours, évaluations et présences...",
 };
 
-/** Étape 3 — données financières et paramètres. */
+/** Étape 1 — données financières et paramètres (dépendances, supprimés en premier). */
 const STEP_FINANCIAL: DemoFlowStep = {
   key: "financial",
   label: "Réinitialisation des données financières et paramètres...",
@@ -93,15 +93,15 @@ const STEP_INJECT: DemoFlowStep = {
 };
 
 const RESET_STEPS: DemoFlowStep[] = [
-  STEP_STUDENTS,
-  STEP_COURSES,
   STEP_FINANCIAL,
+  STEP_COURSES,
+  STEP_STUDENTS,
 ];
 
 const INJECT_STEPS: DemoFlowStep[] = [
-  STEP_STUDENTS,
-  STEP_COURSES,
   STEP_FINANCIAL,
+  STEP_COURSES,
+  STEP_STUDENTS,
   STEP_INJECT,
 ];
 
@@ -310,30 +310,31 @@ export function DemoDataCard({
         },
       }));
 
-    startTransition(async () => {
-      let currentStep: StepKey = "students";
+        startTransition(async () => {
+      let currentStep: StepKey = "financial";
       const merged: DemoDataResetCounts = { ...ZERO_RESET_COUNTS };
 
       try {
         // ---------------------------------------------------------------
-        // Étape 1 — Nettoyage des étudiants et de la scolarité.
+        // Étape 1 — Nettoyage des données financières et paramètres
+        // (dépendances : Expenses, Payments, Tasks, etc.)
         // ---------------------------------------------------------------
-        currentStep = "students";
-        mark("students", "running");
-        const stepStudents = await resetStudentsStepAction(
+        currentStep = "financial";
+        mark("financial", "running");
+        const stepFinancial = await resetFinancialStepAction(
           INITIAL_STATE,
           formData
         );
-        if (stepStudents.status !== "success") {
+        if (stepFinancial.status !== "success") {
           fail(
-            "students",
-            stepStudents.message ??
-              "Échec du nettoyage des étudiants et de la scolarité."
+            "financial",
+            stepFinancial.message ??
+              "Échec de la réinitialisation des données financières et paramètres."
           );
           return;
         }
-        mergeResetCounts(merged, stepStudents.counts);
-        mark("students", "done");
+        mergeResetCounts(merged, stepFinancial.counts);
+        mark("financial", "done");
 
         // ---------------------------------------------------------------
         // Étape 2 — Suppression des cours, évaluations et présences.
@@ -356,24 +357,25 @@ export function DemoDataCard({
         mark("courses", "done");
 
         // ---------------------------------------------------------------
-        // Étape 3 — Réinitialisation des données financières et paramètres.
+        // Étape 3 — Nettoyage des étudiants et de la scolarité (racines).
         // ---------------------------------------------------------------
-        currentStep = "financial";
-        mark("financial", "running");
-        const stepFinancial = await resetFinancialStepAction(
+        currentStep = "students";
+        mark("students", "running");
+        const stepStudents = await resetStudentsStepAction(
           INITIAL_STATE,
           formData
         );
-        if (stepFinancial.status !== "success") {
+        if (stepStudents.status !== "success") {
           fail(
-            "financial",
-            stepFinancial.message ??
-              "Échec de la réinitialisation des données financières et paramètres."
+            "students",
+            stepStudents.message ??
+              "Échec du nettoyage des étudiants et de la scolarité."
           );
           return;
         }
-        mergeResetCounts(merged, stepFinancial.counts);
-        mark("financial", "done");
+        mergeResetCounts(merged, stepStudents.counts);
+        mark("students", "done");
+
 
         // Réinitialisation : terminé (bandeau vert + bouton unique « OK »).
         if (target === "reset") {

@@ -84,7 +84,7 @@ export function AddExpenseDialog({ members }: { members: StaffMemberDTO[] }) {
         </DialogHeader>
 
         <form action={formAction} className="grid gap-4">
-          {state.message && state.status === "error" && !state.fieldErrors ? (
+          {state.message && state.status === "error" ? (
             <p
               role="alert"
               className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"

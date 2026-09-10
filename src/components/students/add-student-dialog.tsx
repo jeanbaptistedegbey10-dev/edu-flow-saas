@@ -90,6 +90,47 @@ export function AddStudentDialog({
   // facultatifs (l'étudiant s'assume financièrement lui-même).
   const [isSelfFinanced, setIsSelfFinanced] = React.useState(false);
 
+    // useActionState conserve l'état du formulaire (y compris les saisies
+  // utilisateur) entre les re-renders : les inputs non contrôlés conservent
+  // leurs valeurs tant que la modale reste ouverte, et le state ne se met à
+  // jour qu'avec le résultat de l'action serveur (erreurs détaillées incluses).
+  const [state, formAction, pending] = useActionState(
+    async (_prevState: StudentFormState, rawFormData: FormData) => {
+      // Clone les entrées puis convertit la sentinelle « aucune classe »
+      // en chaîne vide attendue par l'action serveur.
+      const formData = new FormData();
+      for (const [key, value] of rawFormData.entries()) {
+        formData.append(key, value);
+      }
+
+      if (String(formData.get("classId") ?? "") === NONE_VALUE) {
+        formData.set("classId", "");
+      }
+
+      const result = await createStudentAction(_prevState, formData);
+
+      // Fermeture de la modale et remise à zéro des champs financiers uniquement
+      // sur succès — en cas d'erreur, la modale reste ouverte et les saisies
+      // utilisateur sont préservées (inputs non contrôlés + state React stable).
+      if (result.status === "success") {
+        setOpen(false);
+        setSelectedClassId(NONE_VALUE);
+        setDiscountType("FIXED");
+        setTotalCost("");
+        setDiscount("");
+        setLegacyExcluded(true);
+        setLegacyPaidAmountInput("");
+      }
+
+      return result;
+    },
+    INITIAL_FORM_STATE
+  );
+
+  const fieldErrors = state.fieldErrors ?? {};
+  const errorMessage =
+    state.status === "error" && state.message ? state.message : undefined;
+
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
   const classFeeLocked = selectedClass !== null;
 
@@ -131,39 +172,6 @@ export function AddStudentDialog({
     return !Number.isNaN(raw) && raw > 0;
   }, [legacyExcluded, legacyPaidAmountInput]);
 
-  // Enveloppe l'action serveur pour fermer la modale dès que la création réussit.
-  const [state, formAction, pending] = useActionState(
-    async (_prevState: StudentFormState, rawFormData: FormData) => {
-      // Clone les entrées puis convertit la sentinelle « aucune classe »
-      // en chaîne vide attendue par l'action serveur.
-      const formData = new FormData();
-      for (const [key, value] of rawFormData.entries()) {
-        formData.append(key, value);
-      }
-
-      if (String(formData.get("classId") ?? "") === NONE_VALUE) {
-        formData.set("classId", "");
-      }
-
-      const result = await createStudentAction(_prevState, formData);
-
-      if (result.status === "success") {
-        setOpen(false);
-        setSelectedClassId(NONE_VALUE);
-        setDiscountType("FIXED");
-        setTotalCost("");
-        setDiscount("");
-        setLegacyExcluded(true);
-        setLegacyPaidAmountInput("");
-      }
-
-      return result;
-    },
-    INITIAL_FORM_STATE
-  );
-
-  const fieldErrors = state.fieldErrors ?? {};
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -186,12 +194,12 @@ export function AddStudentDialog({
           action={formAction}
           className="grid max-h-[70vh] gap-4 overflow-y-auto pr-2"
         >
-          {state.message && state.status === "error" && !state.fieldErrors ? (
+          {errorMessage ? (
             <p
               role="alert"
               className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
             >
-              {state.message}
+              {errorMessage}
             </p>
           ) : null}
 
