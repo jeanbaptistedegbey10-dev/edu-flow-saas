@@ -11,8 +11,8 @@ import {
   resetFinancialAndSettingsData,
   resetOrganizationData,
   resetStudentsAndSchoolingData,
-  type DemoDataResetCounts,
 } from "@/lib/demo-data";
+import type { DemoDataActionState } from "@/lib/demo-data-constants";
 import { assertCanMutate } from "@/lib/license-check";
 import {
   getValidatedSessionContext,
@@ -22,6 +22,12 @@ import {
 // --------------------------------------
 // Données de démonstration — Server Actions
 // --------------------------------------
+//
+// ⚠️ Contrainte « use server » : ce module n'exporte QUE des fonctions
+// asynchrones. Les valeurs partagées (état initial, type d'état d'action)
+// vivent dans `@/lib/demo-data-constants` — exporter une constante ou un
+// objet depuis un fichier « use server » provoque une erreur de compilation
+// Next.js (« Only async functions are allowed to be exported »).
 //
 // Exposées au tableau de bord (carte « Données de démonstration ») :
 // - `injectDemoDataAction`  : injecte le jeu de démonstration (idempotent) ;
@@ -48,19 +54,6 @@ import {
 // /billing), rôle ADMIN / SUPER_ADMIN et confirmation mot-clé (SUPPRIMER ou
 // CONFIRMER). Une erreur de redirection (`NEXT_REDIRECT`) est TOUJOURS
 // relancée, jamais convertie en état d'erreur métier.
-
-/** État sérialisable retourné aux composants clients (`useActionState`). */
-export type DemoDataActionState = {
-  status: "idle" | "success" | "error";
-  message?: string;
-  /** Comptes supprimés (renseignés par les sous-actions en cas de succès). */
-  counts?: DemoDataResetCounts;
-};
-
-const INITIAL_ACTION_STATE: DemoDataActionState = { status: "idle" };
-
-/** État initial partagé par les formulaires client. */
-export { INITIAL_ACTION_STATE };
 
 /** Mots de confirmation reconnus par les étapes de nettoyage. */
 type ResetConfirmationWord = "SUPPRIMER" | "CONFIRMER";
@@ -319,9 +312,10 @@ export async function injectDemoDataAction(
       };
     }
 
-            // 4. ÉCRASEMENT CONFIRMÉ : si l'organisation contient déjà des données,
+    // 4. ÉCRASEMENT CONFIRMÉ : si l'organisation contient déjà des données,
     //    l'injection les remplace. Une confirmation mot-clé (CONFIRMER) est
     //    exigée côté serveur — le garde-fou ne repose jamais sur le seul client.
+    //    La même sonde `presence` alimente ensuite l'optimisation anti-timeout.
     const presence = await getOrganizationDataPresence(context.organizationId);
 
     if (presence.hasData) {
@@ -336,26 +330,30 @@ export async function injectDemoDataAction(
             "Votre organisation contient déjà des données. Tapez CONFIRMER pour les remplacer par le jeu de démonstration (écrasement définitif).",
         };
       }
+
+      // 4b. Données résiduelles présentes : réinitialisation complète avant
+      //     l'injection (« reset-before-inject » idempotent, sans échappatoire).
+      const reset = await resetOrganizationData(context.organizationId);
+
+      if (!reset.ok) {
+        console.error(
+          "[injectDemoDataAction] Réinitialisation préalable échouée :",
+          reset.reason
+        );
+        return {
+          status: "error",
+          message:
+            "Impossible de nettoyer les données existantes avant l'injection. Veuillez réessayer ou contacter le support.",
+        };
+      }
     }
 
-    // 4b. TOUJOURS exécuter une réinitialisation complète avant l'injection,
-    //     même si `hasData` est faux. Cela garantit que toute donnée résiduelle
-    //     ou partiellement supprimée (dossiers orphelins, migrations interrompues…)
-    //     est nettoyée avant que le seeding ne commence — principe de
-    //     « reset-before-inject » idempotent et sans échappatoire.
-    const reset = await resetOrganizationData(context.organizationId);
-
-    if (!reset.ok) {
-      console.error(
-        "[injectDemoDataAction] Réinitialisation préalable échouée :",
-        reset.reason
-      );
-      return {
-        status: "error",
-        message:
-          "Impossible de nettoyer les données existantes avant l'injection. Veuillez réessayer ou contacter le support.",
-      };
-    }
+    // 4c. OPTIMISATION ANTI-TIMEOUT : si l'organisation est DÉJÀ VIDE (cas
+    //     nominal après le pas-à-pas de la carte, ou toute première injection),
+    //     la réinitialisation complète est SKIPPÉE. Elle coûterait ~15
+    //     allers-retours SQL dans la MÊME requête HTTP que l'injection et
+    //     ferait dépasser le budget Serverless (10 s) — d'où les faux
+    //     dialogs d'erreur Vercel alors que l'injection aurait pu réussir.
 
     // 5. Opérations de données — encapsulées dans le même try/catch global.
     const result = await injectDemoDataForOrganization(

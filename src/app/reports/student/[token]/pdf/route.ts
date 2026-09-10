@@ -58,7 +58,7 @@ export async function GET(
   const [attendanceEntries, payments, academicRecord] = await Promise.all([
     getStudentAttendanceHistory(studentId),
     prisma.payment.findMany({
-      where: { studentId, organizationId, status: "COMPLETED" },
+      where: { studentId, organizationId, status: "COMPLETED", isVoided: false },
       select: { amount: true },
     }),
     prisma.evaluation.findMany({

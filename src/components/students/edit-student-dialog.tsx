@@ -36,19 +36,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+// Les statuts sont strictement limités à trois options produit :
+// Prospect, Inscrit, Abandonné (voir src/lib/student-status.ts).
+import {
+  CANONICAL_STUDENT_STATUS_OPTIONS,
+  getStudentStatusLabel,
+} from "@/lib/student-status";
 import { cn } from "@/lib/utils";
 
 /** Valeur sentinelle pour les champs Select optionnels (Radix interdit ""). */
 const NONE_VALUE = "__none__";
-
-const STATUS_OPTIONS = [
-  { value: "PROSPECT", label: "Prospect" },
-  { value: "ENROLLED", label: "Inscrit" },
-  { value: "IN_PROGRESS", label: "En cours" },
-  { value: "COMPLETED", label: "Terminé" },
-  { value: "SUSPENDED", label: "Suspendu" },
-  { value: "DROPPED_OUT", label: "Abandon" },
-] as const;
 
 const INITIAL_FORM_STATE: StudentFormState = { status: "idle" };
 
@@ -116,6 +113,23 @@ function EditStudentForm({
 
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
   const classFeeLocked = selectedClass !== null;
+
+  // Options de statut : les TROIS statuts canoniques (Prospect, Inscrit,
+  // Abandonné), complétés par le statut historique de l'étudiant lorsque
+  // celui-ci date d'avant la simplification — ainsi la valeur existante est
+  // toujours affichée et ne peut pas être perdue à l'enregistrement.
+  const statusOptions = React.useMemo(() => {
+    const options = CANONICAL_STUDENT_STATUS_OPTIONS.map((option) => ({
+      ...option,
+    }));
+    if (!options.some((option) => option.value === student.status)) {
+      options.push({
+        value: student.status,
+        label: `${getStudentStatusLabel(student.status)} (statut historique)`,
+      });
+    }
+    return options;
+  }, [student.status]);
 
   /** Réaction à la sélection d'une classe : pré-remplit et verrouille les frais. */
   const handleClassChange = (value: string) => {
@@ -267,7 +281,7 @@ function EditStudentForm({
                 <SelectValue placeholder="Sélectionner un statut" />
               </SelectTrigger>
               <SelectContent>
-                {STATUS_OPTIONS.map((option) => (
+                {statusOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>

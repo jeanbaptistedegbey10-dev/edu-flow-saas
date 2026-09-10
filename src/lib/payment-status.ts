@@ -64,3 +64,14 @@ export function getPaymentStatusBadgeClass(status: PaymentStatus): string {
 export function getPaymentMethodLabel(method: PaymentMethod): string {
   return PAYMENT_METHOD_LABELS[method];
 }
+
+// --------------------------------------
+// Écritures suspendues (Payment.isVoided)
+// --------------------------------------
+
+/** Libellé d'une écriture suspendue (hors trésorerie active). */
+export const PAYMENT_VOIDED_LABEL = "Suspendu";
+
+/** Classes Tailwind du badge d'une écriture suspendue. */
+export const PAYMENT_VOIDED_BADGE_CLASSES =
+  "border border-slate-200/60 bg-slate-50 text-slate-600 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400";

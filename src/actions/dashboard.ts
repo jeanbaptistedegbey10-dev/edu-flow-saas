@@ -486,9 +486,10 @@ export async function getDashboardStats(): Promise<DashboardStatsDTO> {
         where: { organizationId, status: "PROSPECT" },
       }),
 
-      // Chiffre d'affaires : somme des paiements réglés (COMPLETED).
+      // Chiffre d'affaires : somme des paiements réglés (COMPLETED) actifs —
+      // les écritures suspendues (`isVoided`) sont exclues de la trésorerie.
       prisma.payment.aggregate({
-        where: { organizationId, status: "COMPLETED" },
+        where: { organizationId, status: "COMPLETED", isVoided: false },
         _sum: { amount: true },
       }),
 
@@ -518,12 +519,13 @@ export async function getDashboardStats(): Promise<DashboardStatsDTO> {
         },
       }),
 
-      // Les 5 derniers règlements enregistrés rattachés à un étudiant.
+      // Les 5 derniers règlements ACTIFS enregistrés rattachés à un étudiant.
       // (`studentId` étant nullable au schéma, on écarte ici les lignes sans
-      // étudiant afin de respecter le contrat `RecentPaymentDTO`.)
+      // étudiant afin de respecter le contrat `RecentPaymentDTO` ; les
+      // écritures suspendues — étudiant repassé Prospect — sont écartées.)
       prisma.payment
         .findMany({
-          where: { organizationId },
+          where: { organizationId, isVoided: false },
           orderBy: { paidAt: "desc" },
           take: 5,
           select: {

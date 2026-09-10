@@ -216,23 +216,26 @@ export async function getDashboardStatsAction(): Promise<DashboardAnalyticsDTO> 
       travelPaidGroups,
       recentPaymentsRows,
     ] = await Promise.all([
-      // Encaissements scolaires du mois : paiements COMPLETED non rattachés à
-      // un dossier voyage.
+      // Encaissements scolaires du mois : paiements COMPLETED actifs (non
+      // suspendus) non rattachés à un dossier voyage.
       prisma.payment.aggregate({
         where: {
           organizationId,
           status: "COMPLETED",
+          isVoided: false,
           paidAt: { gte: monthStart, lt: monthEnd },
           travelProcedureId: null,
         },
         _sum: { amount: true },
       }),
 
-      // Encaissements voyages du mois : paiements COMPLETED liés à un dossier.
+      // Encaissements voyages du mois : paiements COMPLETED actifs (non
+      // suspendus) liés à un dossier.
       prisma.payment.aggregate({
         where: {
           organizationId,
           status: "COMPLETED",
+          isVoided: false,
           paidAt: { gte: monthStart, lt: monthEnd },
           travelProcedureId: { not: null },
         },
@@ -282,13 +285,14 @@ export async function getDashboardStatsAction(): Promise<DashboardAnalyticsDTO> 
         },
       }),
 
-      // Total encaissé par étudiant (règlements confirmés uniquement, même
-      // règle que src/actions/students.ts getStudentDetail).
+      // Total encaissé par étudiant (règlements confirmés actifs uniquement —
+      // non suspendus, même règle que src/actions/students.ts getStudentDetail).
       prisma.payment.groupBy({
         by: ["studentId"],
         where: {
           organizationId,
           status: "COMPLETED",
+          isVoided: false,
           studentId: { not: null },
         },
         _sum: { amount: true },
@@ -318,23 +322,24 @@ export async function getDashboardStatsAction(): Promise<DashboardAnalyticsDTO> 
         },
       }),
 
-      // Total encaissé par dossier voyage (COMPLETED + PARTIAL, même règle
-      // que la vue liste des voyages).
+      // Total encaissé par dossier voyage (COMPLETED + PARTIAL actifs — non
+      // suspendus, même règle que la vue liste des voyages).
       prisma.payment.groupBy({
         by: ["travelProcedureId"],
         where: {
           organizationId,
           status: { in: ["COMPLETED", "PARTIAL"] },
+          isVoided: false,
           travelProcedureId: { not: null },
         },
         _sum: { amount: true },
       }),
 
-      // Les 5 derniers versements enregistrés, rattachés à un étudiant
+      // Les 5 derniers versements ACTIFS enregistrés, rattachés à un étudiant
       // (`studentId` nullable au schéma : on écarte les lignes orphelines).
       prisma.payment
         .findMany({
-          where: { organizationId },
+          where: { organizationId, isVoided: false },
           orderBy: { paidAt: "desc" },
           take: 5,
           select: {
@@ -547,12 +552,13 @@ export async function getFinancialOverviewAction(
 
   try {
     const [payments, sales] = await Promise.all([
-      // Paiements confirmés de la fenêtre : classés voyage si liés à un
-      // dossier, sinon scolarité.
+      // Paiements confirmés ACTIFS de la fenêtre : classés voyage si liés à
+      // un dossier, sinon scolarité.
       prisma.payment.findMany({
         where: {
           organizationId,
           status: "COMPLETED",
+          isVoided: false,
           paidAt: { gte: windowStart },
         },
         select: {
@@ -1023,11 +1029,12 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         where: { id: organizationId },
         select: { initialCashBalance: true },
       }),
-      // Encaissements du mois (paiements confirmés).
+      // Encaissements du mois (paiements confirmés actifs).
       prisma.payment.aggregate({
         where: {
           organizationId,
           status: "COMPLETED",
+          isVoided: false,
           paidAt: { gte: monthStart, lt: nextMonth },
         },
         _sum: { amount: true },
@@ -1049,9 +1056,9 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         },
         _sum: { amount: true },
       }),
-      // Encaissements totaux (tous temps).
+      // Encaissements totaux (tous temps, paiements actifs).
       prisma.payment.aggregate({
-        where: { organizationId, status: "COMPLETED" },
+        where: { organizationId, status: "COMPLETED", isVoided: false },
         _sum: { amount: true },
       }),
       prisma.sale.aggregate({
@@ -1063,11 +1070,12 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         where: { organizationId },
         _sum: { amount: true },
       }),
-      // Paiements confirmés de la fenêtre (série mensuelle du graphique).
+      // Paiements confirmés ACTIFS de la fenêtre (série mensuelle du graphique).
       prisma.payment.findMany({
         where: {
           organizationId,
           status: "COMPLETED",
+          isVoided: false,
           paidAt: { gte: windowStart },
         },
         select: { amount: true, paidAt: true },
@@ -1086,9 +1094,10 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         where: { organizationId, expenseDate: { gte: windowStart } },
         select: { amount: true, expenseDate: true },
       }),
-      // Répartition des recettes (tous temps) : voyage si dossier lié.
+      // Répartition des recettes (tous temps, paiements actifs) : voyage si
+      // dossier lié.
       prisma.payment.findMany({
-        where: { organizationId, status: "COMPLETED" },
+        where: { organizationId, status: "COMPLETED", isVoided: false },
         select: { amount: true, travelProcedureId: true },
       }),
       // Répartition des dépenses par catégorie (tous temps).
@@ -1096,9 +1105,9 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         where: { organizationId },
         select: { amount: true, category: true },
       }),
-      // Les 20 derniers paiements (journal unifié de caisse).
+      // Les 20 derniers paiements ACTIFS (journal unifié de caisse).
       prisma.payment.findMany({
-        where: { organizationId, status: "COMPLETED" },
+        where: { organizationId, status: "COMPLETED", isVoided: false },
         orderBy: { paidAt: "desc" },
         take: 20,
         select: {

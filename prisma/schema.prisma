@@ -609,6 +609,12 @@ model Payment {
   currency          String        @default("XOF")
   paymentMethod     PaymentMethod
   status            PaymentStatus @default(COMPLETED)
+  /// Écriture suspendue (hors trésorerie active) : valorisé automatiquement
+  /// lorsque le statut de l'étudiant repasse à PROSPECT (« Inscrit ➔ Prospect »).
+  /// Les enregistrements et reçus sont conservés, mais le montant est exclu de
+  /// tous les totaux de trésorerie / cash-flow. Restauré (`isVoided = false`)
+  /// lors d'une réinscription (« Prospect ➔ Inscrit »).
+  isVoided          Boolean       @default(false)
   reference         String?       @unique
   description       String?
   paidAt            DateTime      @default(now())

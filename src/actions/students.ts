@@ -67,6 +67,7 @@ export type StudentFormField =
   | "discountType"
   | "legacyPaidAmount"
   | "classId"
+  | "registrationFeePayment"
   | "isSelfFinanced"
   | "parentName"
   | "parentRelation"
@@ -90,6 +91,14 @@ export type StudentMutationResult =
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Statuts acceptés à la validation serveur. Les contrôles de saisie ne
+ * proposent plus que TROIS options produit (Prospect, Inscrit, Abandonné —
+ * voir `CANONICAL_STUDENT_STATUS_OPTIONS`), mais la validation reste tolérante
+ * sur l'ensemble de l'enum afin de ne jamais bloquer l'édition de fiches
+ * historiques créées avant la simplification (IN_PROGRESS, COMPLETED,
+ * SUSPENDED).
+ */
 const STUDENT_STATUSES: readonly StudentStatus[] = [
   "PROSPECT",
   "ENROLLED",
@@ -479,12 +488,21 @@ function computeFinancialsWithFee(
  * Fiche détaillée d'un étudiant : informations, récapitulatif financier
  * et historique des règlements.
  */
+/**
+ * Historique d'un règlement rattaché à la fiche d'un étudiant.
+ */
 export type StudentPaymentDTO = {
   id: string;
   amount: number;
   currency: string;
   paymentMethod: string;
   status: string;
+  /**
+   * Écriture suspendue (hors trésorerie active) : valorisé lorsque le statut
+   * de l'étudiant repasse à PROSPECT — le règlement reste consultable
+   * (historique / reçu) mais son montant n'alimente plus la caisse.
+   */
+  isVoided: boolean;
   reference: string | null;
   description: string | null;
   paidAt: Date;
@@ -595,9 +613,11 @@ export async function getStudentDetail(
     }
 
     const [paidAggregate, payments] = await Promise.all([
-      // Montant encaissé : uniquement les règlements confirmés (COMPLETED).
+      // Montant encaissé : uniquement les règlements confirmés (COMPLETED) et
+      // actifs (non suspendus — `isVoided` exclut les écritures d'un étudiant
+      // repassé au statut Prospect).
       prisma.payment.aggregate({
-        where: { studentId, organizationId, status: "COMPLETED" },
+        where: { studentId, organizationId, status: "COMPLETED", isVoided: false },
         _sum: { amount: true },
       }),
       prisma.payment.findMany({
@@ -609,6 +629,7 @@ export async function getStudentDetail(
           currency: true,
           paymentMethod: true,
           status: true,
+          isVoided: true,
           reference: true,
           description: true,
           paidAt: true,
@@ -846,18 +867,71 @@ export async function createStudentAction(
 
   const registrationFee = organization.defaultRegistrationFee;
 
-  // Étudiant « hérité » : dès que des paiements antérieurs hors système sont
-  // saisis ou que la case « Ne pas inclure dans le journal de caisse actuel »
-  // est cochée, les frais d'inscription (15 000 FCFA) sont réputés réglés hors
-  // système — ils ne doivent JAMAIS être injectés dans la caisse live.
+  // ---------------------------------------------------------------
+  // Frais d'inscription (15 000 FCFA par défaut) — mode d'encaissement
+  // ---------------------------------------------------------------
+  // Champ OBLIGATOIRE « registrationFeePayment » dès que le statut est
+  // « Inscrit » :
+  //   - PAYE              → recette officielle créée dans le système
+  //                         (comptabilité / trésorerie) ;
+  //   - PAYE_HORS_SYSTEME → frais réputés réglés sur la fiche de l'étudiant,
+  //                         AUCUNE écriture dans le journal de caisse.
+  // Pour un statut Prospect / Abandonné : aucun frais facturé.
+  const rawFeeChoice = String(formData.get("registrationFeePayment") ?? "")
+    .trim()
+    .toUpperCase();
+  const registrationFeeChoice: "PAYE" | "PAYE_HORS_SYSTEME" | "" =
+    rawFeeChoice === "PAYE"
+      ? "PAYE"
+      : rawFeeChoice === "PAYE_HORS_SYSTEME"
+        ? "PAYE_HORS_SYSTEME"
+        : "";
+
+  if (
+    parsed.data.status === "ENROLLED" &&
+    registrationFee > 0 &&
+    !registrationFeeChoice
+  ) {
+    return {
+      status: "error",
+      message: "Veuillez corriger les champs indiqués.",
+      fieldErrors: {
+        registrationFeePayment:
+          "Veuillez sélectionner le statut du paiement des frais d'inscription.",
+      },
+    };
+  }
+
+  // Étudiant « hérité » (repli historique, champ absent) : dès que des
+  // paiements antérieurs hors système sont saisis ou que la case « Ne pas
+  // inclure dans le journal de caisse actuel » est cochée, les frais
+  // d'inscription sont réputés réglés hors système — replacés par le choix
+  // explicite du formulaire dès qu'il est présent.
   const registrationFeeExcluded =
     parsed.data.legacyExcludeFromJournal || parsed.data.legacyPaidAmount > 0;
 
-  // Un nouvel étudiant n'a jamais réglé les frais d'inscription : ils sont
-  // facturés dès cette première inscription (si > 0), sauf pour un étudiant
-  // hérité dont les frais sont déjà réputés réglés hors système.
+  type RegistrationFeeMode = "SYSTEM" | "OFF_SYSTEM" | "NONE";
+  const registrationFeeMode: RegistrationFeeMode =
+    parsed.data.status !== "ENROLLED"
+      ? "NONE"
+      : registrationFeeChoice === "PAYE"
+        ? "SYSTEM"
+        : registrationFeeChoice === "PAYE_HORS_SYSTEME"
+          ? "OFF_SYSTEM"
+          : registrationFeeExcluded
+            ? "OFF_SYSTEM"
+            : "SYSTEM";
+
+  // Recette en caisse UNIQUEMENT pour le mode « Payé » (système).
   const appliesRegistrationFee =
-    registrationFee > 0 && !registrationFeeExcluded;
+    registrationFeeMode === "SYSTEM" && registrationFee > 0;
+
+  // Frais d'inscription réglés (fiche étudiant) pour tout étudiant « Inscrit »
+  // dont les frais ont été déclarés payés (système OU hors système). Un
+  // Prospect / Abandonné n'a pas réglé les frais (ils pourront être facturés
+  // lors de son passage au statut « Inscrit »).
+  const hasPaidRegistrationFee =
+    registrationFee <= 0 || registrationFeeMode !== "NONE";
 
   // Classe / cohorte ciblée (validation multi-tenant) — résolue AVANT le
   // calcul financier afin d'appliquer automatiquement les frais de la classe
@@ -914,7 +988,7 @@ export async function createStudentAction(
             netAmount: financials.netAmount,
             legacyPaidAmount: financials.legacyPaidAmount,
             legacyAmountInCashJournal: legacyInJournal,
-            hasPaidRegistrationFee: true,
+            hasPaidRegistrationFee,
             isSelfFinanced: parsed.data.isSelfFinanced,
             parentName: parsed.data.parentName,
             parentRelation: parsed.data.parentRelation,
@@ -1000,13 +1074,14 @@ export async function createStudentAction(
         });
       }
 
-      const feeNote = appliesRegistrationFee
-        ? ` Frais d'inscription (${formatFcfa(registrationFee)}) encaissés.`
-        : registrationFeeExcluded
-          ? ` Frais d'inscription (${formatFcfa(
-              registrationFee
-            )}) réputés réglés hors système (aucune écriture en caisse).`
-          : "";
+      const feeNote =
+        registrationFee > 0 && registrationFeeMode === "SYSTEM"
+          ? ` Frais d'inscription (${formatFcfa(registrationFee)}) encaissés.`
+          : registrationFee > 0 && registrationFeeMode === "OFF_SYSTEM"
+            ? ` Frais d'inscription (${formatFcfa(
+                registrationFee
+              )}) réputés réglés hors système (aucune écriture en caisse).`
+            : "";
 
       const legacyNote =
         financials.legacyPaidAmount > 0
@@ -1141,6 +1216,9 @@ export async function updateStudentAction(
         currentClassId: true,
         legacyPaidAmount: true,
         legacyAmountInCashJournal: true,
+        // Statut actuel : pilote la machine à états des règlements
+        // (suspension / restauration) lors d'un changement de statut.
+        status: true,
       },
     });
 
@@ -1226,7 +1304,10 @@ export async function updateStudentAction(
       legacyInJournal !== existing.legacyAmountInCashJournal ||
       legacyInJournal;
 
-    await prisma.$transaction(async (tx) => {
+    // Note comptable générée par la machine à états des statuts (calculée en
+    // fin de transaction, retournée par celle-ci) — ajoutée au message de
+    // succès.
+    const statusImpactNote = await prisma.$transaction(async (tx) => {
       await tx.student.update({
         where: { id: studentId },
         data: {
@@ -1328,6 +1409,52 @@ export async function updateStudentAction(
           },
         });
       }
+
+      // ---------------------------------------------------------------
+      // Machine à états des statuts — impact comptable du changement
+      // (exécuté en FIN de transaction pour couvrir TOUTES les écritures
+      // de l'étudiant, y compris celles créées ci-dessus) :
+      //
+      //   • X ➔ PROSPECT    : tous les règlements ACTIFS sont SUSPENDUS
+      //     (`isVoided = true`). Les enregistrements et reçus restent
+      //     consultables, mais les montants sortent de la trésorerie /
+      //     du cash-flow actif.
+      //   • X ➔ ENROLLED    : les règlements suspendus sont RESTAURÉS
+      //     (`isVoided = false`) et réintègrent le grand livre actif.
+      //   • X ➔ DROPPED_OUT : AUCUNE écriture modifiée — l'argent a été
+      //     réellement encaissé, l'historique complet est conservé.
+      // ---------------------------------------------------------------
+      const previousStatus = existing.status;
+      const nextStatus = parsed.data.status;
+
+      let statusNote: string | null = null;
+
+      if (previousStatus !== nextStatus) {
+        if (nextStatus === "PROSPECT") {
+          const voided = await tx.payment.updateMany({
+            where: { organizationId, studentId, isVoided: false },
+            data: { isVoided: true },
+          });
+
+          statusNote =
+            voided.count > 0
+              ? `Statut « Prospect » : ${voided.count} règlement(s) suspendu(s) et exclu(s) de la trésorerie active.`
+              : "Statut « Prospect » : aucun règlement actif à suspendre.";
+        } else if (nextStatus === "ENROLLED") {
+          const restored = await tx.payment.updateMany({
+            where: { organizationId, studentId, isVoided: true },
+            data: { isVoided: false },
+          });
+
+          statusNote =
+            restored.count > 0
+              ? `Statut « Inscrit » : ${restored.count} règlement(s) suspendu(s) restauré(s) dans la caisse active.`
+              : null;
+        }
+        // DROPPED_OUT : règlements conservés intacts (aucune écriture).
+      }
+
+      return statusNote;
     });
 
     revalidatePath("/dashboard/students");
@@ -1365,6 +1492,10 @@ export async function updateStudentAction(
               financials.legacyPaidAmount
             )}) inclus dans le journal de caisse.`
       );
+    }
+
+    if (statusImpactNote) {
+      notes.push(statusImpactNote.trim());
     }
 
     return {

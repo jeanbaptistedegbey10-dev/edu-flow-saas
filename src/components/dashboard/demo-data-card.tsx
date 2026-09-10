@@ -15,8 +15,8 @@ import {
   resetCoursesStepAction,
   resetFinancialStepAction,
   resetStudentsStepAction,
-  type DemoDataActionState,
 } from "@/lib/actions/demo-data";
+import type { DemoDataActionState } from "@/lib/demo-data-constants";
 import type { DemoDataResetCounts } from "@/lib/demo-data";
 import {
   DemoProgressModal,

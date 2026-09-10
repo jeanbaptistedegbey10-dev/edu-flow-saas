@@ -478,7 +478,10 @@ export async function getTravelProcedures(): Promise<TravelProcedureDTO[]> {
             },
           },
           payments: {
-            where: { status: { in: ["COMPLETED", "PARTIAL"] } },
+            // Même règle que la vue liste : seuls les règlements aboutis
+            // (COMPLETED/PARTIAL) et ACTIFS (non suspendus) alimentent le
+            // total encaissé.
+            where: { status: { in: ["COMPLETED", "PARTIAL"] }, isVoided: false },
             select: { amount: true },
           },
         },
@@ -649,8 +652,9 @@ export async function getTravelProcedureDetail(
       },
       payments: {
         // Même règle que la vue liste : seuls les règlements aboutis
-        // (COMPLETED/PARTIAL) alimentent le total encaissé.
-        where: { status: { in: ["COMPLETED", "PARTIAL"] } },
+        // (COMPLETED/PARTIAL) et ACTIFS (non suspendus) alimentent le total
+        // encaissé.
+        where: { status: { in: ["COMPLETED", "PARTIAL"] }, isVoided: false },
         orderBy: { paidAt: "desc" },
         select: {
           id: true,

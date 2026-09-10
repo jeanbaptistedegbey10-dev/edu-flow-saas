@@ -46,6 +46,7 @@ export function PaymentReceiptButton({
       currency: payment.currency,
       paymentMethod: payment.paymentMethod as PaymentMethod,
       status: payment.status as PaymentStatus,
+      isVoided: payment.isVoided,
       reference: payment.reference,
       description: payment.description,
       paidAt: payment.paidAt,

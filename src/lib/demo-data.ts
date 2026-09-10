@@ -22,11 +22,12 @@ import { prisma } from "@/lib/prisma";
 //   - resetStudentsAndSchoolingData      (Étape 1 : étudiants & scolarité) ;
 //   - resetCoursesAndAssessmentsData     (Étape 2 : cours, éval. & présences) ;
 //   - resetFinancialAndSettingsData      (Étape 3 : finances & paramètres).
-// Chaque étape vit dans SA PROPRE transaction (< 3 s) et est idempotente :
-// même sur une base volumineuse, aucune requête unique ne s'approche du budget
-// d'exécution des fonctions Vercel. Les Server Actions de la carte « Données
-// de démonstration » invoquent ces étapes SÉQUENTIELLEMENT (une requête HTTP
-// par étape) et affichent une liste de contrôle progressant en temps réel.
+// Chaque étape enchaîne des vagues de `deleteMany` exécutées EN PARALLÈLE
+// (< 1 s par étape, aucun aller-retour superflu) : aucune requête unique ne
+// s'approche du budget d'exécution des fonctions Vercel. Les Server Actions
+// de la carte « Données de démonstration » invoquent ces étapes
+// SÉQUENTIELLEMENT (une requête HTTP par étape) et affichent une liste de
+// contrôle progressant en temps réel.
 // `resetOrganizationData` reste disponible en orchestration « tout en un »
 // (compatibilité) — elle enchaîne simplement les trois étapes ci-dessus.
 
@@ -164,61 +165,60 @@ export function mergeResetCounts(...steps: DemoDataResetCounts[]): DemoDataReset
 }
 
 /**
- * Options de transaction des étapes courtes — volontairement bornées pour
- * rester sous le budget d'exécution des Serverless (chaque étape < 3 s).
+ * Les étapes de réinitialisation s'exécutent SANS transaction interactive :
+ * chaque étape enchaîne des VAGUES de suppressions en masse (`deleteMany`)
+ * exécutées en parallèle (Promise.all) dans un ordre « leaves to root »
+ * respectueux des contraintes de clés étrangères. Ce découpage réduit le
+ * temps de réponse à quelques allers-retours réseau par vague (< 1 s par
+ * étape sur une organisation de démonstration) et reste idempotent : en cas
+ * d'échec partiel, ré-exécuter l'étape achève le nettoyage sans effet de bord.
  */
-const RESET_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
 
 /**
  * ÉTAPE 3 — Étudiants & scolarité (Racines / Root records).
  *
  * Supprime : notes, affectations de classes, inscriptions aux cours, logements
- * étudiants, puis les étudiants eux-mêmes et les parrainages.
+ * étudiants, puis les étudiants eux-mêmes.
  *
  * DOIT ÊTRE EXÉCUTÉ EN DERNIER : les étudiants sont référencés par de nombreuses
  * tables enfants (présences, documents, paiements, étapes voyage…) qui doivent
  * avoir été supprimées auparavant (Étapes 1 et 2).
  *
- * Transaction courte et idempotente : ré-exécutable sans effet de bord.
+ * Vagues parallèles idempotentes : ré-exécutable sans effet de bord.
  */
 export async function resetStudentsAndSchoolingData(
   organizationId: string
 ): Promise<DemoDataResetCounts> {
-  return prisma.$transaction(
-    async (tx) => {
-      const counts = emptyResetCounts();
+  const counts = emptyResetCounts();
 
-      // Notes (Grade) avant les évaluations — filtrées par étudiant.
-      counts.grades = (
-        await tx.grade.deleteMany({
-          where: { student: { organizationId } },
-        })
-      ).count;
+  // Vague 1 — enfants directs des étudiants (indépendants entre eux) :
+  // notes, affectations de classes, inscriptions aux cours, logements.
+  const [grades, classEnrollments, enrollments, housings] = await Promise.all([
+    prisma.grade
+      .deleteMany({ where: { student: { organizationId } } })
+      .then((r) => r.count),
+    prisma.classEnrollment
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.enrollment
+      .deleteMany({ where: { student: { organizationId } } })
+      .then((r) => r.count),
+    prisma.housing
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+  ]);
+  counts.grades = grades;
+  counts.classEnrollments = classEnrollments;
+  counts.enrollments = enrollments;
+  counts.housings = housings;
 
-      // Affectations de classes (historique) puis inscriptions aux cours.
-      counts.classEnrollments = (
-        await tx.classEnrollment.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.enrollments = (
-        await tx.enrollment.deleteMany({
-          where: { student: { organizationId } },
-        })
-      ).count;
+  // Vague 2 — les étudiants en dernier (d'autres tables référencent cet
+  // identifiant ; toutes leurs dépendances ont déjà été purgées).
+  counts.students = (
+    await prisma.student.deleteMany({ where: { organizationId } })
+  ).count;
 
-      // Logements étudiants (hébergement rattaché à la scolarité).
-      counts.housings = (
-        await tx.housing.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // Étudiants en dernier (d'autres tables référencent cet identifiant).
-      counts.students = (
-        await tx.student.deleteMany({ where: { organizationId } })
-      ).count;
-
-      return counts;
-    },
-    RESET_TX_OPTIONS
-  );
+  return counts;
 }
 
 /**
@@ -232,38 +232,39 @@ export async function resetStudentsAndSchoolingData(
 export async function resetCoursesAndAssessmentsData(
   organizationId: string
 ): Promise<DemoDataResetCounts> {
-  return prisma.$transaction(
-    async (tx) => {
-      const counts = emptyResetCounts();
+  const counts = emptyResetCounts();
 
-      // Présences (Attendance) — enfants des étudiants / cours / classes.
-      counts.attendances = (
-        await tx.attendance.deleteMany({ where: { organizationId } })
-      ).count;
+  // Vague 1 — présences, cahier de texte, sessions d'évaluation (cascade vers
+  // modules & notes éventuelles) et affectations de classes résiduelles :
+  // tables indépendantes supprimées EN PARALLÈLE (bulk deleteMany).
+  const [attendances, courseLogs, evaluations] = await Promise.all([
+    prisma.attendance
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.courseLog
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.evaluation
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+  ]);
+  counts.attendances = attendances;
+  counts.courseLogs = courseLogs;
+  counts.evaluations = evaluations;
 
-      // Cahier de texte.
-      counts.courseLogs = (
-        await tx.courseLog.deleteMany({ where: { organizationId } })
-      ).count;
+  // Sécurité : affectations de classes résiduelles (référencent Class).
+  await prisma.classEnrollment.deleteMany({ where: { organizationId } });
 
-      // Sessions d'évaluation (cascade vers modules & notes éventuelles).
-      counts.evaluations = (
-        await tx.evaluation.deleteMany({ where: { organizationId } })
-      ).count;
+  // Vagues 2 & 3 — classes AVANT cours : supprimer le cours déclencherait la
+  // cascade sur les classes et fausserait les compteurs renvoyés au client.
+  counts.classes = (
+    await prisma.class.deleteMany({ where: { organizationId } })
+  ).count;
+  counts.courses = (
+    await prisma.course.deleteMany({ where: { organizationId } })
+  ).count;
 
-      // Affectations de classes résiduelles (sécurité) puis classes et cours.
-      await tx.classEnrollment.deleteMany({ where: { organizationId } });
-      counts.classes = (
-        await tx.class.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.courses = (
-        await tx.course.deleteMany({ where: { organizationId } })
-      ).count;
-
-      return counts;
-    },
-    RESET_TX_OPTIONS
-  );
+  return counts;
 }
 
 /**
@@ -282,78 +283,95 @@ export async function resetCoursesAndAssessmentsData(
 export async function resetFinancialAndSettingsData(
   organizationId: string
 ): Promise<DemoDataResetCounts> {
-  return prisma.$transaction(
-    async (tx) => {
-      const counts = emptyResetCounts();
+  const counts = emptyResetCounts();
 
-      // 1. Paiements (recettes comptabilisées) — dépendent de Student/Enrollment.
-      counts.payments = (
-        await tx.payment.deleteMany({ where: { organizationId } })
-      ).count;
+  // Vague 1 — tables feuilles sans dépendance Restrict entre elles :
+  // paiements, documents, salaires, dépenses, tâches, dossiers & étapes de
+  // voyage, lignes de vente POS, catégories de produits. Supprimées EN
+  // PARALLÈLE (bulk deleteMany) pour réduire le temps de réponse à un seul
+  // aller-retour logique par vague.
+  const [
+    payments,
+    documents,
+    payrolls,
+    expenses,
+    tasks,
+    travelProcedures,
+    workflowStages,
+  ] = await Promise.all([
+    prisma.payment
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.document
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.payroll
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.expense
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.task.deleteMany({ where: { organizationId } }).then((r) => r.count),
+    prisma.travelProcedure
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.workflowStage
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    // Lignes de vente POS (comptées séparément, avant Sale & ProductService —
+    // contrainte onDelete: Restrict sur ProductService)…
+    prisma.saleItem.deleteMany({ where: { sale: { organizationId } } }),
+    // …et catégories de produits (ProductService.categoryId → SetNull :
+    // ordre indifférent vis-à-vis des produits).
+    prisma.productCategory
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+  ]);
+  counts.payments = payments;
+  counts.documents = documents;
+  counts.payrolls = payrolls;
+  counts.expenses = expenses;
+  counts.tasks = tasks;
+  counts.travelProcedures = travelProcedures;
+  counts.workflowStages = workflowStages;
 
-      // 2. POS — lignes de vente (avant produits, contrainte Restrict) puis reçus.
-      await tx.saleItem.deleteMany({ where: { sale: { organizationId } } });
-      counts.sales = (
-        await tx.sale.deleteMany({ where: { organizationId } })
-      ).count;
+  // Vague 2 — dépendent des tables de la vague 1 :
+  //   - Sale            : ses lignes (SaleItem) ont été supprimées en vague 1 ;
+  //   - Workflow        : ses étapes (WorkflowStage) ont été supprimées en vague 1 ;
+  //   - ProductService  : ses lignes de vente ont été supprimées en vague 1.
+  const [sales, workflows] = await Promise.all([
+    prisma.sale.deleteMany({ where: { organizationId } }).then((r) => r.count),
+    prisma.workflow
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+    prisma.productService
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+  ]);
+  counts.sales = sales;
+  counts.workflows = workflows;
 
-      // 3. Pièces jointes / documents (visa et étudiants).
-      counts.documents = (
-        await tx.document.deleteMany({ where: { organizationId } })
-      ).count;
+  // Vague 3 — comptes de démonstration non-administrateurs (les ADMIN /
+  // SUPER_ADMIN sont conservés) APRÈS Task (Restrict), Sale (Restrict sur le
+  // caissier) et Expense (Restrict sur le créateur), puis rôles personnalisés
+  // (User.customRoleId → SetNull : ordre indifférent, exécution parallèle).
+  const [demoUsers, customRoles] = await Promise.all([
+    prisma.user
+      .deleteMany({
+        where: {
+          organizationId,
+          role: { notIn: ["ADMIN", "SUPER_ADMIN"] },
+        },
+      })
+      .then((r) => r.count),
+    prisma.customRole
+      .deleteMany({ where: { organizationId } })
+      .then((r) => r.count),
+  ]);
+  counts.demoUsers = demoUsers;
+  counts.customRoles = customRoles;
 
-      // 4. Salaires puis dépenses (avant suppression des comptes, Restrict).
-      counts.payrolls = (
-        await tx.payroll.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.expenses = (
-        await tx.expense.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 5. Tâches (créées par un User → Restrict) — DOIT AVANT User.
-      counts.tasks = (
-        await tx.task.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 6. Pipeline voyage : modèles de workflow, étapes de workflow puis dossiers.
-      counts.workflowStages = (
-        await tx.workflowStage.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.workflows = (
-        await tx.workflow.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.travelProcedures = (
-        await tx.travelProcedure.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 7. Catalogue POS : produits (avant catégories) puis catégories.
-      counts.productServices = (
-        await tx.productService.deleteMany({ where: { organizationId } })
-      ).count;
-      counts.productCategories = (
-        await tx.productCategory.deleteMany({ where: { organizationId } })
-      ).count;
-
-      // 8. Comptes de démonstration non-administrateurs (les ADMIN /
-      //    SUPER_ADMIN sont conservés) — APRÈS Task (Restrict).
-      counts.demoUsers = (
-        await tx.user.deleteMany({
-          where: {
-            organizationId,
-            role: { notIn: ["ADMIN", "SUPER_ADMIN"] },
-          },
-        })
-      ).count;
-
-      // 9. Rôles personnalisés.
-      counts.customRoles = (
-        await tx.customRole.deleteMany({ where: { organizationId } })
-      ).count;
-
-      return counts;
-    },
-    RESET_TX_OPTIONS
-  );
+  return counts;
 }
 /**
  * Supprime TOUTES les données métier de l'organisation (étudiants, cours,
@@ -361,11 +379,11 @@ export async function resetFinancialAndSettingsData(
  * dépenses, tâches, catalogue POS, comptes de démonstration non-admin…).
  * L'organisation et ses comptes ADMIN / SUPER_ADMIN sont conservés.
  *
- * Orchestration « tout en un » décomposée en TROIS transactions courtes et
- * indépendantes (Étapes 1 à 3), chacune exécutée en moins de 3 s. C'est le
- * même découpage que les Server Actions pas-à-pas de la carte « Données de
- * démonstration » : chaque étape est idempotente, ce qui permet une reprise
- * simple en cas d'échec partiel.
+ * Orchestration « tout en un » décomposée en TROIS étapes courtes et
+ * indépendantes (Étapes 1 à 3), chacune exécutée en moins de 3 s via des
+ * vagues parallèles de `deleteMany`. C'est le même découpage que les Server
+ * Actions pas-à-pas de la carte « Données de démonstration » : chaque étape
+ * est idempotente, ce qui permet une reprise simple en cas d'échec partiel.
  */
 export async function resetOrganizationData(
   organizationId: string

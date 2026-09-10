@@ -9,20 +9,23 @@ import {
   DownloadIcon,
   FileTextIcon,
   HistoryIcon,
-  LinkIcon,
   MailIcon,
   PhoneIcon,
   ReceiptTextIcon,
   WalletIcon,
 } from "lucide-react";
 
+import { getStudentAttendanceHistory } from "@/actions/attendance";
 import {
-  getStudentAttendanceHistory,
-  type StudentAttendanceEntryDTO,
-} from "@/actions/attendance";
-import { ensureStudentReportToken, getStudentDetail } from "@/actions/students";
-import { getStudentAcademicRecord } from "@/actions/evaluations";
-import { getCurrentOrganizationProfile } from "@/actions/payments";
+  ensureStudentReportToken,
+  getStudentDetail,
+  type StudentDetailDTO,
+} from "@/actions/students";
+import { getStudentAcademicRecord, type StudentAcademicRecordDTO } from "@/actions/evaluations";
+import {
+  getCurrentOrganizationProfile,
+  type OrganizationProfileDTO,
+} from "@/actions/payments";
 import {
   getDocumentsByOwner,
 } from "@/actions/documents";
@@ -40,10 +43,12 @@ import {
 } from "@/components/ui/table";
 import { StudentAcademicTab } from "@/components/students/student-academic-tab";
 import { StudentAttendanceTab } from "@/components/students/student-attendance-tab";
-import {
-  getPaymentMethodLabel,
+import { CopyParentLinkButton } from "@/components/students/copy-parent-link-button";
+import { getPaymentMethodLabel,
   getPaymentStatusBadgeClass,
   getPaymentStatusLabel,
+  PAYMENT_VOIDED_BADGE_CLASSES,
+  PAYMENT_VOIDED_LABEL,
 } from "@/lib/payment-status";
 import {
   getStudentStatusBadgeClass,
@@ -70,7 +75,20 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 const numberFormatter = new Intl.NumberFormat("fr-FR");
 
 function formatAmount(amount: number): string {
-  return `${numberFormatter.format(amount)} FCFA`;
+  return `${numberFormatter.format(Number(amount ?? 0))} FCFA`;
+}
+
+/**
+ * Formatage de date tolérant aux valeurs manquantes / invalides : retourne
+ * toujours une chaîne affichable (jamais `Invalid Date` ni `undefined`).
+ */
+function formatDateSafe(
+  value: Date | string | number | null | undefined
+): string {
+  const date = value === null || value === undefined ? null : new Date(value);
+  return date && !Number.isNaN(date.getTime())
+    ? dateFormatter.format(date)
+    : "—";
 }
 
 const BADGE_BASE_CLASSES =
@@ -113,38 +131,68 @@ export default async function StudentDetailPage({
 }) {
   const { id } = await params;
 
-  // Les actions lèvent une erreur si l'étudiant est introuvable ou hors
-  // organisation ; le profil d'organisation alimente l'en-tête des documents.
-  let student;
-  let academicRecord;
-  let organization;
-  let documents;
-  let attendanceEntries: StudentAttendanceEntryDTO[] = [];
-  let reportTokenResult: Awaited<ReturnType<typeof ensureStudentReportToken>> | null = null;
+  // ---------------------------------------------------------------
+  // Chargement résilient (anti-crash serveur — ex : Vercel #742386243)
+  // ---------------------------------------------------------------
+  // 1. Données CRITIQUES (fiche étudiant + profil d'organisation) : toute
+  //    erreur (étudiant introuvable, hors organisation, session invalide,
+  //    incident Prisma…) → `notFound()` → page 404 propre, JAMAIS une
+  //    exception serveur non gérée (500).
+  // 2. Données NON critiques (onglets secondaires, jeton de rapport) : chaque
+  //    lecture est isolée dans son propre `.catch()` avec une valeur de repli
+  //    — un échec d'un onglet n'effondre plus l'ensemble de la fiche.
+  let student: StudentDetailDTO | null = null;
+  let organization: OrganizationProfileDTO | null = null;
 
   try {
-    [student, academicRecord, organization, documents, attendanceEntries, reportTokenResult] =
-      await Promise.all([
-        getStudentDetail(id),
-        getStudentAcademicRecord(id),
-        getCurrentOrganizationProfile(),
-        // Pièces jointes rattachées à l'étudiant (isolation multi-tenant).
-        getDocumentsByOwner({ studentId: id }),
-        // Historique des émargements (onglet « Assiduité »).
-        getStudentAttendanceHistory(id),
-        // Token d'accès public non modifiable (rapport parent).
-        ensureStudentReportToken(id),
-      ]);
+    [student, organization] = await Promise.all([
+      getStudentDetail(id),
+      getCurrentOrganizationProfile(),
+    ]);
   } catch {
     notFound();
   }
 
+  // Garde explicite : ne jamais rendre sans fiche valide (relations incluses).
+  if (!student || !organization) notFound();
+
+  const [academicRecord, documents, attendanceEntries, reportTokenResult] =
+    await Promise.all([
+      // Onglet « Évaluations & Notes » : repli = dossier vide (aucun crash).
+      getStudentAcademicRecord(id).catch(
+        (): StudentAcademicRecordDTO => ({
+          evaluations: [],
+          stats: {
+            overallAverage: null,
+            validationRate: null,
+            gradedModuleCount: 0,
+            validatedModuleCount: 0,
+            evaluationCount: 0,
+          },
+        })
+      ),
+      // Onglet « Documents » : repli = liste vide.
+      getDocumentsByOwner({ studentId: id }).catch(() => []),
+      // Onglet « Assiduité » : repli = historique vide.
+      getStudentAttendanceHistory(id).catch(() => []),
+      // Jeton d'accès public (rapport parent) : purement facultatif — un
+      // échec n'empêche pas l'affichage de la fiche, seuls les boutons
+      // « Rapport PDF » / « Copier le lien parent » sont masqués.
+      ensureStudentReportToken(id).catch(() => null),
+    ]);
+
   const reportToken =
-    reportTokenResult?.ok && reportTokenResult.token ? reportTokenResult.token : null;
+    reportTokenResult && reportTokenResult.ok && reportTokenResult.token
+      ? reportTokenResult.token
+      : null;
   const parentLink = reportToken
     ? `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/reports/student/${reportToken}`
     : null;
   const downloadPdfUrl = reportToken ? `/reports/student/${reportToken}/pdf?format=pdf` : null;
+
+  // Lectures relationnelles défensives : `payments` provient de la fiche mais
+  // toute donnée partielle (undefined / null) se replie sur un tableau vide.
+  const payments = Array.isArray(student.payments) ? student.payments : [];
 
   const hasFinancials = student.netAmount !== null;
   const isFullyPaid =
@@ -182,7 +230,7 @@ export default async function StudentDetailPage({
             <p className="mt-1 text-sm text-muted-foreground">
               Code étudiant :{" "}
               <span className="font-mono">{student.studentCode}</span> · inscrit
-              le {dateFormatter.format(student.createdAt)}
+              le {formatDateSafe(student.createdAt)}
             </p>
 
             <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
@@ -215,23 +263,7 @@ export default async function StudentDetailPage({
                 </Button>
               ) : null}
               {parentLink ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        await navigator.clipboard.writeText(parentLink!);
-                      } catch {
-                        /* presse-papiers indisponible */
-                      }
-                    })();
-                  }}
-                >
-                  <LinkIcon className="size-4" />
-                  Copier le lien parent
-                </Button>
+                <CopyParentLinkButton url={parentLink} />
               ) : null}
             </div>
           </div>
@@ -339,13 +371,13 @@ export default async function StudentDetailPage({
               <div className="border-b px-4 py-3">
                 <h3 className="text-sm font-semibold">Historique des règlements</h3>
                 <p className="text-xs text-muted-foreground">
-                  {student.payments.length} transaction
-                  {student.payments.length > 1 ? "s" : ""} enregistrée
-                  {student.payments.length > 1 ? "s" : ""}
+                  {payments.length} transaction
+                  {payments.length > 1 ? "s" : ""} enregistrée
+                  {payments.length > 1 ? "s" : ""}
                 </p>
               </div>
 
-              {student.payments.length === 0 ? (
+              {payments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
                   <div className="flex size-10 items-center justify-center rounded-full bg-muted">
                     <ReceiptTextIcon className="size-5 text-muted-foreground" />
@@ -368,12 +400,15 @@ export default async function StudentDetailPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {student.payments.map((payment) => (
-                      <TableRow key={payment.id}>
+                    {payments.map((payment) => (
+                      <TableRow
+                        key={payment.id}
+                        className={payment.isVoided ? "opacity-60" : undefined}
+                      >
                         <TableCell className="whitespace-nowrap text-muted-foreground">
                           <span className="flex items-center gap-1.5">
                             <CalendarDaysIcon className="size-3.5 shrink-0" />
-                            {dateFormatter.format(payment.paidAt)}
+                            {formatDateSafe(payment.paidAt)}
                           </span>
                         </TableCell>
                         <TableCell className="font-medium tabular-nums">
@@ -386,14 +421,27 @@ export default async function StudentDetailPage({
                           {payment.reference ?? "—"}
                         </TableCell>
                         <TableCell>
-                          <span
-                            className={cn(
-                              BADGE_BASE_CLASSES,
-                              getPaymentStatusBadgeClass(payment.status as PaymentStatus)
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span
+                              className={cn(
+                                BADGE_BASE_CLASSES,
+                                getPaymentStatusBadgeClass(payment.status as PaymentStatus)
+                              )}
+                            >
+                              {getPaymentStatusLabel(payment.status as PaymentStatus)}
+                            </span>
+                            {payment.isVoided && (
+                              <span
+                                className={cn(
+                                  BADGE_BASE_CLASSES,
+                                  PAYMENT_VOIDED_BADGE_CLASSES
+                                )}
+                                title="Écriture suspendue : exclue de la trésorerie active (étudiant repassé Prospect)."
+                              >
+                                {PAYMENT_VOIDED_LABEL}
+                              </span>
                             )}
-                          >
-                            {getPaymentStatusLabel(payment.status as PaymentStatus)}
-                          </span>
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">
                           <PaymentReceiptButton

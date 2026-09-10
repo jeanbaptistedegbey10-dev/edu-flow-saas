@@ -23,6 +23,12 @@ export type PaymentDTO = {
   currency: string;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;
+  /**
+   * Écriture suspendue (hors trésorerie active) : valorisé lorsque le statut
+   * de l'étudiant repasse à PROSPECT — conservé pour l'historique mais exclu
+   * des totaux de trésorerie.
+   */
+  isVoided: boolean;
   reference: string | null;
   description: string | null;
   paidAt: Date;
@@ -210,6 +216,7 @@ export async function getPayments(): Promise<PaymentDTO[]> {
         currency: true,
         paymentMethod: true,
         status: true,
+        isVoided: true,
         reference: true,
         description: true,
         paidAt: true,
@@ -254,12 +261,14 @@ export async function getFinancialStats(): Promise<FinancialStatsDTO> {
 
   try {
     const [collected, pending, expenses, transactionCount] = await Promise.all([
+      // Total encaissé actif : paiements COMPLETED non suspendus (`isVoided`
+      // exclut les écritures d'étudiants repassés au statut Prospect).
       prisma.payment.aggregate({
-        where: { organizationId, status: "COMPLETED" },
+        where: { organizationId, status: "COMPLETED", isVoided: false },
         _sum: { amount: true },
       }),
       prisma.payment.aggregate({
-        where: { organizationId, status: "PENDING" },
+        where: { organizationId, status: "PENDING", isVoided: false },
         _sum: { amount: true },
       }),
       prisma.expense.aggregate({
@@ -269,7 +278,9 @@ export async function getFinancialStats(): Promise<FinancialStatsDTO> {
         },
         _sum: { amount: true },
       }),
-      prisma.payment.count({ where: { organizationId } }),
+      prisma.payment.count({
+        where: { organizationId, isVoided: false },
+      }),
     ]);
 
     return {

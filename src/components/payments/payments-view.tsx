@@ -48,6 +48,8 @@ import {
   PAYMENT_METHOD_ORDER,
   PAYMENT_STATUS_LABELS,
   PAYMENT_STATUS_ORDER,
+  PAYMENT_VOIDED_BADGE_CLASSES,
+  PAYMENT_VOIDED_LABEL,
 } from "@/lib/payment-status";
 import { exportToCsv, type CsvColumn } from "@/lib/export";
 import { cn } from "@/lib/utils";
@@ -92,7 +94,10 @@ const PAYMENT_CSV_COLUMNS: readonly CsvColumn<PaymentDTO>[] = [
   },
   {
     header: "Statut",
-    value: (payment) => getPaymentStatusLabel(payment.status),
+    value: (payment) =>
+      payment.isVoided
+        ? `${getPaymentStatusLabel(payment.status)} (${PAYMENT_VOIDED_LABEL.toLowerCase()})`
+        : getPaymentStatusLabel(payment.status),
   },
   {
     header: "Date de paiement",
@@ -356,7 +361,10 @@ export function PaymentsView({
               </TableHeader>
               <TableBody>
                 {filteredPayments.map((payment) => (
-                  <TableRow key={payment.id}>
+                  <TableRow
+                    key={payment.id}
+                    className={payment.isVoided ? "opacity-60" : undefined}
+                  >
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
                         <span className="font-medium">
@@ -375,14 +383,27 @@ export function PaymentsView({
                       {getPaymentMethodLabel(payment.paymentMethod)}
                     </TableCell>
                     <TableCell>
-                      <span
-                        className={cn(
-                          BADGE_BASE_CLASSES,
-                          getPaymentStatusBadgeClass(payment.status)
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span
+                          className={cn(
+                            BADGE_BASE_CLASSES,
+                            getPaymentStatusBadgeClass(payment.status)
+                          )}
+                        >
+                          {getPaymentStatusLabel(payment.status)}
+                        </span>
+                        {payment.isVoided && (
+                          <span
+                            className={cn(
+                              BADGE_BASE_CLASSES,
+                              PAYMENT_VOIDED_BADGE_CLASSES
+                            )}
+                            title="Écriture suspendue : exclue de la trésorerie active (étudiant repassé Prospect)."
+                          >
+                            {PAYMENT_VOIDED_LABEL}
+                          </span>
                         )}
-                      >
-                        {getPaymentStatusLabel(payment.status)}
-                      </span>
+                      </div>
                     </TableCell>
                     <TableCell className="max-w-40 truncate text-muted-foreground">
                       {payment.reference ?? "—"}

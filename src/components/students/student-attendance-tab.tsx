@@ -1,3 +1,5 @@
+"use client";
+
 import * as React from "react";
 import {
   CalendarDaysIcon,
@@ -173,9 +175,10 @@ function AttendanceStatCard({
  * Onglet « Assiduité » de la fiche étudiant : historique complet des
  * émargements (présences / absences) avec synthèse par statut.
  *
- * Composant serveur : les données sont chargées côté serveur (action
- * `getStudentAttendanceHistory`) et transmises en props — aucune logique
- * client n'est nécessaire pour l'affichage.
+ * Composant CLIENT : il utilise `React.useState` (modale de justificatif) et
+ * des gestionnaires d'événements (`onClick`) — la directive « use client »
+ * est donc requise en tête de fichier. Les données restent chargées côté
+ * serveur (action `getStudentAttendanceHistory`) et transmises en props.
  */
 export function StudentAttendanceTab({
   entries,

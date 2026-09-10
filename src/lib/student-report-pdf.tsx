@@ -23,7 +23,7 @@ const STATUS_LABELS: Record<string, string> = {
   IN_PROGRESS: "En cours",
   COMPLETED: "Terminé",
   SUSPENDED: "Suspendu",
-  DROPPED_OUT: "Abandon",
+  DROPPED_OUT: "Abandonné",
 };
 
 const ATTENDANCE_LABELS: Record<string, string> = {

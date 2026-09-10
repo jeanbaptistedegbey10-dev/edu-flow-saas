@@ -33,19 +33,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+// Les statuts sont strictement limités à trois options produit :
+// Prospect, Inscrit, Abandonné (voir src/lib/student-status.ts).
+import { CANONICAL_STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
 import { cn } from "@/lib/utils";
 
 /** Valeur sentinelle pour les champs Select optionnels (Radix interdit ""). */
 const NONE_VALUE = "__none__";
 
-const STATUS_OPTIONS = [
-  { value: "PROSPECT", label: "Prospect" },
-  { value: "ENROLLED", label: "Inscrit" },
-  { value: "IN_PROGRESS", label: "En cours" },
-  { value: "COMPLETED", label: "Terminé" },
-  { value: "SUSPENDED", label: "Suspendu" },
-  { value: "DROPPED_OUT", label: "Abandon" },
-] as const;
+/** Choix de paiement des frais d'inscription (statut « Inscrit » uniquement). */
+type RegistrationFeePaymentChoice = "" | "PAYE" | "PAYE_HORS_SYSTEME";
 
 const INITIAL_FORM_STATE: StudentFormState = { status: "idle" };
 
@@ -89,6 +86,13 @@ export function AddStudentDialog({
   // Autonomie de l'étudiant : si coché, les champs de contact parent deviennent
   // facultatifs (l'étudiant s'assume financièrement lui-même).
   const [isSelfFinanced, setIsSelfFinanced] = React.useState(false);
+  // Statut sélectionné (contrôlé) : conditionne l'affichage du champ obligatoire
+  // « Frais d'inscription » (visible uniquement pour le statut « Inscrit »).
+  const [statusValue, setStatusValue] = React.useState("PROSPECT");
+  // Statut de paiement des frais d'inscription : « Payé » (recette créée dans
+  // le système) ou « Payé hors système » (aucune écriture comptable).
+  const [registrationFeePayment, setRegistrationFeePayment] =
+    React.useState<RegistrationFeePaymentChoice>("");
 
     // useActionState conserve l'état du formulaire (y compris les saisies
   // utilisateur) entre les re-renders : les inputs non contrôlés conservent
@@ -120,6 +124,8 @@ export function AddStudentDialog({
         setDiscount("");
         setLegacyExcluded(true);
         setLegacyPaidAmountInput("");
+        setStatusValue("PROSPECT");
+        setRegistrationFeePayment("");
       }
 
       return result;
@@ -163,14 +169,10 @@ export function AddStudentDialog({
     return Math.max(0, cost - reduction);
   }, [totalCost, discount, discountType]);
 
-  // Frais d'inscription : pour un étudiant hérité (paiements antérieurs > 0
-  // ou case d'exclusion cochée), ils sont réputés réglés hors système et ne
-  // génèrent AUCUNE écriture dans la caisse live.
-  const legacyBypass = React.useMemo(() => {
-    if (legacyExcluded) return true;
-    const raw = Number(legacyPaidAmountInput.replace(",", "."));
-    return !Number.isNaN(raw) && raw > 0;
-  }, [legacyExcluded, legacyPaidAmountInput]);
+  // Les frais d'inscription sont facturés UNIQUEMENT au statut « Inscrit » :
+  // le champ « Frais d'inscription (15 000 FCFA) » est alors obligatoire.
+  const requiresRegistrationFee =
+    statusValue === "ENROLLED" && registrationFee > 0;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -261,12 +263,16 @@ export function AddStudentDialog({
 
             <div className="grid gap-2">
               <Label htmlFor="status">Statut</Label>
-              <Select name="status" defaultValue="PROSPECT">
+              <Select
+                name="status"
+                value={statusValue}
+                onValueChange={setStatusValue}
+              >
                 <SelectTrigger id="status" className="w-full">
                   <SelectValue placeholder="Sélectionner un statut" />
                 </SelectTrigger>
                 <SelectContent>
-                  {STATUS_OPTIONS.map((option) => (
+                  {CANONICAL_STUDENT_STATUS_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -453,35 +459,78 @@ export function AddStudentDialog({
               </p>
             ) : null}
 
-            {/* Statut des frais d'inscription : encaissement live (étudiant
-                saisi dans EduFlow) ou réputés réglés hors système (hérités). */}
-            {registrationFee > 0 ? (
-              legacyBypass ? (
-                <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
-                  <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
-                  <span>
-                    Frais d&rsquo;inscription (
-                    <strong className="font-semibold tabular-nums">
-                      {registrationFee.toLocaleString("fr-FR")} FCFA
-                    </strong>
-                    ) : considérés comme réglés hors système. Aucun montant ne
-                    sera ajouté à la caisse live.
+            {/* Frais d'inscription : champ OBLIGATOIRE dès que le statut est
+                « Inscrit » — « Payé » crée une recette officielle dans le
+                système (comptabilité / trésorerie), « Payé hors système »
+                marque les frais comme réglés SANS écriture en caisse. */}
+            {requiresRegistrationFee ? (
+              <div className="grid gap-2 rounded-md border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-500/20 dark:bg-indigo-500/5">
+                <Label htmlFor="registrationFeePayment">
+                  Frais d&apos;inscription (
+                  <span className="tabular-nums">
+                    {registrationFee.toLocaleString("fr-FR")} FCFA
                   </span>
-                </div>
-              ) : (
-                <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
-                  <BadgeCheckIcon className="mt-0.5 size-3.5 shrink-0" />
-                  <span>
-                    Frais d&rsquo;inscription uniques :{" "}
+                  ) *
+                </Label>
+                <Select
+                  name="registrationFeePayment"
+                  value={registrationFeePayment}
+                  onValueChange={(value) =>
+                    setRegistrationFeePayment(
+                      value as RegistrationFeePaymentChoice
+                    )
+                  }
+                >
+                  <SelectTrigger
+                    id="registrationFeePayment"
+                    className="w-full"
+                    aria-invalid={Boolean(fieldErrors.registrationFeePayment)}
+                  >
+                    <SelectValue placeholder="-- Sélectionner le statut du paiement --" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PAYE">Payé</SelectItem>
+                    <SelectItem value="PAYE_HORS_SYSTEME">
+                      Payé hors système
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldError message={fieldErrors.registrationFeePayment} />
+                {registrationFeePayment === "PAYE" ? (
+                  <p className="flex items-start gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                    <BadgeCheckIcon className="mt-0.5 size-3.5 shrink-0" />
+                    Une recette officielle de{" "}
                     <strong className="font-semibold tabular-nums">
                       {registrationFee.toLocaleString("fr-FR")} FCFA
                     </strong>{" "}
-                    seront ajoutés au coût total exigé et encaissés
-                    automatiquement (recette « Frais d&rsquo;inscription ») lors
-                    de la validation.
-                  </span>
-                </div>
-              )
+                    sera créée dans le système (comptabilité et trésorerie).
+                  </p>
+                ) : registrationFeePayment === "PAYE_HORS_SYSTEME" ? (
+                  <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                    <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+                    Les frais seront marqués comme réglés sur la fiche de
+                    l&apos;étudiant, sans aucune écriture dans le journal de
+                    caisse.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Sélection obligatoire : indiquez si les frais d&apos;inscription
+                    ont été encaissés dans le système ou hors système.
+                  </p>
+                )}
+              </div>
+            ) : registrationFee > 0 ? (
+              <div className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400">
+                <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  Frais d&apos;inscription (
+                  <strong className="font-semibold tabular-nums">
+                    {registrationFee.toLocaleString("fr-FR")} FCFA
+                  </strong>
+                  ) applicables uniquement au statut « Inscrit » — aucun frais
+                  ne sera facturé ici.
+                </span>
+              </div>
             ) : null}
 
             {/* Net à payer calculé automatiquement (lecture seule) */}
