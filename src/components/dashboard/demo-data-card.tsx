@@ -115,6 +115,7 @@ const ZERO_RESET_COUNTS: DemoDataResetCounts = {
   sales: 0,
   tasks: 0,
   attendances: 0,
+  classSessions: 0,
   documents: 0,
   travelProcedures: 0,
   travelSteps: 0,

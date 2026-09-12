@@ -770,6 +770,7 @@ async function main() {
   // Attendance & CourseLogs (Cahier de texte)
   // --------------------------------------
   await prisma.attendance.createMany({
+    skipDuplicates: true,
     data: [
       {
         organizationId: org1.id,

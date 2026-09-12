@@ -20,7 +20,7 @@ import { prisma } from "@/lib/prisma";
 // ---------------------------------------------------------------
 // La réinitialisation est découpée en TROIS étapes courtes et indépendantes :
 //   - resetStudentsAndSchoolingData      (Étape 1 : étudiants & scolarité) ;
-//   - resetCoursesAndAssessmentsData     (Étape 2 : cours, éval. & présences) ;
+//   - resetCoursesAndAssessmentsData     (Étape 2 : cours, séances, éval. & présences) ;
 //   - resetFinancialAndSettingsData      (Étape 3 : finances & paramètres).
 // Chaque étape enchaîne des vagues de `deleteMany` exécutées EN PARALLÈLE
 // (< 1 s par étape, aucun aller-retour superflu) : aucune requête unique ne
@@ -98,6 +98,8 @@ export type DemoDataResetCounts = {
   sales: number;
   tasks: number;
   attendances: number;
+  /** Séances de cours supprimées (ClassSession). */
+  classSessions: number;
   documents: number;
   travelProcedures: number;
   travelSteps: number;
@@ -133,6 +135,7 @@ function emptyResetCounts(): DemoDataResetCounts {
     sales: 0,
     tasks: 0,
     attendances: 0,
+    classSessions: 0,
     documents: 0,
     travelProcedures: 0,
     travelSteps: 0,
@@ -222,10 +225,12 @@ export async function resetStudentsAndSchoolingData(
 }
 
 /**
- * ÉTAPE 2 — Cours, évaluations & présences (Intermédiaires / Intermediate records).
+ * ÉTAPE 2 — Cours, séances de cours, évaluations & présences (Intermédiaires /
+ * Intermediate records).
  *
- * Supprime : présences, cahier de texte, sessions d'évaluation (modules et
- * notes restantes par cascade), puis classes et cours.
+ * Supprime : séances de cours (ClassSession), présences, cahier de texte,
+ * sessions d'évaluation (modules et notes restantes par cascade), puis classes
+ * et cours.
  *
  * S'exécute APRÈS les dépendances (Étape 1) et AVANT les racines (Étape 3).
  */
@@ -234,21 +239,29 @@ export async function resetCoursesAndAssessmentsData(
 ): Promise<DemoDataResetCounts> {
   const counts = emptyResetCounts();
 
-  // Vague 1 — présences, cahier de texte, sessions d'évaluation (cascade vers
-  // modules & notes éventuelles) et affectations de classes résiduelles :
+  // Vague 1 — présences, séances de cours (ClassSession), cahier de texte et
+  // sessions d'évaluation (cascade vers modules & notes éventuelles) :
   // tables indépendantes supprimées EN PARALLÈLE (bulk deleteMany).
-  const [attendances, courseLogs, evaluations] = await Promise.all([
-    prisma.attendance
-      .deleteMany({ where: { organizationId } })
-      .then((r) => r.count),
-    prisma.courseLog
-      .deleteMany({ where: { organizationId } })
-      .then((r) => r.count),
-    prisma.evaluation
-      .deleteMany({ where: { organizationId } })
-      .then((r) => r.count),
-  ]);
+  // ⚠️ ClassSession est purgée EXPLICITEMENT (AVANT les classes) pour éviter
+  // tout orphelin et compter les suppressions : la cascade depuis Class
+  // suffirait, mais ferait disparaître les séances des compteurs renvoyés.
+  const [attendances, classSessions, courseLogs, evaluations] =
+    await Promise.all([
+      prisma.attendance
+        .deleteMany({ where: { organizationId } })
+        .then((r) => r.count),
+      prisma.classSession
+        .deleteMany({ where: { organizationId } })
+        .then((r) => r.count),
+      prisma.courseLog
+        .deleteMany({ where: { organizationId } })
+        .then((r) => r.count),
+      prisma.evaluation
+        .deleteMany({ where: { organizationId } })
+        .then((r) => r.count),
+    ]);
   counts.attendances = attendances;
+  counts.classSessions = classSessions;
   counts.courseLogs = courseLogs;
   counts.evaluations = evaluations;
 
@@ -423,7 +436,8 @@ export type OrganizationDataPresence = {
 
 /**
  * Indique si une organisation contient des données (démonstration ou métier) :
- * comptes non-administrateurs, élèves, cours ou classes. Le jeu de
+ * comptes non-administrateurs, élèves, cours, classes, séances de cours
+ * (ClassSession) ou présences (Attendance). Le jeu de
  * démonstration vivant dans les MÊMES tables que les données réelles (aucun
  * indicateur `isDemo` en base), la présence de données est le signal utilisé
  * par la carte « Données de démonstration » pour :
@@ -438,20 +452,29 @@ export async function getOrganizationDataPresence(
   }
 
   try {
-    const [demoAccounts, students, courses, classes] = await Promise.all([
-      prisma.user.count({
-        where: {
-          organizationId,
-          role: { notIn: ["ADMIN", "SUPER_ADMIN"] },
-        },
-      }),
-      prisma.student.count({ where: { organizationId } }),
-      prisma.course.count({ where: { organizationId } }),
-      prisma.class.count({ where: { organizationId } }),
-    ]);
+    const [demoAccounts, students, courses, classes, classSessions, attendances] =
+      await Promise.all([
+        prisma.user.count({
+          where: {
+            organizationId,
+            role: { notIn: ["ADMIN", "SUPER_ADMIN"] },
+          },
+        }),
+        prisma.student.count({ where: { organizationId } }),
+        prisma.course.count({ where: { organizationId } }),
+        prisma.class.count({ where: { organizationId } }),
+        prisma.classSession.count({ where: { organizationId } }),
+        prisma.attendance.count({ where: { organizationId } }),
+      ]);
 
     return {
-      hasData: demoAccounts > 0 || students > 0 || courses > 0 || classes > 0,
+      hasData:
+        demoAccounts > 0 ||
+        students > 0 ||
+        courses > 0 ||
+        classes > 0 ||
+        classSessions > 0 ||
+        attendances > 0,
       demoAccounts,
     };
   } catch (error) {

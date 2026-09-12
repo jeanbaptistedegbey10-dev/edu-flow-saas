@@ -236,6 +236,8 @@ export type DemoSeedSummary = {
     students: number;
     classes: number;
     courses: number;
+    /** Séances de cours réelles (ClassSession) créées. */
+    classSessions: number;
     attendances: number;
     travelProcedures: number;
     documents: number;
@@ -257,6 +259,7 @@ function emptyCounts(): DemoSeedSummary["counts"] {
     students: 0,
     classes: 0,
     courses: 0,
+    classSessions: 0,
     attendances: 0,
     travelProcedures: 0,
     documents: 0,
@@ -343,18 +346,41 @@ async function generateDemoStudentCodes(
 }
 
 /**
- * Génère les dates des séances passées : `count` dates espacées de ~3 jours,
- * remontant à partir d'aujourd'hui (la plus ancienne en premier).
+ * Génère les dates des séances passées : `count` journées espacées de ~3 jours,
+ * remontant à partir d'aujourd'hui (la plus ancienne en premier). Chaque date
+ * est normalisée à MINUIT UTC — même convention que les séances créées par
+ * l'application (`parseAttendanceDay`), requise par la contrainte unique
+ * `[classId, sessionDate]` et par les requêtes bornées à une journée.
  */
 function pastSessionDates(dayOffsetStart: number, count: number): Date[] {
   const dates: Date[] = [];
+  const now = new Date();
+  const todayUtcMidnight = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate()
+  );
   for (let i = count - 1; i >= 0; i -= 1) {
-    const day = new Date();
-    day.setHours(9, 0, 0, 0);
-    day.setDate(day.getDate() - (dayOffsetStart + i * 3));
-    dates.push(day);
+    dates.push(
+      new Date(todayUtcMidnight - (dayOffsetStart + i * 3) * 24 * 60 * 60 * 1000)
+    );
   }
   return dates;
+}
+
+/** Horodatage UTC « jour de séance + heure » (ex : 09:00, 14:20…). */
+function utcAt(sessionDate: Date, hours: number, minutes = 0): Date {
+  return new Date(
+    Date.UTC(
+      sessionDate.getUTCFullYear(),
+      sessionDate.getUTCMonth(),
+      sessionDate.getUTCDate(),
+      hours,
+      minutes,
+      0,
+      0
+    )
+  );
 }
 
 /**
@@ -651,34 +677,73 @@ async function runDemoSeedTransaction(
   if (studentPaymentRows.length > 0) {
     await tx.payment.createMany({ data: studentPaymentRows });
   }
-  // 8. Assiduité : séances PASSÉES pour toutes les classes, statuts variés
-  //    (PRESENT / ABSENT / LATE / EXCUSED) — une ligne par étudiant et séance.
+  // 8. Séances de cours (ClassSession) + assiduité : ATTENDANCE_SESSIONS_PER_CLASS
+  //    séances PASSÉES par classe (créneau horaire réel de la classe), puis
+  //    présences rattachées à CHAQUE séance avec statuts variés (PRESENT /
+  //    ABSENT / LATE / EXCUSED) — une ligne par étudiant et par séance.
+  //    ⚠️ `Attendance.sessionId` référence STRICTEMENT `ClassSession.id`
+  //    (contrainte unique [sessionId, studentId]) : tout autre identifiant
+  //    (ex : courseId) déclenche une erreur Prisma P2002.
   const attendanceRows: Prisma.AttendanceCreateManyInput[] = [];
+  const attendanceKeys = new Set<string>();
   const classGroups: Array<{
-    courseId: string;
     classId: string;
+    subjectName: string;
+    chapters: string[];
+    startHour: number;
+    endHour: number;
     studentIds: string[];
     dayOffset: number;
   }> = [
     {
-      courseId: frenchCourse.id,
       classId: frenchClass.id,
+      subjectName: "Français FLE",
+      chapters: [
+        "Alphabet & prononciation",
+        "Se présenter",
+        "Les articles définis et indéfinis",
+        "Les verbes du 1er groupe au présent",
+        "La négation simple",
+        "Les nombres et l'heure",
+      ],
+      startHour: 8,
+      endHour: 11,
       studentIds: createdStudents
         .filter((s) => s.classId === frenchClass.id)
         .map((s) => s.id),
       dayOffset: 21,
     },
     {
-      courseId: englishCourse.id,
       classId: englishClass.id,
+      subjectName: "Anglais Intensif",
+      chapters: [
+        "Unit 1: Business Greetings",
+        "Unit 2: Making Phone Calls",
+        "Unit 3: Emails & Reports",
+        "Unit 4: Meetings & Presentations",
+        "Unit 5: Negotiations",
+        "Unit 6: Job Interviews",
+      ],
+      startHour: 14,
+      endHour: 17,
       studentIds: createdStudents
         .filter((s) => s.classId === englishClass.id)
         .map((s) => s.id),
       dayOffset: 20,
     },
     {
-      courseId: germanCourse.id,
       classId: germanClass.id,
+      subjectName: "Allemand B1",
+      chapters: [
+        "Modul 1: Grundlagen",
+        "Modul 2: Sich vorstellen",
+        "Modul 3: Alltag & Beruf",
+        "Modul 4: Einkaufen",
+        "Modul 5: Reisen",
+        "Modul 6: Prüfungstraining",
+      ],
+      startHour: 18,
+      endHour: 21,
       studentIds: createdStudents
         .filter((s) => s.classId === germanClass.id)
         .map((s) => s.id),
@@ -686,13 +751,38 @@ async function runDemoSeedTransaction(
     },
   ];
 
+  let classSessionCount = 0;
   for (const group of classGroups) {
     const dates = pastSessionDates(
       group.dayOffset,
       ATTENDANCE_SESSIONS_PER_CLASS
     );
+
+    // 8.a Création des SÉANCES réelles (une par date, créneau horaire de la
+    //     classe) — leurs identifiants servent de FK aux présences.
+    //     Promise.all préserve l'ordre des résultats (= ordre des dates).
+    const createdSessions = await Promise.all(
+      dates.map((sessionDate, sessionIndex) =>
+        tx.classSession.create({
+          data: {
+            organizationId,
+            classId: group.classId,
+            subjectName: group.subjectName,
+            chapter: group.chapters[sessionIndex % group.chapters.length],
+            sessionDate,
+            startTime: utcAt(sessionDate, group.startHour),
+            endTime: utcAt(sessionDate, group.endHour),
+          },
+          select: { id: true, sessionDate: true },
+        })
+      )
+    );
+    classSessionCount += createdSessions.length;
+
+    // 8.b Présences rattachées aux séances ci-dessus — dédoublonnées sur la
+    //     clé unique composite [sessionId, studentId] avant createMany.
     for (const studentId of group.studentIds) {
-      dates.forEach((date, sessionIndex) => {
+      createdSessions.forEach((session, sessionIndex) => {
         let status: AttendanceStatusValue = "PRESENT";
         if (sessionIndex === 2 && studentId === group.studentIds[0]) {
           status = "ABSENT";
@@ -701,20 +791,32 @@ async function runDemoSeedTransaction(
         } else if (sessionIndex === 3 && studentId === group.studentIds[2]) {
           status = "EXCUSED";
         }
+        const dedupeKey = `${session.id}-${studentId}`;
+        if (attendanceKeys.has(dedupeKey)) {
+          return;
+        }
+        attendanceKeys.add(dedupeKey);
         attendanceRows.push({
           organizationId,
-          sessionId: group.courseId,
+          sessionId: session.id,
           classId: group.classId,
           studentId,
           status,
-          date,
+          arrivalTime:
+            status === "LATE" ? utcAt(session.sessionDate, group.startHour, 20) : null,
+          // Journée dénormalisée = sessionDate (minuit UTC), même convention
+          // que les enregistrements créés par les Server Actions.
+          date: session.sessionDate,
           notes: status === "PRESENT" ? null : "Voir justificatif.",
         });
       });
     }
   }
   if (attendanceRows.length > 0) {
-    await tx.attendance.createMany({ data: attendanceRows });
+    await tx.attendance.createMany({
+      data: attendanceRows,
+      skipDuplicates: true,
+    });
   }
 
   // 9. Workflows de voyage : Canada, Allemagne, France (Campus France).
@@ -1245,6 +1347,7 @@ async function runDemoSeedTransaction(
     students: createdStudents.length,
     classes: 3,
     courses: 3,
+    classSessions: classSessionCount,
     attendances: attendanceRows.length,
     travelProcedures: 3,
     documents: 4,
@@ -1294,15 +1397,20 @@ export async function seedDemoDataForOrganization(
   }
 
   // Garde anti-doublon SANS exception : si l'organisation contient déjà des
-  // élèves ou les comptes de démonstration, le seeding est ignoré (retour
-  // informatif) au lieu de laisser Prisma lever une erreur de contrainte.
+  // élèves, des classes, des séances de cours (ClassSession), des présences
+  // (Attendance) ou les comptes de démonstration, le seeding est ignoré
+  // (retour informatif) au lieu de laisser Prisma lever une erreur de
+  // contrainte unique (P2002).
   const firstEmails = demoAccountEmails(
     demoMailboxToken(organization.slug, organizationId, 1)
   );
   const [
     existingDemoAccounts,
     existingStudents,
+    existingClasses,
     existingCourses,
+    existingClassSessions,
+    existingAttendances,
     existingExpenses,
     existingPayments,
     existingProducts,
@@ -1315,22 +1423,32 @@ export async function seedDemoDataForOrganization(
       },
     }),
     prisma.student.count({ where: { organizationId } }),
+    prisma.class.count({ where: { organizationId } }),
     prisma.course.count({ where: { organizationId } }),
+    prisma.classSession.count({ where: { organizationId } }),
+    prisma.attendance.count({ where: { organizationId } }),
     prisma.expense.count({ where: { organizationId } }),
     prisma.payment.count({ where: { organizationId } }),
     prisma.productService.count({ where: { organizationId } }),
     prisma.productCategory.count({ where: { organizationId } }),
   ]);
 
-  if (existingDemoAccounts > 0 || existingStudents > 0) {
+  if (
+    existingDemoAccounts > 0 ||
+    existingStudents > 0 ||
+    existingClasses > 0 ||
+    existingClassSessions > 0 ||
+    existingAttendances > 0
+  ) {
     return {
       seeded: false,
       reason: "ALREADY_SEEDED",
       counts: {
         students: existingStudents,
-        classes: 0,
+        classes: existingClasses,
         courses: existingCourses,
-        attendances: 0,
+        classSessions: existingClassSessions,
+        attendances: existingAttendances,
         travelProcedures: 0,
         documents: 0,
         expenses: existingExpenses,
