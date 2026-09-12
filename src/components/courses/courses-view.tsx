@@ -6,18 +6,16 @@ import {
   BookOpenIcon,
   ClipboardListIcon,
   ClockIcon,
-  GraduationCapIcon,
   SearchIcon,
   UsersRoundIcon,
 } from "lucide-react";
 
-import type { CourseDTO, TeacherDTO } from "@/actions/courses";
+import type { CourseDTO } from "@/actions/courses";
 import { deleteCourseAction } from "@/actions/courses";
 import { AddCourseDialog } from "@/components/courses/add-course-dialog";
 import { EditCourseDialog } from "@/components/courses/edit-course-dialog";
 import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 
 // Formatage déterministe (locale fixe) pour éviter tout écart d'hydratation.
 const amountFormatter = new Intl.NumberFormat("fr-FR", {
@@ -47,7 +45,7 @@ function CourseCard({
   const enrollmentCount = course._count.enrollments;
 
   return (
-    <div className="flex flex-col rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+    <div className="flex flex-col rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:border-primary hover:shadow-md">
       <div className="flex flex-col gap-2 p-4">
         {/* Code + prix + actions */}
         <div className="flex items-center justify-between gap-2">
@@ -88,17 +86,8 @@ function CourseCard({
         ) : null}
       </div>
 
-      {/* Métadonnées : enseignant, durée, inscrits */}
-      <div className="mt-auto flex flex-col gap-2 border-t px-4 py-3 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <GraduationCapIcon className="size-4 shrink-0" />
-          <span className={cn(!course.teacher && "italic")}>
-            {course.teacher
-              ? `${course.teacher.firstName} ${course.teacher.lastName}`
-              : "Enseignant non attribué"}
-          </span>
-        </div>
-
+      {/* Métadonnées : durée, inscrits */}
+      <div className="flex flex-col gap-2 border-t border-border px-4 py-3 text-sm text-muted-foreground">
         <div className="flex items-center gap-2">
           <ClockIcon className="size-4 shrink-0" />
           <span>
@@ -113,14 +102,23 @@ function CourseCard({
             {enrollmentCount > 1 ? "s" : ""}
           </span>
         </div>
+      </div>
 
-        {/* Accès direct au cahier de texte du cours */}
+      {/* Actions rapides */}
+      <div className="flex flex-col gap-2 border-t border-border p-3">
         <Link
           href={`/dashboard/courses/${course.id}`}
-          className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
-          <ClipboardListIcon className="size-3.5" />
-          Présences & cahier de texte
+          <BookOpenIcon className="size-4" />
+          Accéder au cours
+        </Link>
+        <Link
+          href={`/dashboard/attendance?courseId=${course.id}`}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          <ClipboardListIcon className="size-4" />
+          Marquer les présences
         </Link>
       </div>
     </div>
@@ -133,11 +131,9 @@ function CourseCard({
 
 export function CoursesView({
   courses,
-  teachers,
   isTeacher = false,
 }: {
   courses: CourseDTO[];
-  teachers: TeacherDTO[];
   /** Masque les données financières et les actions d'administration. */
   isTeacher?: boolean;
 }) {
@@ -146,7 +142,7 @@ export function CoursesView({
     null
   );
 
-  /** Recherche instantanée par intitulé, code ou nom de l'enseignant. */
+  /** Recherche instantanée par intitulé ou code. */
   const filteredCourses = React.useMemo(() => {
     const query = search.trim().toLowerCase();
 
@@ -155,10 +151,7 @@ export function CoursesView({
     return courses.filter((course) => {
       return (
         course.title.toLowerCase().includes(query) ||
-        course.code.toLowerCase().includes(query) ||
-        `${course.teacher?.firstName ?? ""} ${course.teacher?.lastName ?? ""}`
-          .toLowerCase()
-          .includes(query)
+        course.code.toLowerCase().includes(query)
       );
     });
   }, [courses, search]);
@@ -183,7 +176,7 @@ export function CoursesView({
           </p>
         </div>
         {/* La création de cours est réservée à l'administration */}
-        {!isTeacher ? <AddCourseDialog teachers={teachers} /> : null}
+        {!isTeacher ? <AddCourseDialog /> : null}
       </div>
 
       {/* Recherche instantanée */}
@@ -244,7 +237,6 @@ export function CoursesView({
       {/* Modale d'édition pré-remplie */}
       <EditCourseDialog
         course={editingCourse}
-        teachers={teachers}
         open={editingCourse !== null}
         onOpenChange={(open) => {
           if (!open) setEditingCourse(null);

@@ -152,12 +152,27 @@ export async function getTeacherDashboardStats(): Promise<TeacherDashboardStatsD
   }
 
   try {
-    // Un enseignant ne voit que ses cours ; les autres rôles staff voient
+    // Un enseignant ne voit que ses cours : périmètre défini par les classes
+    // qui lui sont assignées (`Class.teacherId = user.id`), jamais par
+    // `Course.teacherId` (champ historique). Les autres rôles staff voient
     // l'ensemble du catalogue (aucune donnée financière incluse).
-    const courseWhere =
-      user.role === "TEACHER"
-        ? { organizationId: user.organizationId, teacherId: user.id }
-        : { organizationId: user.organizationId };
+    // Aligné avec `getCourses` (actions/courses.ts) et `getMyCourses`.
+    let courseWhere: { organizationId: string; id?: { in: string[] } };
+    if (user.role === "TEACHER") {
+      const assignedClasses = await prisma.class.findMany({
+        where: { organizationId: user.organizationId, teacherId: user.id },
+        select: { courseId: true },
+      });
+      const teacherCourseIds = [
+        ...new Set(assignedClasses.map((c) => c.courseId)),
+      ];
+      courseWhere = {
+        organizationId: user.organizationId,
+        id: { in: teacherCourseIds },
+      };
+    } else {
+      courseWhere = { organizationId: user.organizationId };
+    }
 
     const [courses, logs] = await Promise.all([
       prisma.course.findMany({

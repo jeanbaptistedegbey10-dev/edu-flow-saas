@@ -1,5 +1,5 @@
 import { getMyClasses } from "@/actions/attendance";
-import { AttendanceView } from "@/components/attendance/attendance-view";
+import { ClassAttendanceView } from "@/components/attendance/class-attendance-view";
 
 export const metadata = {
   title: "Présences & Cahier de texte | EduFlow",
@@ -10,5 +10,5 @@ export const metadata = {
 export default async function AttendancePage() {
   const classes = await getMyClasses();
 
-  return <AttendanceView classes={classes} />;
+  return <ClassAttendanceView classes={classes} />;
 }

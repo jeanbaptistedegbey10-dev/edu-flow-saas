@@ -6,8 +6,6 @@ import {
   BanknoteIcon,
   CalendarDaysIcon,
   ClipboardCheckIcon,
-  DownloadIcon,
-  FileTextIcon,
   HistoryIcon,
   MailIcon,
   PhoneIcon,
@@ -43,6 +41,7 @@ import {
 } from "@/components/ui/table";
 import { StudentAcademicTab } from "@/components/students/student-academic-tab";
 import { StudentAttendanceTab } from "@/components/students/student-attendance-tab";
+import { StudentReportButton } from "@/components/students/student-report-button";
 import { CopyParentLinkButton } from "@/components/students/copy-parent-link-button";
 import { getPaymentMethodLabel,
   getPaymentStatusBadgeClass,
@@ -177,7 +176,7 @@ export default async function StudentDetailPage({
       getStudentAttendanceHistory(id).catch(() => []),
       // Jeton d'accès public (rapport parent) : purement facultatif — un
       // échec n'empêche pas l'affichage de la fiche, seuls les boutons
-      // « Rapport PDF » / « Copier le lien parent » sont masqués.
+      // « Voir / Imprimer le rapport » / « Copier le lien parent » sont masqués.
       ensureStudentReportToken(id).catch(() => null),
     ]);
 
@@ -188,7 +187,6 @@ export default async function StudentDetailPage({
   const parentLink = reportToken
     ? `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/reports/student/${reportToken}`
     : null;
-  const downloadPdfUrl = reportToken ? `/reports/student/${reportToken}/pdf?format=pdf` : null;
 
   // Lectures relationnelles défensives : `payments` provient de la fiche mais
   // toute donnée partielle (undefined / null) se replie sur un tableau vide.
@@ -252,16 +250,9 @@ export default async function StudentDetailPage({
               ) : null}
             </div>
 
-            {/* Actions rapport parent + PDF */}
+            {/* Actions rapport — aperçu modale + copie du lien parent */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              {downloadPdfUrl ? (
-                <Button asChild variant="outline" size="sm">
-                  <Link href={downloadPdfUrl}>
-                    <DownloadIcon className="size-4" />
-                    Télécharger Rapport PDF
-                  </Link>
-                </Button>
-              ) : null}
+              <StudentReportButton studentId={student.id} />
               {parentLink ? (
                 <CopyParentLinkButton url={parentLink} />
               ) : null}

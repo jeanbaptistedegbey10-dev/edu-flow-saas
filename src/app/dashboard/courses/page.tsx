@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { getCourses, getTeachers } from "@/actions/courses";
+import { getCourses } from "@/actions/courses";
 import { CoursesView } from "@/components/courses/courses-view";
 
 export const metadata = {
@@ -13,9 +13,9 @@ export default async function CoursesPage() {
 
   // Un enseignant ne reçoit que les cours qui lui sont assignés
   // (filtrage effectué dans l'action getCourses).
-  const [courses, teachers] = await Promise.all([getCourses(), getTeachers()]);
+  const courses = await getCourses();
 
   return (
-    <CoursesView courses={courses} teachers={teachers} isTeacher={isTeacher} />
+    <CoursesView courses={courses} isTeacher={isTeacher} />
   );
 }

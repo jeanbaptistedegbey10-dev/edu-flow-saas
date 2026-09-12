@@ -4,18 +4,25 @@ import * as React from "react";
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
+  FileTextIcon,
   Loader2Icon,
+  PrinterIcon,
   SaveIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 
 import {
   getGradeSheet,
+  getPremiumReportForStudent,
   saveGradesAction,
   type GradeSheetDTO,
+  type PremiumReportDTO,
 } from "@/actions/evaluations";
+import { getCurrentOrganizationProfile } from "@/actions/payments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ReportCardDialog } from "@/components/evaluations/report-card-dialog";
+import type { PremiumReportOrganization } from "@/lib/premium-report";
 import {
   Table,
   TableBody,
@@ -59,6 +66,15 @@ export function GradeSheet({
     kind: "success" | "error";
     message: string;
   } | null>(null);
+  const [periodLabel, setPeriodLabel] = React.useState("");
+  const [reportOpen, setReportOpen] = React.useState(false);
+  const [reportLoadingId, setReportLoadingId] = React.useState<string | null>(
+    null
+  );
+  const [report, setReport] = React.useState<PremiumReportDTO | null>(null);
+  const [reportError, setReportError] = React.useState<string | null>(null);
+  const [organization, setOrganization] =
+    React.useState<PremiumReportOrganization | null>(null);
 
   // Charge la grille complète (session + modules + étudiants + notes).
   React.useEffect(() => {
@@ -117,20 +133,19 @@ export function GradeSheet({
   };
 
   /**
-   * Statistiques live : moyenne /100 par étudiant et nombre de notes sous le
-   * seuil de validation (alerte visuelle automatique).
+   * Statistiques live : nombre de notes sous le seuil de validation par
+   * étudiant (alerte visuelle automatique). Formation modulaire : aucune
+   * moyenne générale n'est affichée — chaque module se valide individuellement.
    */
   const statsByStudent = React.useMemo(() => {
     if (!sheet) {
-      return new Map<string, { average: number | null; failing: number }>();
+      return new Map<string, { failing: number }>();
     }
 
     return new Map(
       sheet.students.map((student) => {
         const draftsRow = drafts[student.studentId] ?? {};
 
-        let totalScore = 0;
-        let totalMax = 0;
         let failing = 0;
 
         for (const moduleItem of sheet.evaluation.modules) {
@@ -140,24 +155,12 @@ export function GradeSheet({
           const value = Number(raw.replace(",", "."));
           if (!Number.isFinite(value)) continue;
 
-          totalScore += value;
-          totalMax += moduleItem.maxScore;
-
           if (value < moduleItem.passingScore) {
             failing += 1;
           }
         }
 
-        return [
-          student.studentId,
-          {
-            average:
-              totalMax > 0
-                ? Math.round((totalScore / totalMax) * 1000) / 10
-                : null,
-            failing,
-          },
-        ];
+        return [student.studentId, { failing }];
       })
     );
   }, [sheet, drafts]);
@@ -172,6 +175,37 @@ export function GradeSheet({
 
     return count;
   }, [statsByStudent]);
+
+  /** Ouvre la modale bulletin premium d'un étudiant (contrôle d'accès serveur). */
+  const handleOpenReport = async (studentId: string) => {
+    setReportError(null);
+    setReportLoadingId(studentId);
+    try {
+      const [dto, org] = await Promise.all([
+        getPremiumReportForStudent(
+          studentId,
+          periodLabel.trim() || undefined
+        ),
+        organization
+          ? Promise.resolve(organization)
+          : getCurrentOrganizationProfile(),
+      ]);
+      if (!organization) setOrganization(org);
+      setReport({
+        ...dto,
+        issuedAt: new Date(dto.issuedAt),
+      });
+      setReportOpen(true);
+    } catch (error) {
+      setReportError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de générer le bulletin pour le moment."
+      );
+    } finally {
+      setReportLoadingId(null);
+    }
+  };
 
   /** Soumet la grille au serveur. */
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -256,11 +290,31 @@ export function GradeSheet({
           </p>
         </div>
 
-        <Button type="button" variant="outline" onClick={onBack}>
-          <ArrowLeftIcon data-icon="inline-start" />
-          Retour
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={periodLabel}
+            onChange={(event) => setPeriodLabel(event.target.value)}
+            placeholder="Période / Semestre (ex : S1 2025/2026)"
+            maxLength={60}
+            className="w-64"
+            aria-label="Période ou semestre du bulletin"
+          />
+          <Button type="button" variant="outline" onClick={onBack}>
+            <ArrowLeftIcon data-icon="inline-start" />
+            Retour
+          </Button>
+        </div>
       </div>
+
+      {reportError ? (
+        <p
+          role="alert"
+          className="flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          <FileTextIcon className="size-4 shrink-0" />
+          {reportError}
+        </p>
+      ) : null}
 
       {/* Alerte globale : notes sous le seuil */}
       {totalFailing > 0 ? (
@@ -303,7 +357,9 @@ export function GradeSheet({
                       </span>
                     </TableHead>
                   ))}
-                  <TableHead className="min-w-[90px]">Moyenne /100</TableHead>
+                  <TableHead className="min-w-[130px] text-right">
+                    Bulletin
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -350,14 +406,16 @@ export function GradeSheet({
                                 )
                               }
                               aria-label={`Note de ${student.firstName} ${student.lastName} — ${moduleItem.name}`}
+                              placeholder={`0–${numberFormatter.format(moduleItem.maxScore)}`}
                               aria-invalid={isBelowThreshold}
                               className={cn(
-                                // Champs immédiatement visibles : bordure
-                                // nette (`border-input`) et fond légèrement
-                                // grisé, sans attendre un survol ou un focus.
-                                "w-24 border border-input bg-muted/50 text-center tabular-nums shadow-xs dark:bg-input/30",
+                                // Champs immédiatement identifiables : bordure
+                                // pointillée bien visible + fond légèrement
+                                // grisé, renforcée au survol et au focus
+                                // (changement de couleur de bordure/anneau).
+                                "w-24 border-2 border-dashed border-slate-400/80 bg-slate-50 text-center tabular-nums shadow-xs transition-colors hover:border-primary/70 hover:bg-primary/5 focus-visible:border-primary focus-visible:ring-4 focus-visible:ring-primary/25 dark:border-slate-600 dark:bg-input/25 dark:hover:border-primary/60 dark:focus-visible:border-primary",
                                 isBelowThreshold &&
-                                  "border-red-500 bg-red-50 text-red-600 focus-visible:ring-red-500/40 dark:bg-red-500/10 dark:text-red-400"
+                                  "border-red-500 bg-red-50 text-red-600 hover:border-red-600 focus-visible:ring-red-500/40 dark:bg-red-500/10 dark:text-red-400"
                               )}
                             />
                             {isBelowThreshold ? (
@@ -370,11 +428,25 @@ export function GradeSheet({
                         );
                       })}
 
-                      <TableCell className="tabular-nums font-semibold">
-                        {stats?.average !== null &&
-                        stats?.average !== undefined
-                          ? numberFormatter.format(stats.average)
-                          : "—"}
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={reportLoadingId === student.studentId}
+                          onClick={() => handleOpenReport(student.studentId)}
+                          title={`Aperçu du bulletin de ${student.firstName} ${student.lastName}`}
+                        >
+                          {reportLoadingId === student.studentId ? (
+                            <Loader2Icon
+                              data-icon="inline-start"
+                              className="animate-spin"
+                            />
+                          ) : (
+                            <PrinterIcon data-icon="inline-start" />
+                          )}
+                          Bulletin
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
@@ -418,6 +490,32 @@ export function GradeSheet({
           </Button>
         </div>
       </div>
+
+      {organization && report ? (
+        <ReportCardDialog
+          data={report}
+          organization={organization}
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+        />
+      ) : (
+        <ReportCardDialog
+          data={null}
+          organization={{
+            name: "Centre de Formation Excellence",
+            address: null,
+            city: null,
+            phone: null,
+            email: null,
+            website: null,
+            logoUrl: null,
+            rccm: null,
+            ifu: null,
+          }}
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+        />
+      )}
     </form>
   );
 }

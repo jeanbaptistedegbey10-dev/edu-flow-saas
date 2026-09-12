@@ -111,7 +111,9 @@ export async function GET(
   return new NextResponse(pdfBlob, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="rapport-${student.studentCode}.pdf"`,
+      // Vue en ligne (aperçu) et non téléchargement automatique : l'utilisateur
+      // choisit lui-même « Enregistrer sous » dans son lecteur PDF.
+      "Content-Disposition": `inline; filename="rapport-${student.studentCode}.pdf"`,
     },
   });
 }

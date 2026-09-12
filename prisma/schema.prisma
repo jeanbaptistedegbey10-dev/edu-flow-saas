@@ -375,6 +375,9 @@ model Class {
   courseId       String
   teacherId      String?
   name           String
+  /// Créneau horaire synthétique (ex : « 08h-11h ») — conservé pour
+  /// compatibilité / affichage rapide. Les créneaux détaillés sont dans
+  /// `schedules` (ClassSchedule).
   schedule       String
   /// Frais de scolarité configurés pour la classe (FCFA). Lorsqu'il est
   /// absent, le prix du cours porteur est utilisé comme montant par défaut.
@@ -390,6 +393,32 @@ model Class {
   attendances  Attendance[]
   sessions     ClassSession[]
   evaluations  Evaluation[]
+  schedules    ClassSchedule[]
+}
+
+/// Créneau hebdomadaire d'une classe / cohorte. Plusieurs créneaux peuvent
+/// être rattachés à une même classe (ex : Lundi 08h-11h + Mercredi 08h-11h).
+/// Permet la gestion de sous-groupes : deux classes distinctes suivant le
+/// même cours (ex : Allemand A1) à des heures différentes, avec des
+/// professeurs et salles distincts.
+model ClassSchedule {
+  id        String   @id @default(cuid())
+  classId   String
+  /// Jour de la semaine : 0 = Dimanche, 1 = Lundi, ..., 6 = Samedi.
+  dayOfWeek Int
+  /// Heure de début (ex : "07:00").
+  startTime String
+  /// Heure de fin (ex : "10:00").
+  endTime   String
+  /// Salle où se déroule le créneau (ex : "Salle 101").
+  room      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@index([classId])
+  @@index([dayOfWeek])
 }
 
 /// Historique des affectations d'un étudiant aux classes / cohortes.
@@ -438,6 +467,8 @@ model ClassSession {
   subjectName    String
   /// Chapitre traité pendant la séance (cahier de texte) — requis.
   chapter        String
+  /// Résumé du cours / Devoirs donnés pour la séance suivante (cahier de texte).
+  summary        String?
   /// Date de la séance (journée, minuit UTC) — les dates passées sont
   /// acceptées pour le suivi historique.
   sessionDate    DateTime
@@ -450,7 +481,7 @@ model ClassSession {
   class        Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
   attendances  Attendance[]
 
-  @@index([classId, sessionDate])
+  @@unique([classId, sessionDate])
   @@index([organizationId])
 }
 
@@ -500,7 +531,7 @@ model CourseLog {
   course       Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
   teacher      User         @relation("TeacherCourseLogs", fields: [teacherId], references: [id], onDelete: Cascade)
 
-  @@index([courseId, date])
+  @@unique([courseId, date])
 }
 
 // --------------------------------------

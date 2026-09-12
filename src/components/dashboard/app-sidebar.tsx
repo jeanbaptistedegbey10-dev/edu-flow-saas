@@ -113,6 +113,11 @@ const teacherMenu: MenuItem[] = [
     url: "/dashboard/evaluations",
     icon: ClipboardCheck,
   },
+  {
+    title: "Mes Étudiants",
+    url: "/dashboard/teacher/students",
+    icon: UsersRound,
+  },
 ]
 
 const managementMenu: MenuItem[] = [
@@ -125,6 +130,22 @@ const managementMenu: MenuItem[] = [
     title: "Dépenses",
     url: "/dashboard/expenses",
     icon: FileText,
+  },
+  {
+    title: "Calendrier",
+    url: "/dashboard/calendar",
+    icon: CalendarDays,
+  },
+]
+
+// Menu « Gestion » réservé à l'enseignant : tâches globales en LECTURE SEULE
+// et calendrier. Les dépenses (données financières) ne sont jamais affichées
+// au rôle TEACHER — voir aussi TEACHER_FORBIDDEN_PREFIXES dans src/proxy.ts.
+const teacherManagementMenu: MenuItem[] = [
+  {
+    title: "Tâches",
+    url: "/dashboard/tasks",
+    icon: ClipboardList,
   },
   {
     title: "Calendrier",
@@ -253,7 +274,8 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <SidebarGroupLabel>Gestion</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {managementMenu.map((item) => (
+                  {/* Dépenses volontairement absentes pour les enseignants */}
+                  {teacherManagementMenu.map((item) => (
                     <SidebarLink
                       key={item.title}
                       item={item}

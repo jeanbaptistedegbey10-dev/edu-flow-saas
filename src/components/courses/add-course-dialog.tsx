@@ -7,7 +7,6 @@ import { BookPlusIcon, Loader2Icon, PlusIcon } from "lucide-react";
 import {
   createCourseAction,
   type CourseFormState,
-  type TeacherDTO,
 } from "@/actions/courses";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,7 +40,7 @@ function FieldError({ message }: { message?: string }) {
   );
 }
 
-export function AddCourseDialog({ teachers }: { teachers: TeacherDTO[] }) {
+export function AddCourseDialog() {
   const [open, setOpen] = React.useState(false);
 
   // Enveloppe l'action serveur pour fermer la modale dès que la création réussit.
@@ -149,27 +148,6 @@ export function AddCourseDialog({ teachers }: { teachers: TeacherDTO[] }) {
               />
               <FieldError message={fieldErrors.durationWeeks} />
             </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="teacherId">Enseignant</Label>
-            <Select name="teacherId">
-              <SelectTrigger
-                id="teacherId"
-                className="w-full"
-                aria-invalid={Boolean(fieldErrors.teacherId)}
-              >
-                <SelectValue placeholder="Non attribué" />
-              </SelectTrigger>
-              <SelectContent>
-                {teachers.map((teacher) => (
-                  <SelectItem key={teacher.id} value={teacher.id}>
-                    {teacher.firstName} {teacher.lastName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FieldError message={fieldErrors.teacherId} />
           </div>
 
           <div className="grid gap-2">

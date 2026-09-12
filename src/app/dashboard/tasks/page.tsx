@@ -1,3 +1,4 @@
+import { auth } from "@/auth";
 import { getStudentOptions } from "@/actions/payments";
 import {
   getStaffMembers,
@@ -12,6 +13,11 @@ export const metadata = {
 };
 
 export default async function TasksPage() {
+  // L'enseignant accède aux tâches en LECTURE SEULE : pas de création,
+  // d'édition ni de suppression (boutons masqués côté client).
+  const session = await auth();
+  const readOnly = session?.user?.role === "TEACHER";
+
   // Requêtes indépendantes exécutées en parallèle pour minimiser la latence.
   const [tasks, staffMembers, students] = await Promise.all([
     getTasks(),
@@ -24,6 +30,7 @@ export default async function TasksPage() {
       tasks={tasks}
       staffMembers={staffMembers}
       students={students}
+      readOnly={readOnly}
     />
   );
 }

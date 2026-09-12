@@ -190,6 +190,23 @@ function sortTasks(tasks: TaskDTO[]): TaskDTO[] {
   });
 }
 
+/**
+ * Garde d'écriture stricte pour les tâches : abonnement actif ET rôle autorisé.
+ * Les enseignants ont un accès LECTURE SEULE aux tâches — aucune création,
+ * modification ni suppression (boutons masqués + refus serveur).
+ */
+async function assertTaskCanMutate(): Promise<void> {
+  await assertCanMutate();
+
+  const session = await auth();
+  const role = session?.user?.role;
+  if (role === "TEACHER" || role === "STUDENT") {
+    throw new Error(
+      "Accès refusé : la gestion des tâches est réservée au personnel administratif."
+    );
+  }
+}
+
 // --------------------------------------
 // Server Actions
 // --------------------------------------
@@ -280,7 +297,7 @@ export async function createTaskAction(
   _prevState: TaskFormState,
   formData: FormData
 ): Promise<TaskFormState> {
-  await assertCanMutate();
+  await assertTaskCanMutate();
   const parsed = parseTaskForm(formData);
 
   if (!parsed.ok) {
@@ -378,7 +395,7 @@ export async function updateTaskStatusAction(
   taskId: string,
   status: string
 ): Promise<UpdateTaskStatusState> {
-  await assertCanMutate();
+  await assertTaskCanMutate();
   if (!TASK_STATUSES.includes(status as TaskStatus)) {
     return {
       status: "error",
@@ -435,7 +452,7 @@ export async function updateTaskAction(
   _prevState: TaskFormState,
   formData: FormData
 ): Promise<TaskFormState> {
-  await assertCanMutate();
+  await assertTaskCanMutate();
   const taskId = String(formData.get("id") ?? "").trim();
 
   if (!taskId) {
@@ -540,7 +557,7 @@ export async function updateTaskAction(
 export async function deleteTaskAction(
   taskId: string
 ): Promise<TaskMutationResult> {
-  await assertCanMutate();
+  await assertTaskCanMutate();
   if (!taskId) {
     return { ok: false, message: "Identifiant de la tâche manquant." };
   }

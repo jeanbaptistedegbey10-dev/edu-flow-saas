@@ -3,12 +3,21 @@
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
+import { getCurrentOrganizationId, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
 // --------------------------------------
+
+/** Créneau hebdomadaire d'une classe (ClassSchedule). */
+export type ClassScheduleDTO = {
+  id: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  room: string | null;
+};
 
 /** Classe / cohorte avec son cours, son enseignant et son effectif. */
 export type ClassDTO = {
@@ -27,6 +36,8 @@ export type ClassDTO = {
   teacherId: string | null;
   teacherName: string | null;
   studentCount: number;
+  /** Créneaux hebdomadaires détaillés de la classe. */
+  schedules: ClassScheduleDTO[];
   createdAt: Date;
 };
 
@@ -42,6 +53,8 @@ export type ClassOptionDTO = {
    * frais de la classe si configurés, sinon prix du cours porteur.
    */
   tuitionFee: number | null;
+  /** Créneaux hebdomadaires détaillés de la classe. */
+  schedules: ClassScheduleDTO[];
 };
 
 export type ClassFormField =
@@ -78,9 +91,44 @@ type ParsedClassInput =
         tuitionFee: number | null;
         courseId: string;
         teacherId: string | null;
+        schedules: Array<{
+          dayOfWeek: number;
+          startTime: string;
+          endTime: string;
+          room: string | null;
+        }>;
       };
     }
   | { ok: false; fieldErrors: Partial<Record<ClassFormField, string>> };
+
+/**
+ * Parse les créneaux hebdomadaires soumis via le formulaire.
+ * Les créneaux sont transmis en JSON dans un champ caché `schedulesJson`.
+ */
+function parseSchedulesJson(raw: string): Array<{
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  room: string | null;
+}> {
+  if (!raw) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter(
+      (item): item is { dayOfWeek: number; startTime: string; endTime: string; room: string | null } =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).dayOfWeek === "number" &&
+        typeof (item as Record<string, unknown>).startTime === "string" &&
+        typeof (item as Record<string, unknown>).endTime === "string"
+    );
+  } catch {
+    return [];
+  }
+}
 
 function parseClassForm(formData: FormData): ParsedClassInput {
   const name = String(formData.get("name") ?? "").trim();
@@ -88,6 +136,7 @@ function parseClassForm(formData: FormData): ParsedClassInput {
   const courseId = String(formData.get("courseId") ?? "").trim();
   const teacherId = String(formData.get("teacherId") ?? "").trim();
   const rawTuitionFee = String(formData.get("tuitionFee") ?? "").trim();
+  const rawSchedules = String(formData.get("schedulesJson") ?? "").trim();
 
   const fieldErrors: Partial<Record<ClassFormField, string>> = {};
 
@@ -123,6 +172,9 @@ function parseClassForm(formData: FormData): ParsedClassInput {
     }
   }
 
+  // Parse des créneaux hebdomadaires
+  const schedules = parseSchedulesJson(rawSchedules);
+
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, fieldErrors };
   }
@@ -135,6 +187,7 @@ function parseClassForm(formData: FormData): ParsedClassInput {
       tuitionFee,
       courseId,
       teacherId: teacherId || null,
+      schedules,
     },
   };
 }
@@ -201,6 +254,16 @@ export async function getClasses(): Promise<ClassDTO[]> {
           select: { firstName: true, lastName: true },
         },
         _count: { select: { enrollments: true } },
+        schedules: {
+          select: {
+            id: true,
+            dayOfWeek: true,
+            startTime: true,
+            endTime: true,
+            room: true,
+          },
+          orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+        },
       },
     });
 
@@ -217,6 +280,13 @@ export async function getClasses(): Promise<ClassDTO[]> {
         ? `${klass.teacher.firstName} ${klass.teacher.lastName}`
         : null,
       studentCount: klass._count.enrollments,
+      schedules: klass.schedules.map((s) => ({
+        id: s.id,
+        dayOfWeek: s.dayOfWeek,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        room: s.room,
+      })),
       createdAt: klass.createdAt,
     }));
   } catch (error) {
@@ -248,6 +318,16 @@ export async function getClassOptions(): Promise<ClassOptionDTO[]> {
         course: {
           select: { title: true, code: true, price: true },
         },
+        schedules: {
+          select: {
+            id: true,
+            dayOfWeek: true,
+            startTime: true,
+            endTime: true,
+            room: true,
+          },
+          orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+        },
       },
     });
 
@@ -259,6 +339,13 @@ export async function getClassOptions(): Promise<ClassOptionDTO[]> {
       courseCode: klass.course.code,
       // Montant effectif : frais de classe si configurés, sinon prix du cours.
       tuitionFee: klass.tuitionFee ?? klass.course.price,
+      schedules: klass.schedules.map((s) => ({
+        id: s.id,
+        dayOfWeek: s.dayOfWeek,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        room: s.room,
+      })),
     }));
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -316,6 +403,14 @@ export async function createClassAction(
         tuitionFee: parsed.data.tuitionFee,
         courseId: parsed.data.courseId,
         teacherId: parsed.data.teacherId,
+        schedules: {
+          create: parsed.data.schedules.map((s) => ({
+            dayOfWeek: s.dayOfWeek,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            room: s.room || null,
+          })),
+        },
       },
     });
 
@@ -398,15 +493,29 @@ export async function updateClassAction(
       };
     }
 
-    await prisma.class.update({
-      where: { id: classId },
-      data: {
-        name: parsed.data.name,
-        schedule: parsed.data.schedule,
-        tuitionFee: parsed.data.tuitionFee,
-        courseId: parsed.data.courseId,
-        teacherId: parsed.data.teacherId,
-      },
+    await prisma.$transaction(async (tx) => {
+      // Supprime les anciens créneaux puis recrée les nouveaux (pattern
+      // delete-and-recreate simple pour synchroniser les horaires).
+      await tx.classSchedule.deleteMany({ where: { classId } });
+
+      await tx.class.update({
+        where: { id: classId },
+        data: {
+          name: parsed.data.name,
+          schedule: parsed.data.schedule,
+          tuitionFee: parsed.data.tuitionFee,
+          courseId: parsed.data.courseId,
+          teacherId: parsed.data.teacherId,
+          schedules: {
+            create: parsed.data.schedules.map((s) => ({
+              dayOfWeek: s.dayOfWeek,
+              startTime: s.startTime,
+              endTime: s.endTime,
+              room: s.room || null,
+            })),
+          },
+        },
+      });
     });
 
     revalidatePath("/dashboard/classes");
@@ -476,4 +585,131 @@ export async function deleteClassAction(
         "Une erreur est survenue lors de la suppression de la classe.",
     };
   }
+}
+
+// --------------------------------------
+// Types pour la fiche détaillée d'une classe
+// --------------------------------------
+
+/** Étudiant inscrit à une classe (pour la fiche détaillée). */
+export type ClassStudentDTO = {
+  studentId: string;
+  studentCode: string;
+  firstName: string;
+  lastName: string;
+  progress: number;
+};
+
+/** Détail complet d'une classe : informations, inscrits et cours porteur. */
+export type ClassDetailDTO = {
+  id: string;
+  name: string;
+  schedule: string;
+  tuitionFee: number | null;
+  courseId: string;
+  courseTitle: string;
+  courseCode: string;
+  teacherId: string | null;
+  teacherName: string | null;
+  students: ClassStudentDTO[];
+  /** Créneaux hebdomadaires détaillés de la classe. */
+  schedules: ClassScheduleDTO[];
+};
+
+// --------------------------------------
+// Server Action — Fiche détaillée d'une classe
+// --------------------------------------
+
+/**
+ * Récupère la fiche détaillée d'une classe (informations, liste des étudiants
+ * inscrits et cours porteur) en une seule action.
+ * Respecte l'isolation par rôle : un enseignant ne peut consulter que ses classes.
+ */
+export async function getClassDetail(
+  classId: string
+): Promise<ClassDetailDTO> {
+  const user = await getCurrentSessionUser();
+
+  if (user.role === "STUDENT") {
+    throw new Error("Accès refusé : les étudiants n'ont pas accès au tableau de bord.");
+  }
+
+  // Vérifie que la classe appartient à l'organisation et que l'enseignant y est assigné
+  const where =
+    user.role === "TEACHER"
+      ? { id: classId, organizationId: user.organizationId, teacherId: user.id }
+      : { id: classId, organizationId: user.organizationId };
+
+  const klass = await prisma.class.findFirst({
+    where,
+    select: {
+      id: true,
+      name: true,
+      schedule: true,
+      tuitionFee: true,
+      courseId: true,
+      course: {
+        select: { title: true, code: true },
+      },
+      teacherId: true,
+      teacher: {
+        select: { firstName: true, lastName: true },
+      },
+      enrollments: {
+        select: {
+          student: {
+            select: {
+              id: true,
+              studentCode: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+        orderBy: [{ student: { firstName: "asc" } }, { student: { lastName: "asc" } }],
+      },
+      schedules: {
+        select: {
+          id: true,
+          dayOfWeek: true,
+          startTime: true,
+          endTime: true,
+          room: true,
+        },
+        orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+      },
+    },
+  });
+
+  if (!klass) {
+    throw new Error("Classe introuvable ou non autorisée.");
+  }
+
+  return {
+    id: klass.id,
+    name: klass.name,
+    schedule: klass.schedule,
+    tuitionFee: klass.tuitionFee,
+    courseId: klass.courseId,
+    courseTitle: klass.course.title,
+    courseCode: klass.course.code,
+    teacherId: klass.teacherId,
+    teacherName: klass.teacher
+      ? `${klass.teacher.firstName} ${klass.teacher.lastName}`
+      : null,
+    students: klass.enrollments.map((enrollment) => ({
+      studentId: enrollment.student.id,
+      studentCode: enrollment.student.studentCode,
+      firstName: enrollment.student.firstName,
+      lastName: enrollment.student.lastName,
+      progress: 0,
+    })),
+    schedules: klass.schedules.map((s) => ({
+      id: s.id,
+      dayOfWeek: s.dayOfWeek,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      room: s.room,
+    })),
+  };
 }

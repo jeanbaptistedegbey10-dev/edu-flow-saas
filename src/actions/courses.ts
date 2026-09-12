@@ -23,11 +23,6 @@ export type CourseDTO = {
   price: number;
   durationWeeks: number;
   createdAt: Date;
-  teacher: {
-    id: string;
-    firstName: string;
-    lastName: string;
-  } | null;
   _count: {
     enrollments: number;
   };
@@ -46,8 +41,7 @@ export type CourseFormField =
   | "code"
   | "description"
   | "price"
-  | "durationWeeks"
-  | "teacherId";
+  | "durationWeeks";
 
 export type CourseFormState = {
   status: "idle" | "success" | "error";
@@ -85,7 +79,6 @@ type ParsedCourseInput =
         description: string | null;
         price: number;
         durationWeeks: number;
-        teacherId: string | null;
       };
     }
   | { ok: false; fieldErrors: Partial<Record<CourseFormField, string>> };
@@ -96,7 +89,6 @@ function parseCourseForm(formData: FormData): ParsedCourseInput {
   const description = String(formData.get("description") ?? "").trim();
   const rawPrice = String(formData.get("price") ?? "").trim();
   const rawDurationWeeks = String(formData.get("durationWeeks") ?? "").trim();
-  const teacherId = String(formData.get("teacherId") ?? "").trim();
 
   const fieldErrors: Partial<Record<CourseFormField, string>> = {};
 
@@ -154,7 +146,6 @@ function parseCourseForm(formData: FormData): ParsedCourseInput {
       description: description || null,
       price,
       durationWeeks,
-      teacherId: teacherId || null,
     },
   };
 }
@@ -165,11 +156,12 @@ function parseCourseForm(formData: FormData): ParsedCourseInput {
 
 /**
  * Récupère le catalogue des cours accessibles à l'utilisateur connecté,
- * avec la relation `teacher` et le nombre d'étudiants inscrits
- * (`_count.enrollments`).
+ * avec le nombre d'étudiants inscrits (`_count.enrollments`).
  *
- * Isolation par rôle : un enseignant (TEACHER) ne voit que les cours qui
- * lui sont assignés ; les autres rôles staff voient tout le catalogue.
+ * Isolation par rôle :
+ * - Un enseignant (TEACHER) ne voit que les cours pour lesquels il a au moins
+ *   une classe assignée (l'enseignant est maintenant assigné au niveau classe).
+ * - Les autres rôles staff voient tout le catalogue.
  */
 export async function getCourses(): Promise<CourseDTO[]> {
   const user = await getCurrentSessionUser();
@@ -181,10 +173,21 @@ export async function getCourses(): Promise<CourseDTO[]> {
   }
 
   try {
+    // Pour un enseignant, récupérer les cours pour lesquels il a des classes
+    const courseIds =
+      user.role === "TEACHER"
+        ? await prisma.class.findMany({
+            where: { organizationId: user.organizationId, teacherId: user.id },
+            select: { courseId: true },
+          })
+        : null;
+
+    const teacherCourseIds = courseIds?.map((c) => c.courseId) ?? [];
+
     return await prisma.course.findMany({
       where:
         user.role === "TEACHER"
-          ? { organizationId: user.organizationId, teacherId: user.id }
+          ? { organizationId: user.organizationId, id: { in: teacherCourseIds } }
           : { organizationId: user.organizationId },
       orderBy: { createdAt: "desc" },
       select: {
@@ -195,13 +198,6 @@ export async function getCourses(): Promise<CourseDTO[]> {
         price: true,
         durationWeeks: true,
         createdAt: true,
-        teacher: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
         _count: {
           select: { enrollments: true },
         },
@@ -218,9 +214,9 @@ export async function getCourses(): Promise<CourseDTO[]> {
 }
 
 /**
- * Récupère la liste des utilisateurs pouvant se voir attribuer un cours
+ * Récupère la liste des utilisateurs pouvant se voir attribuer une classe
  * (rôles TEACHER ou ADMIN) de l'organisation active.
- * Utilisée pour alimenter le Select « Enseignant » de la modale d'ajout.
+ * Utilisée pour alimenter le Select « Enseignant » de la modale d'ajout de classe.
  */
 export async function getTeachers(): Promise<TeacherDTO[]> {
   const organizationId = await getCurrentOrganizationId();
@@ -289,27 +285,6 @@ export async function createCourseAction(
       };
     }
 
-    // Vérifie que l'enseignant appartient bien à l'organisation active
-    // avec un rôle autorisé (isolation multi-tenant).
-    if (parsed.data.teacherId) {
-      const teacher = await prisma.user.findFirst({
-        where: {
-          id: parsed.data.teacherId,
-          organizationId,
-          role: { in: ["TEACHER", "ADMIN"] },
-        },
-        select: { id: true },
-      });
-
-      if (!teacher) {
-        return {
-          status: "error",
-          message: "Enseignant introuvable dans votre organisation.",
-          fieldErrors: { teacherId: "Enseignant invalide." },
-        };
-      }
-    }
-
     await prisma.course.create({
       data: {
         organizationId,
@@ -318,7 +293,6 @@ export async function createCourseAction(
         description: parsed.data.description,
         price: parsed.data.price,
         durationWeeks: parsed.data.durationWeeks,
-        teacherId: parsed.data.teacherId,
       },
     });
 
@@ -413,27 +387,6 @@ export async function updateCourseAction(
       };
     }
 
-    // Vérifie que l'enseignant appartient bien à l'organisation active
-    // avec un rôle autorisé (isolation multi-tenant).
-    if (parsed.data.teacherId) {
-      const teacher = await prisma.user.findFirst({
-        where: {
-          id: parsed.data.teacherId,
-          organizationId,
-          role: { in: ["TEACHER", "ADMIN"] },
-        },
-        select: { id: true },
-      });
-
-      if (!teacher) {
-        return {
-          status: "error",
-          message: "Enseignant introuvable dans votre organisation.",
-          fieldErrors: { teacherId: "Enseignant invalide." },
-        };
-      }
-    }
-
     await prisma.course.update({
       where: { id: courseId },
       data: {
@@ -442,7 +395,6 @@ export async function updateCourseAction(
         description: parsed.data.description,
         price: parsed.data.price,
         durationWeeks: parsed.data.durationWeeks,
-        teacherId: parsed.data.teacherId,
       },
     });
 

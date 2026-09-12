@@ -7,7 +7,7 @@ import { after } from "next/server";
 
 import { sendWelcomeEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
+import { getCurrentOrganizationId, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
 
 // --------------------------------------
@@ -797,6 +797,167 @@ export async function getStudents(): Promise<StudentDTO[]> {
     if (isNextRedirectError(error)) throw error;
 
     console.error("[getStudents] Échec de lecture :", error);
+
+    // Dégradation gracieuse : liste vide plutôt que crash serveur.
+    return [];
+  }
+}
+
+/**
+ * Étudiant visible par un enseignant dans sa vue « Mes Étudiants » :
+ * STRICTEMENT aucune donnée financière — uniquement le profil académique
+ * (classe, formation) et l'assiduité.
+ */
+export type TeacherStudentDTO = {
+  id: string;
+  studentCode: string;
+  firstName: string;
+  lastName: string;
+  status: StudentStatus;
+  /** Classe / cohorte effective de l'étudiant (celle de l'enseignant). */
+  className: string | null;
+  /** Intitulé de la formation suivie dans cette classe. */
+  courseTitle: string | null;
+  /** Récapitulatif d'assiduité (Présents / Retards / Absences / Excusés). */
+  attendance: {
+    total: number;
+    present: number;
+    late: number;
+    absent: number;
+    excused: number;
+  };
+};
+
+/**
+ * Récupère les étudiants inscrits dans les cours / classes assignés à
+ * l'enseignant connecté. Réservé au rôle TEACHER — aucun champ financier
+ * (coût, réduction, net à payer, paiements) n'est sélectionné ni renvoyé.
+ */
+export async function getTeacherStudents(): Promise<TeacherStudentDTO[]> {
+  const user = await getCurrentSessionUser();
+
+  if (user.role !== "TEACHER") {
+    throw new Error("Accès réservé aux enseignants.");
+  }
+
+  try {
+    const classes = await prisma.class.findMany({
+      where: { organizationId: user.organizationId, teacherId: user.id },
+      select: {
+        id: true,
+        name: true,
+        course: { select: { title: true } },
+      },
+      orderBy: { name: "asc" },
+    });
+
+    const classIds = classes.map((klass) => klass.id);
+    if (classIds.length === 0) return [];
+
+    const students = await prisma.student.findMany({
+      where: {
+        organizationId: user.organizationId,
+        OR: [
+          { currentClassId: { in: classIds } },
+          { classEnrollments: { some: { classId: { in: classIds } } } },
+        ],
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      select: {
+        id: true,
+        studentCode: true,
+        firstName: true,
+        lastName: true,
+        status: true,
+        currentClass: {
+          select: {
+            id: true,
+            name: true,
+            course: { select: { title: true } },
+          },
+        },
+        // Classe de l'enseignant quand l'étudiant est inscrit via une
+        // inscription supplémentaire (et pas seulement sa classe active).
+        classEnrollments: {
+          where: { classId: { in: classIds } },
+          select: {
+            class: {
+              select: {
+                id: true,
+                name: true,
+                course: { select: { title: true } },
+              },
+            },
+          },
+          take: 1,
+        },
+      },
+    });
+
+    // Assiduité globale de chaque étudiant (données pédagogiques partagées).
+    const attendanceRecords = await prisma.attendance.findMany({
+      where: {
+        organizationId: user.organizationId,
+        studentId: { in: students.map((student) => student.id) },
+      },
+      select: { studentId: true, status: true },
+    });
+
+    const attendanceByStudent = new Map<string, { status: string; count: number }[]>();
+    for (const record of attendanceRecords) {
+      const bucket = attendanceByStudent.get(record.studentId) ?? [];
+      const existing = bucket.find((entry) => entry.status === record.status);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        bucket.push({ status: record.status, count: 1 });
+      }
+      attendanceByStudent.set(record.studentId, bucket);
+    }
+
+    const classNameById = new Map(classes.map((klass) => [klass.id, klass]));
+
+    return students.map((student) => {
+      // Classe effective : celle de l'enseignant (classe active si elle
+      // appartient à ses cours, sinon la première inscription trouvée).
+      let effectiveClass: {
+        name: string;
+        course: { title: string };
+      } | null = null;
+      if (
+        student.currentClass &&
+        classNameById.has(student.currentClass.id)
+      ) {
+        effectiveClass = student.currentClass;
+      } else if (student.classEnrollments[0]?.class) {
+        effectiveClass = student.classEnrollments[0].class;
+      }
+
+      const buckets = attendanceByStudent.get(student.id) ?? [];
+      const countFor = (status: string) =>
+        buckets.find((entry) => entry.status === status)?.count ?? 0;
+
+      return {
+        id: student.id,
+        studentCode: student.studentCode,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        status: student.status,
+        className: effectiveClass?.name ?? null,
+        courseTitle: effectiveClass?.course.title ?? null,
+        attendance: {
+          total: buckets.reduce((sum, entry) => sum + entry.count, 0),
+          present: countFor("PRESENT"),
+          late: countFor("LATE"),
+          absent: countFor("ABSENT"),
+          excused: countFor("EXCUSED"),
+        },
+      };
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getTeacherStudents] Échec de lecture :", error);
 
     // Dégradation gracieuse : liste vide plutôt que crash serveur.
     return [];

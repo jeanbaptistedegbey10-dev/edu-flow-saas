@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   CalendarClockIcon,
   ClockIcon,
@@ -56,7 +57,12 @@ function ClassCard({
           />
         </div>
 
-        <p className="font-semibold leading-snug">{klass.name}</p>
+        <Link
+          href={`/dashboard/classes/${klass.id}`}
+          className="font-semibold leading-snug hover:underline"
+        >
+          {klass.name}
+        </Link>
 
         <p className="text-sm text-muted-foreground">{klass.courseTitle}</p>
       </div>
@@ -67,6 +73,18 @@ function ClassCard({
           <ClockIcon className="size-4 shrink-0" />
           <span>{klass.schedule}</span>
         </div>
+
+        {klass.schedules.length > 0 && (
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+            {klass.schedules.map((s) => (
+              <span key={s.id} className="flex items-center gap-1">
+                <span className="font-medium">{["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][s.dayOfWeek]}</span>
+                <span>{s.startTime}–{s.endTime}</span>
+                {s.room && <span className="text-muted-foreground/70">• {s.room}</span>}
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <GraduationCapIcon className="size-4 shrink-0" />

@@ -9,6 +9,17 @@ import {
   isNextRedirectError,
 } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import {
+  computeModuleValidation,
+  defaultAppreciationForValidation,
+  formatPremiumReportNumber,
+  paymentMethodLabel,
+  type PremiumFinancialSummary,
+  type PremiumPaymentEntry,
+  type PremiumReportData,
+  type PremiumTravelSummary,
+} from "@/lib/premium-report";
+import { getTravelStatusLabel } from "@/lib/travel-status";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -76,6 +87,39 @@ export type GradeSheetStudentDTO = {
   lastName: string;
   /** Notes existantes indexées par identifiant de module. */
   grades: Record<string, number>;
+};
+
+/**
+ * Ligne module du bulletin premium cote serveur : note sur le bareme reel
+ * configure par le professeur (SANS coefficient, SANS moyenne generale).
+ */
+export type PremiumReportRowDTO = {
+  /** Intitule de la session d'evaluation (ex : « Examen Continu N°1 »). */
+  evaluationTitle: string;
+  /** Nom du module evalue (ex : « Lesen »). */
+  module: string;
+  /** Date de la session d'evaluation (null si indisponible). */
+  date: Date | null;
+  /** Note obtenue sur le bareme du module (null si non note). */
+  score: number | null;
+  /** Bareme configure par le professeur (ex : 100). */
+  maxScore: number;
+  /** Seuil de validation du module (ex : 60). */
+  passingScore: number;
+  /** true si note >= seuil, false si note < seuil, null si non note. */
+  passed: boolean | null;
+};
+
+/**
+ * Bulletin premium securise d'un etudiant (contrat serveur → Dialog).
+ * `financial` et `travel` ne sont renseignes QUE pour les roles
+ * administratifs (ADMIN / STAFF / SUPER_ADMIN) : le bulletin academique de
+ * l'enseignant n'expose AUCUNE donnee financiere ni de procedure de voyage.
+ */
+export type PremiumReportDTO = PremiumReportData & {
+  studentId: string;
+  classId: string | null;
+  courseId: string | null;
 };
 
 /** Grille complète de saisie des notes d'une session d'évaluation. */
@@ -965,3 +1009,536 @@ export async function getStudentAcademicRecord(
   }
 }
 
+/**
+ * Libellé de la réduction d'un étudiant (ex : « 10 % » ou « 25 000 FCFA »).
+ * Retourne null si aucune réduction n'est renseignée.
+ */
+function discountLabelServer(
+  discount: number | null,
+  discountType: "PERCENTAGE" | "FIXED"
+): string | null {
+  if (discount === null || discount <= 0) return null;
+  return discountType === "PERCENTAGE"
+    ? `${Math.round(discount * 100) / 100} %`
+    : `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(discount)} FCFA`;
+}
+
+function sanitizePeriodLabel(raw: string | null | undefined): string {
+  const cleaned = (raw ?? "").trim().slice(0, 60);
+  return cleaned.length > 0 ? cleaned : "Période en cours";
+}
+
+/**
+ * Bulletin premium securise d'un etudiant.
+ * TEACHER : uniquement si l'etudiant est inscrit dans l'une de ses
+ * classes (via `classId` / `courseId` rattaches a son ID enseignant)
+ * ou suit l'un de ses cours ; ADMIN/STAFF : organisation entiere.
+ *
+ * SEPARATION STRICTE DES ROLES :
+ * - TEACHER → bulletin ACADEMIQUE uniquement (scope "academic") : aucune
+ *   donnee financiere, aucune donnee de procedure de voyage.
+ * - ADMIN / STAFF / SUPER_ADMIN → rapport GLOBAL (scope "global") : bulletin
+ *   + recapitulatif financier detaille (historique des versements) + section
+ *   procedure de voyage (etapes validees + reglements du dossier).
+ */
+export async function getPremiumReportForStudent(
+  studentId: string,
+  periodLabel?: string
+): Promise<PremiumReportDTO> {
+  const user = await getCurrentSessionUser();
+  if (user.role === "STUDENT") {
+    throw new Error("Accès refusé : les étudiants n'ont pas accès aux bulletins.");
+  }
+  const cleanPeriod = sanitizePeriodLabel(periodLabel);
+  // Rapport global réservé aux roles administratifs : l'enseignant n'a
+  // JAMAIS acces aux donnees financieres ni a la procedure de voyage.
+  const canSeeFinancial =
+    user.role === "ADMIN" ||
+    user.role === "STAFF" ||
+    user.role === "SUPER_ADMIN";
+  const scope: PremiumReportData["scope"] = canSeeFinancial
+    ? "global"
+    : "academic";
+  try {
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, organizationId: user.organizationId },
+      select: {
+        id: true,
+        studentCode: true,
+        firstName: true,
+        lastName: true,
+        // Donnees financieres de la formation (rapport global uniquement).
+        totalCost: true,
+        discount: true,
+        discountType: true,
+        netAmount: true,
+        currentClassId: true,
+        currentClass: {
+          select: {
+            id: true,
+            name: true,
+            courseId: true,
+            teacherId: true,
+            course: { select: { title: true } },
+            teacher: { select: { firstName: true, lastName: true } },
+          },
+        },
+        classEnrollments: {
+          select: { classId: true, class: { select: { teacherId: true } } },
+        },
+        enrollments: {
+          select: {
+            courseId: true,
+            course: { select: { teacherId: true } },
+          },
+        },
+      },
+    });
+    if (!student) {
+      throw new Error("Étudiant introuvable dans votre organisation.");
+    }
+    if (user.role === "TEACHER") {
+      const inOwnClass =
+        student.currentClass?.teacherId === user.id ||
+        student.classEnrollments.some((e) => e.class.teacherId === user.id);
+      const enrolledInOwnCourse = student.enrollments.some(
+        (e) => e.course.teacherId === user.id
+      );
+      let inOwnCourseByClass = false;
+      if (student.currentClass?.courseId != null) {
+        const ownClass = await prisma.class.findFirst({
+          where: {
+            organizationId: user.organizationId,
+            courseId: student.currentClass.courseId,
+            teacherId: user.id,
+          },
+          select: { id: true },
+        });
+        inOwnCourseByClass = ownClass !== null;
+      }
+      if (!inOwnClass && !inOwnCourseByClass && !enrolledInOwnCourse) {
+        throw new Error(
+          "Accès refusé : cet étudiant n'est inscrit dans aucun de vos cours."
+        );
+      }
+    }
+    const classId = student.currentClass?.id ?? student.currentClassId;
+    const className = student.currentClass?.name ?? null;
+    const courseId = student.currentClass?.courseId ?? null;
+    const courseTitle = student.currentClass?.course.title ?? null;
+    const teacherName = student.currentClass?.teacher
+      ? `${student.currentClass.teacher.firstName} ${student.currentClass.teacher.lastName}`.trim()
+      : null;
+    const [evaluations, attendanceRecords, payments, travelProcedures] =
+      await Promise.all([
+        prisma.evaluation.findMany({
+          where: classId
+            ? { organizationId: user.organizationId, classId }
+            : { organizationId: user.organizationId },
+          orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+          select: {
+            id: true,
+            title: true,
+            date: true,
+            modules: {
+              orderBy: { createdAt: "asc" },
+              select: {
+                id: true,
+                name: true,
+                maxScore: true,
+                passingScore: true,
+                grades: {
+                  where: { studentId },
+                  select: { score: true },
+                  take: 1,
+                },
+              },
+            },
+          },
+        }),
+        prisma.attendance.findMany({
+          where: { studentId, organizationId: user.organizationId },
+          select: { status: true },
+        }),
+        // Historique des versements de la formation (rapport global) :
+        // paiements aboutis et non suspendus, du plus ancien au plus recent.
+        prisma.payment.findMany({
+          where: {
+            studentId,
+            organizationId: user.organizationId,
+            travelProcedureId: null,
+            status: "COMPLETED",
+            isVoided: false,
+          },
+          orderBy: { paidAt: "asc" },
+          select: {
+            amount: true,
+            paymentMethod: true,
+            reference: true,
+            description: true,
+            paidAt: true,
+          },
+        }),
+        // Dossier de voyage lie a l'etudiant (rapport global uniquement).
+        canSeeFinancial
+          ? prisma.travelProcedure.findFirst({
+              where: { studentId, organizationId: user.organizationId },
+              orderBy: { createdAt: "desc" },
+              select: {
+                destination: true,
+                targetProgram: true,
+                status: true,
+                totalCost: true,
+                discount: true,
+                netAmount: true,
+                currentStageOrder: true,
+                workflow: {
+                  select: {
+                    stages: {
+                      orderBy: { order: "asc" },
+                      select: { title: true, order: true },
+                    },
+                  },
+                },
+                payments: {
+                  where: {
+                    status: { in: ["COMPLETED", "PARTIAL"] },
+                    isVoided: false,
+                  },
+                  orderBy: { paidAt: "asc" },
+                  select: {
+                    amount: true,
+                    paymentMethod: true,
+                    reference: true,
+                    description: true,
+                    paidAt: true,
+                  },
+                },
+              },
+            })
+          : Promise.resolve(null),
+      ]);
+    const attendance: PremiumReportDTO["attendance"] = {
+      total: attendanceRecords.length,
+      present: attendanceRecords.filter((a) => a.status === "PRESENT").length,
+      late: attendanceRecords.filter((a) => a.status === "LATE").length,
+      absent: attendanceRecords.filter((a) => a.status === "ABSENT").length,
+      excused: attendanceRecords.filter((a) => a.status === "EXCUSED").length,
+    };
+    /**
+     * Lignes du bulletin : note sur le bareme reel du module + statut
+     * modulaire (Validé / Non validé) selon le seuil configure par le
+     * professeur. Aucune conversion /20, aucun coefficient.
+     */
+    const rows: PremiumReportRowDTO[] = evaluations.flatMap((ev) =>
+      ev.modules.map((m) => {
+        const score = m.grades[0]?.score ?? null;
+        return {
+          evaluationTitle: ev.title,
+          module: m.name,
+          date: ev.date,
+          score,
+          maxScore: m.maxScore,
+          passingScore: m.passingScore,
+          passed:
+            score === null
+              ? null
+              : score >= m.passingScore,
+        };
+      })
+    );
+    const { validatedModules, gradedModules } = computeModuleValidation(rows);
+    // --------------------------------------
+    // Rapport global : recapitulatif financier detaille + procedure voyage
+    // (roles administratifs uniquement — jamais pour un enseignant).
+    // --------------------------------------
+    let financial: PremiumFinancialSummary | null = null;
+    let travel: PremiumTravelSummary | null = null;
+
+    if (canSeeFinancial) {
+      const paymentHistory: PremiumPaymentEntry[] = payments.map((p) => ({
+        paidAt: p.paidAt,
+        amount: p.amount,
+        method: paymentMethodLabel(p.paymentMethod),
+        reference: p.reference ?? p.description ?? null,
+      }));
+      const formationAmountPaid = paymentHistory.reduce(
+        (sum, p) => sum + p.amount,
+        0
+      );
+      const formationRemaining =
+        student.netAmount != null
+          ? Math.max(0, student.netAmount - formationAmountPaid)
+          : null;
+      financial = {
+        totalCost: student.totalCost,
+        discount: student.discount,
+        discountLabel: discountLabelServer(student.discount, student.discountType),
+        netAmount: student.netAmount,
+        amountPaid: formationAmountPaid,
+        remaining: formationRemaining,
+        isFullyPaid:
+          student.netAmount != null ? formationRemaining === 0 : null,
+        history: paymentHistory,
+      };
+
+      const procedure = travelProcedures;
+      if (procedure) {
+        const travelHistory: PremiumPaymentEntry[] = procedure.payments.map(
+          (p) => ({
+            paidAt: p.paidAt,
+            amount: p.amount,
+            method: paymentMethodLabel(p.paymentMethod),
+            reference: p.reference ?? p.description ?? null,
+          })
+        );
+        const travelAmountPaid = travelHistory.reduce(
+          (sum, p) => sum + p.amount,
+          0
+        );
+        const travelNet = procedure.netAmount || Math.max(procedure.totalCost - procedure.discount, 0);
+        // Etapes validees : toutes celles dont l'ordre est atteint
+        // (currentStageOrder = nombre d'etapes franchies).
+        const steps = procedure.workflow?.stages.map((stage) => ({
+          label: stage.title,
+          validated: stage.order <= procedure.currentStageOrder,
+        }));
+        travel = {
+          destination: procedure.destination,
+          targetProgram: procedure.targetProgram,
+          statusLabel: getTravelStatusLabel(procedure.status),
+          steps: steps ?? [],
+          validatedSteps:
+            procedure.workflow?.stages.filter(
+              (stage) => stage.order <= procedure.currentStageOrder
+            ).length ?? 0,
+          totalSteps: procedure.workflow?.stages.length ?? 0,
+          totalCost: procedure.totalCost,
+          discount: procedure.discount > 0 ? procedure.discount : null,
+          netAmount: travelNet,
+          amountPaid: travelAmountPaid,
+          remaining: Math.max(travelNet - travelAmountPaid, 0),
+          history: travelHistory,
+        };
+      }
+    }
+    const issuedAt = new Date();
+    const documentNumber = formatPremiumReportNumber(
+      student.studentCode,
+      issuedAt
+    );
+    return {
+      studentId: student.id,
+      studentFirstName: student.firstName,
+      studentLastName: student.lastName,
+      studentCode: student.studentCode,
+      classId,
+      className,
+      courseId,
+      courseTitle,
+      periodLabel: cleanPeriod,
+      teacherName,
+      scope,
+      rows,
+      validatedModules,
+      gradedModules,
+      generalAppreciation: defaultAppreciationForValidation(
+        validatedModules,
+        gradedModules
+      ),
+      documentNumber,
+      issuedAt,
+      attendance,
+      financial,
+      travel,
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    if (error instanceof Error && error.message.startsWith("Accès refusé")) {
+      throw error;
+    }
+    if (error instanceof Error && error.message.startsWith("Étudiant")) {
+      throw error;
+    }
+    console.error("[getPremiumReportForStudent] Échec de lecture :", error);
+    throw new Error("Impossible de générer le bulletin pour le moment.");
+  }
+}
+
+// --------------------------------------
+// Rapport public « lien parent » (sans compte)
+// --------------------------------------
+
+/**
+ * Génère le bulletin premium complet d'un étudiant à partir de son
+ * TOKEN PUBLIC (lien parent), SANS session ni authentification.
+ *
+ * Le token (UUID v4) est l'équivalent d'une clé d'accès : il ne permet
+ * aucune modification et expose uniquement les données d'un seul étudiant.
+ * L'organisation associée est renvoyée pour l'en-tête du bulletin.
+ */
+export async function getPublicStudentReport(
+  token: string
+): Promise<{
+  report: PremiumReportDTO;
+  organization: {
+    name: string;
+    address: string | null;
+    city: string | null;
+    phone: string | null;
+    email: string | null;
+    website: string | null;
+    logoUrl: string | null;
+    rccm: string | null;
+    ifu: string | null;
+  };
+}> {
+  const cleanToken = (token ?? "").trim();
+  if (cleanToken.length < 8) {
+    throw new Error("Lien de rapport invalide.");
+  }
+
+  const student = await prisma.student.findFirst({
+    where: { publicReportToken: cleanToken },
+    select: {
+      id: true,
+      organizationId: true,
+      studentCode: true,
+      firstName: true,
+      lastName: true,
+      currentClassId: true,
+      currentClass: {
+        select: {
+          id: true,
+          name: true,
+          courseId: true,
+          course: { select: { title: true } },
+        },
+      },
+    },
+  });
+
+  if (!student) {
+    throw new Error("Étudiant introuvable.");
+  }
+
+  const organizationId = student.organizationId;
+
+  const organization = await prisma.organization.findFirst({
+    where: { id: organizationId },
+    select: {
+      name: true,
+      address: true,
+      city: true,
+      phone: true,
+      email: true,
+      website: true,
+      logoUrl: true,
+      rccm: true,
+      ifu: true,
+    },
+  });
+
+  if (!organization) {
+    throw new Error("Établissement introuvable.");
+  }
+
+  const classId = student.currentClassId ?? student.currentClass?.id ?? null;
+  const className = student.currentClass?.name ?? null;
+  const courseId = student.currentClass?.courseId ?? null;
+  const courseTitle = student.currentClass?.course.title ?? null;
+
+  const [evaluations, attendanceRecords] = await Promise.all([
+    prisma.evaluation.findMany({
+      where: classId
+        ? { organizationId, classId }
+        : { organizationId },
+      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        title: true,
+        date: true,
+        modules: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            name: true,
+            maxScore: true,
+            passingScore: true,
+            grades: {
+              where: { studentId: student.id },
+              select: { score: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    }),
+    prisma.attendance.findMany({
+      where: { studentId: student.id, organizationId },
+      select: { status: true },
+    }),
+  ]);
+
+  /**
+   * Lignes du bulletin public : note sur le bareme reel + statut modulaire.
+   * Le lien parent expose le BULLETIN ACADEMIQUE uniquement : aucune donnee
+   * financiere ni de procedure de voyage.
+   */
+  const rows: PremiumReportRowDTO[] = evaluations.flatMap((ev) =>
+    ev.modules.map((m) => {
+      const score = m.grades[0]?.score ?? null;
+      return {
+        evaluationTitle: ev.title,
+        module: m.name,
+        date: ev.date,
+        score,
+        maxScore: m.maxScore,
+        passingScore: m.passingScore,
+        passed: score === null ? null : score >= m.passingScore,
+      };
+    })
+  );
+
+  const { validatedModules, gradedModules } = computeModuleValidation(rows);
+
+  const attendance: PremiumReportDTO["attendance"] = {
+    total: attendanceRecords.length,
+    present: attendanceRecords.filter((a) => a.status === "PRESENT").length,
+    late: attendanceRecords.filter((a) => a.status === "LATE").length,
+    absent: attendanceRecords.filter((a) => a.status === "ABSENT").length,
+    excused: attendanceRecords.filter((a) => a.status === "EXCUSED").length,
+  };
+
+  const issuedAt = new Date();
+  const documentNumber = formatPremiumReportNumber(student.studentCode, issuedAt);
+
+  return {
+    report: {
+      studentId: student.id,
+      studentFirstName: student.firstName,
+      studentLastName: student.lastName,
+      studentCode: student.studentCode,
+      classId,
+      className,
+      courseId,
+      courseTitle,
+      periodLabel: "Période en cours",
+      teacherName: null,
+      scope: "academic",
+      rows,
+      validatedModules,
+      gradedModules,
+      generalAppreciation: defaultAppreciationForValidation(
+        validatedModules,
+        gradedModules
+      ),
+      documentNumber,
+      issuedAt,
+      attendance,
+      financial: null,
+      travel: null,
+    },
+    organization,
+  };
+}

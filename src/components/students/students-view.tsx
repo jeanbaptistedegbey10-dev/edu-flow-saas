@@ -2,13 +2,31 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { DownloadIcon, SearchIcon, UsersRoundIcon } from "lucide-react";
+import {
+  DownloadIcon,
+  LinkIcon,
+  Loader2Icon,
+  PrinterIcon,
+  SearchIcon,
+  UsersRoundIcon,
+} from "lucide-react";
 
 import type { ClassOptionDTO } from "@/actions/classes";
+import {
+  getPremiumReportForStudent,
+  type PremiumReportDTO,
+} from "@/actions/evaluations";
+import type { OrganizationProfileDTO } from "@/actions/payments";
+import { getCurrentOrganizationProfile } from "@/actions/payments";
 import type { StudentDTO } from "@/actions/students";
-import { deleteStudentAction } from "@/actions/students";
+import {
+  deleteStudentAction,
+  ensureStudentReportToken,
+} from "@/actions/students";
 import { AddStudentDialog } from "@/components/students/add-student-dialog";
 import { EditStudentDialog } from "@/components/students/edit-student-dialog";
+import { ReportCardDialog } from "@/components/evaluations/report-card-dialog";
+import { ToastNotification } from "@/components/ui/toast";
 import {
   EntityActionsMenu,
 } from "@/components/shared/entity-actions-menu";
@@ -92,6 +110,80 @@ export function StudentsView({
   const [editingStudent, setEditingStudent] = React.useState<StudentDTO | null>(
     null
   );
+
+  // État de la modale « Rapport / Bulletin » (aperçu premium).
+  const [reportData, setReportData] = React.useState<PremiumReportDTO | null>(
+    null
+  );
+  const [reportOrg, setReportOrg] =
+    React.useState<OrganizationProfileDTO | null>(null);
+  const [reportOpen, setReportOpen] = React.useState(false);
+  const [reportLoadingId, setReportLoadingId] = React.useState<string | null>(
+    null
+  );
+  const [reportError, setReportError] = React.useState<string | null>(null);
+  // État du presse-papiers / lien parent.
+  const [toast, setToast] = React.useState<string | null>(null);
+  const [parentLinkPendingId, setParentLinkPendingId] = React.useState<
+    string | null
+  >(null);
+
+  /**
+   * Ouvre la modale d'aperçu du bulletin premium d'un étudiant. Les données
+   * sont récupérées au clic via les Server Actions (contrôle d'accès serveur).
+   */
+  const handleOpenReport = async (studentId: string) => {
+    setReportError(null);
+    setReportLoadingId(studentId);
+    try {
+      const [dto, org] = await Promise.all([
+        getPremiumReportForStudent(studentId),
+        getCurrentOrganizationProfile(),
+      ]);
+      setReportData({ ...dto, issuedAt: new Date(dto.issuedAt) });
+      setReportOrg(org);
+      setReportOpen(true);
+    } catch (error) {
+      setReportError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de générer le bulletin pour le moment."
+      );
+    } finally {
+      setReportLoadingId(null);
+    }
+  };
+
+  /**
+   * Génère (ou réutilise) le token public de l'étudiant, copie l'URL
+   * `/reports/student/<token>` dans le presse-papiers puis affiche un toast.
+   */
+  const handleCopyParentLink = async (studentId: string) => {
+    setParentLinkPendingId(studentId);
+    setToast(null);
+    try {
+      const result = await ensureStudentReportToken(studentId);
+      if (!result.ok) {
+        setToast(
+          result.message ?? "Impossible de générer le lien parent pour le moment."
+        );
+        return;
+      }
+      const url = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/reports/student/${result.token}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        setToast("Lien parent copié dans le presse-papier !");
+      } catch {
+        setToast(
+          "Lien généré, mais copie impossible : sélectionnez-le manuellement dans la fiche étudiant."
+        );
+      }
+    } catch {
+      setToast("Impossible de générer le lien parent pour le moment.");
+    } finally {
+      setParentLinkPendingId(null);
+    }
+  };
 
   const filteredStudents = React.useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -250,11 +342,49 @@ export function StudentsView({
                       {dateFormatter.format(student.createdAt)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <EntityActionsMenu
-                        entityName={`${student.firstName} ${student.lastName}`}
-                        onEdit={() => setEditingStudent(student)}
-                        onDelete={() => deleteStudentAction(student.id)}
-                      />
+                      <div
+                        role="group"
+                        aria-label={`Actions pour ${student.firstName} ${student.lastName}`}
+                        className="flex items-center justify-end gap-1.5"
+                      >
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon-sm"
+                          onClick={() => void handleOpenReport(student.id)}
+                          disabled={reportLoadingId === student.id}
+                          title={`Voir / imprimer le bulletin de ${student.firstName} ${student.lastName}`}
+                        >
+                          {reportLoadingId === student.id ? (
+                            <Loader2Icon className="size-3.5 animate-spin" />
+                          ) : (
+                            <PrinterIcon className="size-3.5" />
+                          )}
+                          <span className="sr-only">Rapport / Bulletin</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() =>
+                            void handleCopyParentLink(student.id)
+                          }
+                          disabled={parentLinkPendingId === student.id}
+                          title="Copier le lien parent"
+                        >
+                          {parentLinkPendingId === student.id ? (
+                            <Loader2Icon className="size-3.5 animate-spin" />
+                          ) : (
+                            <LinkIcon className="size-3.5" />
+                          )}
+                          <span className="sr-only">Copier le lien parent</span>
+                        </Button>
+                        <EntityActionsMenu
+                          entityName={`${student.firstName} ${student.lastName}`}
+                          onEdit={() => setEditingStudent(student)}
+                          onDelete={() => deleteStudentAction(student.id)}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -300,6 +430,53 @@ export function StudentsView({
         onOpenChange={(open) => {
           if (!open) setEditingStudent(null);
         }}
+      />
+
+      {/* Modale d'aperçu « Rapport / Bulletin » */}
+      {reportOrg && reportData ? (
+        <ReportCardDialog
+          data={reportData}
+          organization={reportOrg}
+          open={reportOpen}
+          onOpenChange={(open) => {
+            if (!open) setReportOpen(false);
+          }}
+        />
+      ) : (
+        <ReportCardDialog
+          data={null}
+          organization={{
+            name: "Centre de Formation Excellence",
+            address: null,
+            city: null,
+            phone: null,
+            email: null,
+            website: null,
+            logoUrl: null,
+            rccm: null,
+            ifu: null,
+          }}
+          open={reportOpen}
+          onOpenChange={(open) => {
+            if (!open) setReportOpen(false);
+          }}
+        />
+      )}
+
+      {/* Erreur de génération du bulletin (stockée au clic sur une ligne) */}
+      {reportError ? (
+        <p
+          role="alert"
+          className="fixed bottom-24 right-6 z-[70] max-w-sm rounded-lg border border-destructive bg-popover p-3 text-sm text-destructive shadow-lg ring-1 ring-destructive/30"
+        >
+          {reportError}
+        </p>
+      ) : null}
+
+      {/* Toast de confirmation de copie du lien parent */}
+      <ToastNotification
+        message={toast}
+        onClose={() => setToast(null)}
       />
     </div>
   );

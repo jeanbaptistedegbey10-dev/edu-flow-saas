@@ -8,7 +8,6 @@ import {
   updateCourseAction,
   type CourseDTO,
   type CourseFormState,
-  type TeacherDTO,
 } from "@/actions/courses";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,16 +21,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-/** Valeur sentinelle pour les champs Select optionnels (Radix interdit ""). */
-const NONE_VALUE = "__none__";
 
 const INITIAL_FORM_STATE: CourseFormState = { status: "idle" };
 
@@ -50,26 +39,13 @@ function FieldError({ message }: { message?: string }) {
  */
 function EditCourseForm({
   course,
-  teachers,
   onSuccess,
 }: {
   course: CourseDTO;
-  teachers: TeacherDTO[];
   onSuccess: () => void;
 }) {
   const [state, formAction, pending] = useActionState(
-    async (_prevState: CourseFormState, rawFormData: FormData) => {
-      // Clone les entrées puis convertit la sentinelle « non attribué »
-      // en chaîne vide attendue par l'action serveur.
-      const formData = new FormData();
-      for (const [key, value] of rawFormData.entries()) {
-        formData.append(key, value);
-      }
-
-      if (String(formData.get("teacherId") ?? "") === NONE_VALUE) {
-        formData.set("teacherId", "");
-      }
-
+    async (_prevState: CourseFormState, formData: FormData) => {
       const result = await updateCourseAction(_prevState, formData);
 
       if (result.status === "success") {
@@ -169,31 +145,6 @@ function EditCourseForm({
         </div>
 
         <div className="grid gap-2">
-          <Label htmlFor="edit-teacherId">Enseignant</Label>
-          <Select
-            name="teacherId"
-            defaultValue={course.teacher?.id ?? NONE_VALUE}
-          >
-            <SelectTrigger
-              id="edit-teacherId"
-              className="w-full"
-              aria-invalid={Boolean(fieldErrors.teacherId)}
-            >
-              <SelectValue placeholder="Non attribué" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE_VALUE}>— Non attribué —</SelectItem>
-              {teachers.map((teacher) => (
-                <SelectItem key={teacher.id} value={teacher.id}>
-                  {teacher.firstName} {teacher.lastName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FieldError message={fieldErrors.teacherId} />
-        </div>
-
-        <div className="grid gap-2">
           <Label htmlFor="edit-description">Description</Label>
           <Input
             id="edit-description"
@@ -231,12 +182,10 @@ function EditCourseForm({
  */
 export function EditCourseDialog({
   course,
-  teachers,
   open,
   onOpenChange,
 }: {
   course: CourseDTO | null;
-  teachers: TeacherDTO[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -247,7 +196,6 @@ export function EditCourseDialog({
           <EditCourseForm
             key={course.id}
             course={course}
-            teachers={teachers}
             onSuccess={() => onOpenChange(false)}
           />
         ) : null}

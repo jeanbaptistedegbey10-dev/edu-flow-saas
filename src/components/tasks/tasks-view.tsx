@@ -101,14 +101,30 @@ function isOverdue(task: TaskDTO): boolean {
 /**
  * Contrôle explicite de changement de statut : le statut courant est
  * directement visible et modifiable sans menu contextuel caché.
+ * En lecture seule (enseignant), un simple badge statique est rendu.
  */
 function TaskStatusControl({
   task,
   onStatusChange,
+  readOnly = false,
 }: {
   task: TaskDTO;
   onStatusChange: (taskId: string, status: string) => void;
+  readOnly?: boolean;
 }) {
+  if (readOnly) {
+    return (
+      <span
+        className={cn(
+          BADGE_BASE_CLASSES,
+          getTaskStatusBadgeClass(task.status)
+        )}
+      >
+        {getTaskStatusLabel(task.status)}
+      </span>
+    );
+  }
+
   return (
     <Select
       value={task.status}
@@ -160,10 +176,12 @@ function TaskCard({
   task,
   onStatusChange,
   onEdit,
+  readOnly = false,
 }: {
   task: TaskDTO;
   onStatusChange: (taskId: string, status: string) => void;
-  onEdit: (task: TaskDTO) => void;
+  onEdit?: (task: TaskDTO) => void;
+  readOnly?: boolean;
 }) {
   const overdue = isOverdue(task);
 
@@ -203,7 +221,11 @@ function TaskCard({
 
       {/* Changement de statut explicite + actions CRUD visibles */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-2">
-        <TaskStatusControl task={task} onStatusChange={onStatusChange} />
+        <TaskStatusControl
+          task={task}
+          onStatusChange={onStatusChange}
+          readOnly={readOnly}
+        />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
@@ -251,15 +273,17 @@ function TaskCard({
         </div>
       ) : null}
 
-      {/* Actions CRUD visibles côte à côte */}
-      <div className="border-t px-3 py-2">
-        <EntityActionsMenu
-          entityName={`la tâche « ${task.title} »`}
-          onEdit={() => onEdit(task)}
-          onDelete={() => deleteTaskAction(task.id)}
-          size="xs"
-        />
-      </div>
+      {/* Actions CRUD visibles côte à côte — masquées en lecture seule */}
+      {!readOnly ? (
+        <div className="border-t px-3 py-2">
+          <EntityActionsMenu
+            entityName={`la tâche « ${task.title} »`}
+            onEdit={() => onEdit?.(task)}
+            onDelete={() => deleteTaskAction(task.id)}
+            size="xs"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -272,10 +296,12 @@ function KanbanView({
   tasks,
   onStatusChange,
   onEdit,
+  readOnly = false,
 }: {
   tasks: TaskDTO[];
   onStatusChange: (taskId: string, status: string) => void;
-  onEdit: (task: TaskDTO) => void;
+  onEdit?: (task: TaskDTO) => void;
+  readOnly?: boolean;
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -313,6 +339,7 @@ function KanbanView({
                   task={task}
                   onStatusChange={onStatusChange}
                   onEdit={onEdit}
+                  readOnly={readOnly}
                 />
               ))
             )}
@@ -331,10 +358,12 @@ function ListView({
   tasks,
   onStatusChange,
   onEdit,
+  readOnly = false,
 }: {
   tasks: TaskDTO[];
   onStatusChange: (taskId: string, status: string) => void;
-  onEdit: (task: TaskDTO) => void;
+  onEdit?: (task: TaskDTO) => void;
+  readOnly?: boolean;
 }) {
   return (
     <Table>
@@ -346,7 +375,9 @@ function ListView({
           <TableHead>Étudiant</TableHead>
           <TableHead>Échéance</TableHead>
           <TableHead>Statut</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
+          {!readOnly ? (
+            <TableHead className="text-right">Actions</TableHead>
+          ) : null}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -408,15 +439,21 @@ function ListView({
                 )}
               </TableCell>
               <TableCell>
-                <TaskStatusControl task={task} onStatusChange={onStatusChange} />
-              </TableCell>
-              <TableCell className="text-right">
-                <EntityActionsMenu
-                  entityName={`la tâche « ${task.title} »`}
-                  onEdit={() => onEdit(task)}
-                  onDelete={() => deleteTaskAction(task.id)}
+                <TaskStatusControl
+                  task={task}
+                  onStatusChange={onStatusChange}
+                  readOnly={readOnly}
                 />
               </TableCell>
+              {!readOnly ? (
+                <TableCell className="text-right">
+                  <EntityActionsMenu
+                    entityName={`la tâche « ${task.title} »`}
+                    onEdit={() => onEdit?.(task)}
+                    onDelete={() => deleteTaskAction(task.id)}
+                  />
+                </TableCell>
+              ) : null}
             </TableRow>
           );
         })}
@@ -433,10 +470,13 @@ export function TasksView({
   tasks,
   staffMembers,
   students,
+  readOnly = false,
 }: {
   tasks: TaskDTO[];
   staffMembers: StaffMemberDTO[];
   students: Parameters<typeof AddTaskDialog>[0]["students"];
+  /** Lecture seule (enseignant) : pas de création, d'édition ni de suppression. */
+  readOnly?: boolean;
 }) {
   const [view, setView] = React.useState<ViewMode>("kanban");
   const [search, setSearch] = React.useState("");
@@ -506,11 +546,14 @@ export function TasksView({
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Tâches</h2>
           <p className="text-base text-muted-foreground">
-            Organisez le travail de votre équipe et suivez l’avancement des
-            dossiers.
+            {readOnly
+              ? "Consultation en lecture seule : tâches globales et tâches assignées."
+              : "Organisez le travail de votre équipe et suivez l’avancement des dossiers."}
           </p>
         </div>
-        <AddTaskDialog staffMembers={staffMembers} students={students} />
+        {!readOnly ? (
+          <AddTaskDialog staffMembers={staffMembers} students={students} />
+        ) : null}
       </div>
 
       {/* Carte : barre d'outils + contenu */}
@@ -621,6 +664,7 @@ export function TasksView({
                   tasks={filteredTasks}
                   onStatusChange={handleStatusChange}
                   onEdit={setEditingTask}
+                  readOnly={readOnly}
                 />
               </div>
             ) : (
@@ -628,6 +672,7 @@ export function TasksView({
                 tasks={filteredTasks}
                 onStatusChange={handleStatusChange}
                 onEdit={setEditingTask}
+                readOnly={readOnly}
               />
             )
           ) : (

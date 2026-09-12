@@ -2,30 +2,35 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useActionState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeftIcon,
   BookOpenIcon,
   CheckCircle2Icon,
   ClipboardListIcon,
   ClockIcon,
-  GraduationCapIcon,
   Loader2Icon,
-  PlusIcon,
+  PencilIcon,
+  SaveIcon,
   UsersRoundIcon,
 } from "lucide-react";
 
 import {
-  createCourseLogAction,
+  upsertCourseLogAction,
   type CourseDetailDTO,
-  type CourseLogFormState,
+  type CourseLogDTO,
 } from "@/actions/attendance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-
-const INITIAL_FORM_STATE: CourseLogFormState = { status: "idle" };
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 // Formatage déterministe (locale + fuseau fixes) pour éviter tout écart d'hydratation.
 const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
@@ -35,62 +40,158 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
   timeZone: "UTC",
 });
 
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return (
-    <p role="alert" className="text-xs font-medium text-destructive">
-      {message}
-    </p>
-  );
+/** Date du jour au format « YYYY-MM-DD » (UTC). */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 /**
- * Formulaire d'ajout d'une entrée au cahier de texte.
- * Isolé par clé React (`key={formKey}`) pour réinitialiser les champs
- * après chaque soumission réussie.
+ * Cherche une entrée du cahier de texte pour une date donnée dans la liste
+ * des logs. Retourne `undefined` si aucune entrée n'existe pour cette date.
+ */
+function findLogForDate(
+  logs: CourseLogDTO[],
+  dateIso: string
+): CourseLogDTO | undefined {
+  return logs.find((log) => {
+    const logDateIso = new Date(log.date).toISOString().slice(0, 10);
+    return logDateIso === dateIso;
+  });
+}
+
+/**
+ * Formulaire du cahier de texte avec auto-remplissage :
+ * - Au chargement ou lors d'un changement de date, si une entrée existe déjà
+ *   pour le cours à cette date, le formulaire est pré-rempli avec ses valeurs.
+ * - Le bouton affiche « Mettre à jour » si l'entrée existe, « Ajouter » sinon.
+ * - L'action upsert garantit l'unicité par [courseId, date].
  */
 function CourseLogForm({
   courseId,
+  logs,
   onSuccess,
 }: {
   courseId: string;
-  onSuccess: () => void;
+  logs: CourseLogDTO[];
+  onSuccess: (savedLog: CourseLogDTO) => void;
 }) {
-  const [state, formAction, pending] = useActionState(
-    async (_prevState: CourseLogFormState, formData: FormData) => {
-      const result = await createCourseLogAction(_prevState, formData);
+  const [date, setDate] = React.useState<string>(todayIso());
+  const [chapterTitle, setChapterTitle] = React.useState("");
+  const [content, setContent] = React.useState("");
+  const [homework, setHomework] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [pending, setPending] = React.useState(false);
+  const [feedback, setFeedback] = React.useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
 
-      if (result.status === "success") {
-        onSuccess();
-      }
-
-      return result;
-    },
-    INITIAL_FORM_STATE
+  // Détermine si une entrée existe déjà pour la date sélectionnée.
+  const existingLog = React.useMemo(
+    () => findLogForDate(logs, date),
+    [logs, date]
   );
+  const isEditing = Boolean(existingLog);
 
-  const fieldErrors = state.fieldErrors ?? {};
+  // Auto-remplissage du formulaire lorsque la date change et qu'une entrée
+  // existe pour cette date dans l'historique. Ne touche pas au `feedback`
+  // (sinon le message de succès post-save serait effacé par la fusion
+  // optimiste de l'historique qui déclenche ce même effet via `logs`).
+  React.useEffect(() => {
+    const log = findLogForDate(logs, date);
+    if (log) {
+      setChapterTitle(log.chapterTitle);
+      setContent(log.content);
+      setHomework(log.homework ?? "");
+      setNotes(log.notes ?? "");
+    } else {
+      setChapterTitle("");
+      setContent("");
+      setHomework("");
+      setNotes("");
+    }
+  }, [date, logs]);
+
+  // Efface le feedback uniquement lors d'un changement de date saisie.
+  React.useEffect(() => {
+    setFeedback(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chapterTitle.trim() || !content.trim()) return;
+
+    setPending(true);
+    setFeedback(null);
+
+    try {
+      const result = await upsertCourseLogAction({
+        courseId,
+        date,
+        chapterTitle,
+        content,
+        homework,
+        notes,
+      });
+
+      if (result.ok) {
+        setFeedback({
+          kind: "success",
+          message: isEditing
+            ? "Entrée mise à jour dans le cahier de texte."
+            : "Entrée ajoutée au cahier de texte.",
+        });
+        // Remonte le log persisté : le parent fusionne l'historique local
+        // puis déclenche `router.refresh()` (revalidation serveur).
+        onSuccess(result.log);
+      } else {
+        setFeedback({ kind: "error", message: result.message });
+      }
+    } catch {
+      setFeedback({
+        kind: "error",
+        message: "Une erreur est survenue lors de l'enregistrement.",
+      });
+    } finally {
+      setPending(false);
+    }
+  };
 
   return (
-    <form action={formAction} className="grid gap-4">
-      <input type="hidden" name="courseId" value={courseId} />
+    <form onSubmit={handleSubmit} className="grid gap-4">
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2 font-semibold">
+          <ClipboardListIcon className="size-4" />
+          Cahier de texte
+        </h3>
+        {isEditing ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200/60 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400">
+            <PencilIcon className="size-3" />
+            Mode édition
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-full border border-sky-200/60 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400">
+            <BookOpenIcon className="size-3" />
+            Nouvelle entrée
+          </span>
+        )}
+      </div>
 
-      {state.message && state.status === "success" ? (
+      {feedback ? (
         <p
-          role="status"
-          className="flex items-center gap-1.5 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+          role={feedback.kind === "success" ? "status" : "alert"}
+          className={cn(
+            "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm",
+            feedback.kind === "success"
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+              : "bg-destructive/10 text-destructive"
+          )}
         >
-          <CheckCircle2Icon className="size-4 shrink-0" />
-          {state.message}
-        </p>
-      ) : null}
-
-      {state.message && state.status === "error" && !state.fieldErrors ? (
-        <p
-          role="alert"
-          className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          {state.message}
+          {feedback.kind === "success" && (
+            <CheckCircle2Icon className="size-4 shrink-0" />
+          )}
+          {feedback.message}
         </p>
       ) : null}
 
@@ -99,25 +200,22 @@ function CourseLogForm({
           <Label htmlFor="log-date">Date du cours *</Label>
           <Input
             id="log-date"
-            name="date"
             type="date"
             required
-            defaultValue={new Date().toISOString().slice(0, 10)}
-            aria-invalid={Boolean(fieldErrors.date)}
+            value={date}
+            onChange={(e) => setDate(e.target.value || todayIso())}
           />
-          <FieldError message={fieldErrors.date} />
         </div>
 
         <div className="grid gap-2">
           <Label htmlFor="log-chapterTitle">Titre du chapitre *</Label>
           <Input
             id="log-chapterTitle"
-            name="chapterTitle"
+            value={chapterTitle}
+            onChange={(e) => setChapterTitle(e.target.value)}
             placeholder="Ex : Chapitre 4 — Le subjonctif"
             required
-            aria-invalid={Boolean(fieldErrors.chapterTitle)}
           />
-          <FieldError message={fieldErrors.chapterTitle} />
         </div>
       </div>
 
@@ -125,47 +223,60 @@ function CourseLogForm({
         <Label htmlFor="log-content">Contenu du cours *</Label>
         <Textarea
           id="log-content"
-          name="content"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="Déroulé de la séance, notions abordées..."
           rows={4}
-          placeholder="Résumé des notions abordées, activités réalisées..."
           required
-          aria-invalid={Boolean(fieldErrors.content)}
         />
-        <FieldError message={fieldErrors.content} />
       </div>
 
-      <div className="grid gap-2">
-        <Label htmlFor="log-homework">Devoirs à faire</Label>
-        <Textarea
-          id="log-homework"
-          name="homework"
-          rows={2}
-          placeholder="Ex : Exercices pages 52-54, réviser le vocabulaire..."
-          aria-invalid={Boolean(fieldErrors.homework)}
-        />
-        <FieldError message={fieldErrors.homework} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor="log-homework">Devoirs donnés</Label>
+          <Textarea
+            id="log-homework"
+            value={homework}
+            onChange={(e) => setHomework(e.target.value)}
+            placeholder="Exercices, lectures..."
+            rows={2}
+          />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="log-notes">Remarques</Label>
+          <Textarea
+            id="log-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Observations diverses..."
+            rows={2}
+          />
+        </div>
       </div>
 
-      <div className="grid gap-2">
-        <Label htmlFor="log-notes">Remarques internes</Label>
-        <Textarea
-          id="log-notes"
-          name="notes"
-          rows={2}
-          placeholder="Observations pédagogiques facultatives..."
-          aria-invalid={Boolean(fieldErrors.notes)}
-        />
-        <FieldError message={fieldErrors.notes} />
-      </div>
-
-      <div className="flex justify-end">
-        <Button type="submit" disabled={pending}>
+      <div className="flex items-center justify-between pt-2">
+        <p className="text-xs text-muted-foreground">
+          {isEditing
+            ? "Entrée existante — modifiez les champs puis enregistrez les modifications."
+            : "Nouvelle entrée — remplissez les champs puis enregistrez."}
+        </p>
+        <Button
+          type="submit"
+          disabled={pending || !chapterTitle.trim() || !content.trim()}
+        >
           {pending ? (
             <Loader2Icon data-icon="inline-start" className="animate-spin" />
+          ) : isEditing ? (
+            <SaveIcon data-icon="inline-start" />
           ) : (
-            <PlusIcon data-icon="inline-start" />
+            <BookOpenIcon data-icon="inline-start" />
           )}
-          {pending ? "Ajout..." : "Ajouter au cahier de texte"}
+          {pending
+            ? "Enregistrement..."
+            : isEditing
+            ? "Mettre à jour l'entrée"
+            : "Ajouter au cahier de texte"}
         </Button>
       </div>
     </form>
@@ -173,10 +284,21 @@ function CourseLogForm({
 }
 
 export function CourseDetailView({ detail }: { detail: CourseDetailDTO }) {
-  const { course, students, logs } = detail;
+  const router = useRouter();
+  const { course, students, logs: initialLogs } = detail;
 
-  // Incrémenté après chaque ajout réussi afin de vider le formulaire.
-  const [formKey, setFormKey] = React.useState(0);
+  // Historique local synchronisé : `detail.logs` est un snapshot serveur figé
+  // à l'instant du rendu. Après un upsert, `revalidatePath` invalide le cache
+  // serveur mais ne réinjecte pas les props tant que `router.refresh()` n'est
+  // pas appelé — d'où la fusion optimiste immédiate (aucun rechargement
+  // manuel requis) puis la réconciliation serveur.
+  const [logs, setLogs] = React.useState<CourseLogDTO[]>(initialLogs);
+
+  // Resynchronise si le serveur pousse de nouvelles props (navigation,
+  // `router.refresh()` après revalidation).
+  React.useEffect(() => {
+    setLogs(initialLogs);
+  }, [initialLogs]);
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
@@ -215,10 +337,6 @@ export function CourseDetailView({ detail }: { detail: CourseDetailDTO }) {
 
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
           <span className="flex items-center gap-2">
-            <GraduationCapIcon className="size-4 shrink-0" />
-            {course.teacherName ?? "Enseignant non attribué"}
-          </span>
-          <span className="flex items-center gap-2">
             <ClockIcon className="size-4 shrink-0" />
             {course.durationWeeks} semaine{course.durationWeeks > 1 ? "s" : ""}
           </span>
@@ -231,32 +349,71 @@ export function CourseDetailView({ detail }: { detail: CourseDetailDTO }) {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-        {/* Cahier de texte */}
-        <div className="flex flex-col gap-4">
-          <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
-            <div className="border-b p-4">
-              <h3 className="flex items-center gap-2 font-semibold">
-                <BookOpenIcon className="size-4" />
-                Nouvelle entrée au cahier de texte
-              </h3>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Consignez le chapitre traité, le contenu de la séance et les
-                devoirs donnés.
-              </p>
-            </div>
+      {/* Cahier de texte */}
+      <Tabs defaultValue="cahier" className="flex flex-col gap-4">
+        <TabsList className="w-fit">
+          <TabsTrigger value="cahier">
+            <BookOpenIcon className="size-4" />
+            Cahier de texte
+          </TabsTrigger>
+        </TabsList>
 
-            <div className="p-4">
-              <CourseLogForm
-                key={formKey}
-                courseId={course.id}
-                onSuccess={() => setFormKey((key) => key + 1)}
-              />
-            </div>
-          </div>
+        {/* Onglet Cahier de texte */}
+        <TabsContent value="cahier">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+                <div className="border-b p-4">
+                  <h3 className="flex items-center gap-2 font-semibold">
+                    <BookOpenIcon className="size-4" />
+                    Nouvelle entrée au cahier de texte
+                  </h3>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    Consignez le chapitre traité, le contenu de la séance et les
+                    devoirs donnés.
+                  </p>
+                </div>
 
-          {/* Historique des entrées */}
-          <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+                <div className="p-4">
+                  <CourseLogForm
+                    courseId={course.id}
+                    logs={logs}
+                    onSuccess={(savedLog) => {
+                      // 1) Mise à jour optimiste unique : upsert par [courseId, date]
+                      //    (même clé que la contrainte serveur) — aucun doublon.
+                      setLogs((prev) => {
+                        const savedDay = new Date(savedLog.date)
+                          .toISOString()
+                          .slice(0, 10);
+                        const next = prev.some(
+                          (l) =>
+                            new Date(l.date).toISOString().slice(0, 10) ===
+                            savedDay
+                        )
+                          ? prev.map((l) =>
+                              new Date(l.date).toISOString().slice(0, 10) ===
+                              savedDay
+                                ? savedLog
+                                : l
+                            )
+                          : [savedLog, ...prev];
+                        // Tri décroissant (plus récent d'abord), cohérent serveur.
+                        return [...next].sort(
+                          (a, b) =>
+                            new Date(b.date).getTime() -
+                            new Date(a.date).getTime()
+                        );
+                      });
+                      // 2) Réconciliation serveur : la Server Action a déjà fait
+                      //    `revalidatePath`, `router.refresh()` réinjecte les props.
+                      router.refresh();
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Historique des entrées */}
+              <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
             <div className="border-b p-4">
               <h3 className="font-semibold">Historique des séances</h3>
               <p className="mt-0.5 text-sm text-muted-foreground">
@@ -357,7 +514,10 @@ export function CourseDetailView({ detail }: { detail: CourseDetailDTO }) {
             </ul>
           )}
         </aside>
-      </div>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
+

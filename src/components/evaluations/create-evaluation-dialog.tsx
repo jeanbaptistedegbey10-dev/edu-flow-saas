@@ -175,13 +175,18 @@ export function CreateEvaluationDialog({
             <div className="grid gap-2 sm:col-span-1">
               <Label htmlFor="evaluation-class">Classe *</Label>
               <Select name="classId" defaultValue={defaultClassId}>
-                <SelectTrigger id="evaluation-class" className="w-full">
+                <SelectTrigger
+                  id="evaluation-class"
+                  className="w-full min-w-0"
+                >
                   <SelectValue placeholder="Sélectionner une classe" />
                 </SelectTrigger>
                 <SelectContent>
                   {classes.map((klass) => (
                     <SelectItem key={klass.id} value={klass.id}>
-                      {klass.name} ({klass.courseCode})
+                      <span className="truncate">
+                        {klass.name} ({klass.courseCode})
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
