@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpenIcon,
   CalendarCheckIcon,
@@ -13,6 +13,7 @@ import {
   ClockIcon,
   EyeIcon,
   Loader2Icon,
+  PrinterIcon,
   SaveIcon,
   UsersRoundIcon,
   MapPinIcon,
@@ -49,6 +50,9 @@ import {
   getAttendanceStatusLabel,
 } from "@/lib/attendance-status";
 import { cn } from "@/lib/utils";
+
+import { buildAttendanceSheetDocument } from "@/lib/attendance-sheet";
+import { printHtmlDocument } from "@/lib/receipt";
 
 /** Date du jour au format « YYYY-MM-DD » (UTC). */
 function todayIso(): string {
@@ -140,9 +144,16 @@ export function ClassAttendanceView({
   classes: TeacherClassDTO[];
 }) {
   const router = useRouter();
-  const [selectedClassId, setSelectedClassId] = React.useState<string>(
-    classes[0]?.id ?? ""
-  );
+  const searchParams = useSearchParams();
+
+  // Présélection de la classe depuis `/dashboard/attendance?classId=...`
+  // (bouton « Marquer les présences » des cartes de classes).
+  const [selectedClassId, setSelectedClassId] = React.useState<string>(() => {
+    const fromQuery = searchParams.get("classId");
+    return fromQuery && classes.some((klass) => klass.id === fromQuery)
+      ? fromQuery
+      : (classes[0]?.id ?? "");
+  });
   const [selectedDate, setSelectedDate] = React.useState<string>(todayIso());
   const [students, setStudents] = React.useState<EnrolledStudentDTO[]>([]);
   const [entries, setEntries] = React.useState<Record<string, AttendanceEntry>>({});
@@ -209,6 +220,19 @@ export function ClassAttendanceView({
     },
     [classes]
   );
+
+  // Synchronise la sélection quand l'URL change (navigation vers
+  // `/dashboard/attendance?classId=...`) sans remonter le composant.
+  // Le changement d'état est différé pour respecter `react-hooks/set-state-in-effect`.
+  React.useEffect(() => {
+    const fromQuery = searchParams.get("classId");
+    if (fromQuery && classes.some((klass) => klass.id === fromQuery)) {
+      const timer = window.setTimeout(() => {
+        setSelectedClassId(fromQuery);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [searchParams, classes]);
 
   // Recharge (roster + séance + historique) à chaque changement de classe ou de date :
   // la séance existante auto-remplit et verrouille les champs, sinon mode nouvelle séance.
@@ -319,6 +343,33 @@ export function ClassAttendanceView({
     setSelectedDate(date.toISOString().slice(0, 10));
   };
 
+  /**
+   * Construit et imprime la feuille de présence de la classe sélectionnée pour
+   * la date courante. Les statuts non renseignés apparaissent comme des cases
+   * vides (feuille vierge imprimable en complément).
+   */
+  const handlePrintSheet = () => {
+    if (!selectedClass) return;
+    const html = buildAttendanceSheetDocument({
+      className: selectedClass.name,
+      courseTitle: selectedClass.courseTitle,
+      courseCode: selectedClass.courseCode,
+      scheduleText: formatScheduleBadge(selectedClass.schedules),
+      date: selectedDate,
+      rows: students.map((student) => {
+        const entry = entries[student.studentId];
+        return {
+          studentId: student.studentId,
+          studentCode: student.studentCode,
+          fullName: `${student.firstName} ${student.lastName}`,
+          status: entry?.status ?? null,
+          notes: entry?.notes ?? "",
+        };
+      }),
+    });
+    printHtmlDocument(html);
+  };
+
   if (!hasClasses) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed p-12 text-center">
@@ -347,10 +398,19 @@ export function ClassAttendanceView({
           ))}
         </div>
         {selectedClass && (
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center flex-wrap justify-end gap-2">
             <span className="text-xs text-muted-foreground">
               {selectedClass.courseTitle}
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrintSheet}
+              disabled={students.length === 0}
+            >
+              <PrinterIcon data-icon="inline-start" />
+              Imprimer / Exporter la feuille de présence
+            </Button>
             <Link
               href={`/dashboard/courses/${selectedClass.courseId}`}
               className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"

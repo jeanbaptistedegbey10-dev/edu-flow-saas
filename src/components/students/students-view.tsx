@@ -24,6 +24,7 @@ import {
   ensureStudentReportToken,
 } from "@/actions/students";
 import { AddStudentDialog } from "@/components/students/add-student-dialog";
+import { ImportStudentsDialog } from "@/components/students/import-students-dialog";
 import { EditStudentDialog } from "@/components/students/edit-student-dialog";
 import { ReportCardDialog } from "@/components/evaluations/report-card-dialog";
 import { ToastNotification } from "@/components/ui/toast";
@@ -228,7 +229,10 @@ export function StudentsView({
             Gérez les étudiants de votre centre de formation.
           </p>
         </div>
-        <AddStudentDialog classes={classes} registrationFee={registrationFee} />
+        <div className="flex items-center gap-2">
+          <ImportStudentsDialog />
+          <AddStudentDialog classes={classes} registrationFee={registrationFee} />
+        </div>
       </div>
 
       {/* Carte : barre d'outils + tableau */}

@@ -70,6 +70,7 @@ function EditStudentForm({
   student,
   classes,
   registrationFee,
+  canEditStatus = false,
   onSuccess,
 }: {
   student: StudentDTO;
@@ -78,6 +79,8 @@ function EditStudentForm({
   /** Frais d'inscription par défaut de l'organisation (FCFA). */
   registrationFee: number;
   onSuccess: () => void;
+  /** Autorise le positionnement d'un statut (modale admin d'édition). */
+  canEditStatus?: boolean;
 }) {
   // Champs financiers contrôlés : le Net à Payer est recalculé en direct
   // (réduction fixe ou en pourcentage), sans jamais être saisissable.
@@ -114,22 +117,28 @@ function EditStudentForm({
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
   const classFeeLocked = selectedClass !== null;
 
-  // Options de statut : les TROIS statuts canoniques (Prospect, Inscrit,
-  // Abandonné), complétés par le statut historique de l'étudiant lorsque
-  // celui-ci date d'avant la simplification — ainsi la valeur existante est
-  // toujours affichée et ne peut pas être perdue à l'enregistrement.
+  // Options de statut : les QUATRE statuts canoniques (Prospect, Inscrit,
+  // Diplômé / Terminé, Abandonné), complétés par le statut historique de
+  // l'étudiant lorsque celui-ci date d'avant l'harmonisation — ainsi la valeur
+  // existante est toujours affichée et ne peut pas être perdue à
+  // l'enregistrement.
   const statusOptions = React.useMemo(() => {
     const options = CANONICAL_STUDENT_STATUS_OPTIONS.map((option) => ({
       ...option,
     }));
-    if (!options.some((option) => option.value === student.status)) {
+    // Statut historique (famille des 6 anciens statuts) : conditionné au flag
+    // `canEditStatus` pour qu'il n'apparaisse que dans les formulaires où la
+    // famille est autorisée à positionner un statut (modale admin d'édition)
+    // et pas dans les formulaires visuels historiques (fiches PDF, historique
+    // du carnet de bord) où seul l'affichage est autorisé.
+    if (canEditStatus && !options.some((option) => option.value === student.status)) {
       options.push({
         value: student.status,
         label: `${getStudentStatusLabel(student.status)} (statut historique)`,
       });
     }
     return options;
-  }, [student.status]);
+  }, [canEditStatus, student.status]);
 
   /** Réaction à la sélection d'une classe : pré-remplit et verrouille les frais. */
   const handleClassChange = (value: string) => {
@@ -635,6 +644,7 @@ export function EditStudentDialog({
   registrationFee,
   open,
   onOpenChange,
+  canEditStatus = false,
 }: {
   student: StudentDTO | null;
   /** Classes / cohortes disponibles pour l'affectation. */
@@ -643,6 +653,8 @@ export function EditStudentDialog({
   registrationFee: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Autorise le positionnement d'un statut (modale admin d'édition). */
+  canEditStatus?: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -653,6 +665,7 @@ export function EditStudentDialog({
             student={student}
             classes={classes}
             registrationFee={registrationFee}
+            canEditStatus={canEditStatus}
             onSuccess={() => onOpenChange(false)}
           />
         ) : null}

@@ -21,6 +21,10 @@ import {
 } from "@/actions/students";
 import { getStudentAcademicRecord, type StudentAcademicRecordDTO } from "@/actions/evaluations";
 import {
+  getStudentJourney,
+  type StudentJourneyDTO,
+} from "@/actions/student-journey";
+import {
   getCurrentOrganizationProfile,
   type OrganizationProfileDTO,
 } from "@/actions/payments";
@@ -41,6 +45,7 @@ import {
 } from "@/components/ui/table";
 import { StudentAcademicTab } from "@/components/students/student-academic-tab";
 import { StudentAttendanceTab } from "@/components/students/student-attendance-tab";
+import { StudentJourneyTab } from "@/components/students/student-journey-tab";
 import { StudentReportButton } from "@/components/students/student-report-button";
 import { CopyParentLinkButton } from "@/components/students/copy-parent-link-button";
 import { getPaymentMethodLabel,
@@ -155,7 +160,7 @@ export default async function StudentDetailPage({
   // Garde explicite : ne jamais rendre sans fiche valide (relations incluses).
   if (!student || !organization) notFound();
 
-  const [academicRecord, documents, attendanceEntries, reportTokenResult] =
+  const [academicRecord, documents, attendanceEntries, journey, reportTokenResult] =
     await Promise.all([
       // Onglet « Évaluations & Notes » : repli = dossier vide (aucun crash).
       getStudentAcademicRecord(id).catch(
@@ -174,6 +179,10 @@ export default async function StudentDetailPage({
       getDocumentsByOwner({ studentId: id }).catch(() => []),
       // Onglet « Assiduité » : repli = historique vide.
       getStudentAttendanceHistory(id).catch(() => []),
+      // Onglet « Parcours & Historique » : repli = parcours vide.
+      getStudentJourney(id).catch(
+        (): StudentJourneyDTO => ({ entries: [] })
+      ),
       // Jeton d'accès public (rapport parent) : purement facultatif — un
       // échec n'empêche pas l'affichage de la fiche, seuls les boutons
       // « Voir / Imprimer le rapport » / « Copier le lien parent » sont masqués.
@@ -267,6 +276,7 @@ export default async function StudentDetailPage({
           <TabsTrigger value="overview">Vue d’ensemble</TabsTrigger>
           <TabsTrigger value="attendance">Assiduité</TabsTrigger>
           <TabsTrigger value="academics">Évaluations & Notes</TabsTrigger>
+          <TabsTrigger value="journey">Parcours & Historique</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
 
@@ -472,7 +482,18 @@ export default async function StudentDetailPage({
           />
         </TabsContent>
 
-        {/* Onglet 4 : pièces jointes (liens externes / stockage externe) */}
+        {/* Onglet 4 : parcours académique — classes passées, décisions et
+            documents figés (bulletin + rapport de présence par classe) */}
+        <TabsContent value="journey" className="mt-2">
+          <StudentJourneyTab
+            entries={journey.entries}
+            studentName={`${student.firstName} ${student.lastName}`}
+            studentCode={student.studentCode}
+            organization={organization}
+          />
+        </TabsContent>
+
+        {/* Onglet 5 : pièces jointes (liens externes / stockage externe) */}
         <TabsContent value="documents" className="mt-2">
           <DocumentsTab
             owner={{ studentId: student.id }}

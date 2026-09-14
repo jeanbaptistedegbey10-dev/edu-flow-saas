@@ -51,6 +51,9 @@ import {
   PAYMENT_VOIDED_BADGE_CLASSES,
   PAYMENT_VOIDED_LABEL,
 } from "@/lib/payment-status";
+import type { OverdueScheduleDTO } from "@/lib/actions/schedules";
+import { CreateScheduleDialog } from "@/components/payments/create-schedule-dialog";
+import { OverdueSchedulesPanel } from "@/components/payments/overdue-schedules-panel";
 import { exportToCsv, type CsvColumn } from "@/lib/export";
 import { cn } from "@/lib/utils";
 
@@ -165,11 +168,15 @@ export function PaymentsView({
   stats,
   students,
   organization,
+  overdueSchedules,
+  overdueAmount,
 }: {
   payments: PaymentDTO[];
   stats: FinancialStatsDTO;
   students: StudentOptionDTO[];
   organization: OrganizationProfileDTO;
+  overdueSchedules: OverdueScheduleDTO[];
+  overdueAmount: number;
 }) {
   const [search, setSearch] = React.useState("");
   const [methodFilter, setMethodFilter] = React.useState<MethodFilter>("ALL");
@@ -231,7 +238,10 @@ export function PaymentsView({
             étudiants.
           </p>
         </div>
-        <AddPaymentDialog students={students} />
+        <div className="flex items-center gap-2">
+          <CreateScheduleDialog students={students} />
+          <AddPaymentDialog students={students} />
+        </div>
       </div>
 
       {/* Cartes d'indicateurs (KPI) */}
@@ -243,8 +253,8 @@ export function PaymentsView({
         />
         <StatCard
           icon={HourglassIcon}
-          label="Montant en attente"
-          value={formatAmount(stats.pendingAmount)}
+          label="Montant en attente (échéances)"
+          value={formatAmount(overdueAmount)}
         />
         <StatCard
           icon={ArrowLeftRightIcon}
@@ -257,6 +267,12 @@ export function PaymentsView({
           value={formatAmount(stats.monthlyExpenses)}
         />
       </div>
+
+      {/* Panneau des impayés et échéances en retard */}
+      <OverdueSchedulesPanel
+        overdueSchedules={overdueSchedules}
+        overdueAmount={overdueAmount}
+      />
 
       {/* Carte : barre d'outils + tableau */}
       <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">

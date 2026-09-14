@@ -63,13 +63,41 @@ const ALLOWED_CONFIRMATION_WORDS: ReadonlyArray<ResetConfirmationWord> = [
   "CONFIRMER",
 ];
 
+/** Message renvoyé lorsque la fonctionnalité démo est désactivée. */
+const DEMO_FEATURE_DISABLED_MESSAGE =
+  "Fonctionnalité de démonstration désactivée sur cette instance " +
+  "(réservée au développement / à la sandbox).";
+
+/**
+ * Garde « sandbox uniquement » de la fonctionnalité de démonstration.
+ *
+ * La carte « Données de démonstration » n'est rendue que lorsque
+ * `NODE_ENV !== "production"` ET `NEXT_PUBLIC_ENABLE_DEMO_DATA === "true"`
+ * (voir src/app/dashboard/page.tsx). Ce garde rejoue la MÊME règle côté
+ * serveur : toute invocation directe des Server Actions (client obsolète,
+ * requête forgée) est refusée dès qu'une instance de production est détectée
+ * ou que la sandbox n'est pas explicitement activée. Défense en profondeur —
+ * le masquage UI seul ne suffirait pas à protéger un client payant.
+ *
+ * NOTE : le seeding à l'ONBOARDING (inscription avec jeu de démonstration)
+ * emprunte un chemin distinct (auth.ts / actions/register.ts) et n'est PAS
+ * concerné par ce garde.
+ */
+function isDemoDataFeatureEnabled(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_ENABLE_DEMO_DATA === "true"
+  );
+}
+
 /**
  * Vérifications communes partagées par les trois étapes de nettoyage :
- *   1. session présente (organisation rattachée au JWT) ;
- *   2. garde d'écriture `assertCanMutate` (peut rediriger vers /billing) ;
- *   3. contexte de session revalidé contre la base (source de vérité) ;
- *   4. rôle administrateur (ADMIN / SUPER_ADMIN) requis ;
- *   5. confirmation mot-clé rejouée côté serveur (jamais client seul).
+ *   1. fonctionnalité démo activée (développement / sandbox uniquement) ;
+ *   2. session présente (organisation rattachée au JWT) ;
+ *   3. garde d'écriture `assertCanMutate` (peut rediriger vers /billing) ;
+ *   4. contexte de session revalidé contre la base (source de vérité) ;
+ *   5. rôle administrateur (ADMIN / SUPER_ADMIN) requis ;
+ *   6. confirmation mot-clé rejouée côté serveur (jamais client seul).
  */
 async function resolveDemoMutationContext(
   formData?: FormData
@@ -77,6 +105,17 @@ async function resolveDemoMutationContext(
   | { ok: true; organizationId: string }
   | { ok: false; state: DemoDataActionState }
 > {
+  // 0. Garde « sandbox uniquement » : refus immédiat hors environnement autorisé.
+  if (!isDemoDataFeatureEnabled()) {
+    return {
+      ok: false,
+      state: {
+        status: "error",
+        message: DEMO_FEATURE_DISABLED_MESSAGE,
+      },
+    };
+  }
+
   const session = await auth();
   if (!session?.user?.organizationId || !session?.user?.id) {
     return {
@@ -286,6 +325,16 @@ export async function injectDemoDataAction(
   console.log("[demo-data] injectDemoDataAction — début");
 
   try {
+    // 0. Garde « sandbox uniquement » : la fonctionnalité de démonstration est
+    //    désactivée sur toute instance de production non explicitement
+    //    autorisée (cf. isDemoDataFeatureEnabled).
+    if (!isDemoDataFeatureEnabled()) {
+      return {
+        status: "error",
+        message: DEMO_FEATURE_DISABLED_MESSAGE,
+      };
+    }
+
     // 1. Vérification explicite de la session au tout début : si l'utilisateur
     //    n'est pas authentifié ou son organisation est absente du JWT, on
     //    retourne un état d'erreur plutôt que de laisser `redirect()` lever
@@ -422,6 +471,16 @@ export async function resetDemoDataAction(
   console.log("[demo-data] resetDemoDataAction — début");
 
   try {
+    // 0. Garde « sandbox uniquement » : la fonctionnalité de démonstration est
+    //    désactivée sur toute instance de production non explicitement
+    //    autorisée (cf. isDemoDataFeatureEnabled).
+    if (!isDemoDataFeatureEnabled()) {
+      return {
+        status: "error",
+        message: DEMO_FEATURE_DISABLED_MESSAGE,
+      };
+    }
+
     // 1. Vérification explicite de la session au tout début : si l'utilisateur
     //    n'est pas authentifié ou son organisation est absente du JWT, on
     //    retourne un état d'erreur plutôt que de laisser `redirect()` lever

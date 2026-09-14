@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { auth } from "@/auth";
 import { getCurrentOrganizationBranding } from "@/actions/organization";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
+import { DashboardHeaderTitle } from "@/components/dashboard/dashboard-header-title";
 import { HelpAssistant } from "@/components/help/HelpAssistant";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -102,7 +103,7 @@ export default async function DashboardLayout({
 
   return (
     <SidebarProvider>
-      <AppSidebar user={session?.user} />
+      <AppSidebar user={session?.user} planType={license?.planType ?? "TRIAL"} />
       <SidebarInset>
         <LicenseBanner
           trialDaysLeft={license?.trialDaysLeft ?? null}
@@ -128,9 +129,8 @@ export default async function DashboardLayout({
               )}
             </div>
             <div className="min-w-0 leading-tight">
-              <h1 className="text-xl font-semibold tracking-tight">
-                Tableau de bord
-              </h1>
+              {/* Titre dynamique : reflète le module consulté (usePathname). */}
+              <DashboardHeaderTitle />
               {branding?.name ? (
                 <p className="truncate text-xs text-muted-foreground">
                   {branding.name}

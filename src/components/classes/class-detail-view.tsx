@@ -6,12 +6,33 @@ import {
   ArrowLeftIcon,
   CalendarCheckIcon,
   ClockIcon,
+  DoorOpenIcon,
   GraduationCapIcon,
   UsersRoundIcon,
 } from "lucide-react";
 
 import type { ClassDetailDTO } from "@/actions/classes";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+const BADGE_BASE_CLASSES =
+  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
+
+const CLASS_STATUS_BADGES: Record<string, { label: string; classes: string }> = {
+  ACTIVE: {
+    label: "Active",
+    classes: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
+  },
+  COMPLETED: {
+    label: "Clôturée",
+    classes: "bg-slate-100 text-slate-700 dark:bg-slate-500/10 dark:text-slate-300",
+  },
+  ARCHIVED: {
+    label: "Archivée",
+    classes: "bg-muted text-muted-foreground",
+  },
+};
+
 
 // Formatage déterministe (locale + fuseau fixes) pour éviter tout écart d'hydratation.
 const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
@@ -36,6 +57,8 @@ function formatPrice(value: number | null): string {
  */
 export function ClassDetailView({ detail }: { detail: ClassDetailDTO }) {
   const studentCount = detail.students.length;
+  const statusBadge =
+    CLASS_STATUS_BADGES[detail.status] ?? CLASS_STATUS_BADGES.ACTIVE;
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
@@ -49,8 +72,11 @@ export function ClassDetailView({ detail }: { detail: ClassDetailDTO }) {
             <ArrowLeftIcon className="size-4" />
           </Link>
           <div>
-            <h2 className="text-2xl font-semibold tracking-tight">
+            <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
               {detail.name}
+              <span className={cn(BADGE_BASE_CLASSES, statusBadge.classes)}>
+                {statusBadge.label}
+              </span>
             </h2>
             <p className="text-base text-muted-foreground">
               {detail.courseTitle} ({detail.courseCode})
@@ -58,12 +84,22 @@ export function ClassDetailView({ detail }: { detail: ClassDetailDTO }) {
           </div>
         </div>
 
-        <Link href="/dashboard/attendance">
-          <Button>
-            <CalendarCheckIcon data-icon="inline-start" />
-            Présences & Cahier de texte
-          </Button>
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {detail.status === "ACTIVE" && (
+            <Link href={`/dashboard/classes/${detail.id}/close`}>
+              <Button variant="outline">
+                <DoorOpenIcon data-icon="inline-start" />
+                Clôturer la classe
+              </Button>
+            </Link>
+          )}
+          <Link href="/dashboard/attendance">
+            <Button>
+              <CalendarCheckIcon data-icon="inline-start" />
+              Présences & Cahier de texte
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Informations de la classe */}

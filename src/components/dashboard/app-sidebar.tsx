@@ -19,6 +19,8 @@ import {
   ShieldCheck,
   CreditCard,
   Coins,
+  AwardIcon,
+  ScrollTextIcon,
   type LucideIcon,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
@@ -39,6 +41,8 @@ import {
 
 import { NavUser, type SessionUser } from "@/components/dashboard/nav-user"
 import { cn } from "@/lib/utils"
+import { isTravelModuleEnabled, isAuditLogEnabled } from "@/lib/plan-permissions";
+import type { PlanType } from "@/lib/plan-labels"
 
 // Menu data
 type MenuItem = {
@@ -94,6 +98,11 @@ const mainMenu: MenuItem[] = [
     title: "Caisse / POS",
     url: "/dashboard/pos",
     icon: ShoppingCart,
+  },
+  {
+    title: "Certificats",
+    url: "/dashboard/certificates",
+    icon: AwardIcon,
   },
 ]
 
@@ -234,11 +243,23 @@ interface AppSidebarProps {
    * dans `src/app/dashboard/layout.tsx`).
    */
   user?: SessionUser | null
+  /** Type de plan de l'organisation (définit les modules visibles). */
+  planType?: string
 }
 
-export function AppSidebar({ user }: AppSidebarProps) {
+export function AppSidebar({ user, planType = "TRIAL" }: AppSidebarProps) {
   const pathname = usePathname()
   const isTeacher = user?.role === "TEACHER"
+
+  // Modules conditionnels selon le plan commercial
+  const showTravelModule = isTravelModuleEnabled(planType as PlanType)
+  const showAuditLog = isAuditLogEnabled(planType as PlanType)
+
+  // Le menu principal filtré : retire « Procédures voyage » si le plan
+  // ne l'inclut pas (option Premium / Mobilité).
+  const filteredMainMenu = showTravelModule
+    ? mainMenu
+    : mainMenu.filter((item) => !item.url.startsWith("/dashboard/travels"))
 
   return (
     <Sidebar collapsible="icon">
@@ -292,7 +313,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <SidebarGroupLabel>Principal</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {mainMenu.map((item) => (
+                  {filteredMainMenu.map((item) => (
                     <SidebarLink
                       key={item.title}
                       item={item}
@@ -335,6 +356,21 @@ export function AppSidebar({ user }: AppSidebarProps) {
                       active={isItemActive(item, pathname)}
                     />
                   ))}
+                  {/* Journal d'audit : visible selon le plan (Pro / Premium) */}
+                  {showAuditLog && (
+                    <SidebarLink
+                      item={{
+                        title: "Journal d'audit",
+                        url: "/dashboard/settings/audit-logs",
+                        icon: ScrollTextIcon,
+                        exact: true,
+                      }}
+                      active={isItemActive(
+                        { title: "", url: "/dashboard/settings/audit-logs", exact: true } as MenuItem,
+                        pathname
+                      )}
+                    />
+                  )}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

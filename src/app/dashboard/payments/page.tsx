@@ -4,6 +4,7 @@ import {
   getPayments,
   getStudentOptions,
 } from "@/actions/payments";
+import { getOverdueSchedules } from "@/lib/actions/schedules";
 import { PaymentsView } from "@/components/payments/payments-view";
 
 export const metadata = {
@@ -13,12 +14,14 @@ export const metadata = {
 };
 
 export default async function PaymentsPage() {
-  const [payments, stats, students, organization] = await Promise.all([
-    getPayments(),
-    getFinancialStats(),
-    getStudentOptions(),
-    getCurrentOrganizationProfile(),
-  ]);
+  const [payments, stats, students, organization, overdueData] =
+    await Promise.all([
+      getPayments(),
+      getFinancialStats(),
+      getStudentOptions(),
+      getCurrentOrganizationProfile(),
+      getOverdueSchedules(),
+    ]);
 
   return (
     <PaymentsView
@@ -26,6 +29,8 @@ export default async function PaymentsPage() {
       stats={stats}
       students={students}
       organization={organization}
+      overdueSchedules={overdueData.schedules}
+      overdueAmount={overdueData.overdueAmount}
     />
   );
 }

@@ -50,10 +50,17 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+/** Rôle de base administrateur : toutes les permissions sont déjà accordées. */
+function isAdminBaseRole(role: string): boolean {
+  return role === "ADMIN" || role === "SUPER_ADMIN";
+}
+
 /**
  * Vue « Rôles & Permissions » : matrice des rôles personnalisés (création,
- * édition, suppression) et attribution de ces rôles aux membres de
- * l'équipe (secrétaires / enseignants).
+ * édition, suppression) et attribution de ces rôles aux membres de l'équipe
+ * (secrétaires / enseignants). Les administrateurs figurent aussi dans le
+ * tableau avec une mention fixe « Tous les accès » — ils ne reçoivent jamais
+ * de rôle personnalisé.
  */
 export function RolesView({ overview }: { overview: RolesOverview }) {
   const { roles, users } = overview;
@@ -122,9 +129,15 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
   }
 
   // Member handlers
+  // Nonce : incrémente à chaque ouverture pour que la `key` du dialogue le
+  // remonte — l'état contrôlé et le formulaire repartent alors de zéro,
+  // même entre deux créations consécutives.
+  const [memberFormNonce, setMemberFormNonce] = React.useState(0);
+
   function openCreateMember() {
     setEditingMember(null);
     setMemberFeedback(null);
+    setMemberFormNonce((nonce) => nonce + 1);
     setMemberDialogOpen(true);
   }
 
@@ -138,6 +151,7 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
       customRoleId: user.customRoleId,
     });
     setMemberFeedback(null);
+    setMemberFormNonce((nonce) => nonce + 1);
     setMemberDialogOpen(true);
   }
 
@@ -396,7 +410,8 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
                   colSpan={4}
                   className="py-6 text-center text-sm text-muted-foreground"
                 >
-                  Aucun membre éligible (comptes Secrétaire / Enseignant).
+                  Aucun membre dans l&apos;organisation pour le moment.
+                  Créez un compte avec «&nbsp;Ajouter un membre&nbsp;».
                 </TableCell>
               </TableRow>
             ) : (
@@ -414,26 +429,35 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
                     {getRoleLabel(user.role as Parameters<typeof getRoleLabel>[0])}
                   </TableCell>
                   <TableCell>
-                    {/* « none » = sentinelle Radix (valeur vide interdite) */}
-                    <Select
-                      value={user.customRoleId ?? "none"}
-                      onValueChange={(value) => handleAssign(user, value)}
-                      disabled={isPending}
-                    >
-                      <SelectTrigger className="w-[220px]">
-                        <SelectValue placeholder="Aucun" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">
-                          Aucun (rôle de base uniquement)
-                        </SelectItem>
-                        {roles.map((role) => (
-                          <SelectItem key={role.id} value={role.id}>
-                            {role.name}
+                    {isAdminBaseRole(user.role) ? (
+                      // Les administrateurs ont déjà toutes les permissions :
+                      // mention fixe au lieu du sélecteur (désactivé).
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200/60 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+                        <ShieldCheckIcon className="size-3.5" />
+                        Tous les accès (Admin)
+                      </span>
+                    ) : (
+                      /* « none » = sentinelle Radix (valeur vide interdite) */
+                      <Select
+                        value={user.customRoleId ?? "none"}
+                        onValueChange={(value) => handleAssign(user, value)}
+                        disabled={isPending}
+                      >
+                        <SelectTrigger className="w-[220px]">
+                          <SelectValue placeholder="Aucun" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            Aucun (rôle de base uniquement)
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                          {roles.map((role) => (
+                            <SelectItem key={role.id} value={role.id}>
+                              {role.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
@@ -523,9 +547,10 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
         role={editingRole}
       />
 
-      {/* Dialogue ajout / édition d'un membre */}
+      {/* Dialogue ajout / édition d'un membre — la `key` (nonce + id)
+          réinitialise le formulaire à chaque ouverture */}
       <MemberFormDialog
-        key={editingMember?.id ?? "new-member"}
+        key={`member-form-${editingMember?.id ?? "new"}-${memberFormNonce}`}
         open={memberDialogOpen}
         onOpenChange={setMemberDialogOpen}
         member={editingMember}

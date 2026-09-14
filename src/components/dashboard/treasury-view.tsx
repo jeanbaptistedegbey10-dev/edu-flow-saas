@@ -32,6 +32,7 @@ import type {
   BreakdownSliceDTO,
   CashFlowDTO,
   CashFlowSeriesPointDTO,
+  TreasuryTransactionDTO,
 } from "@/actions/analytics";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getPaymentMethodLabel } from "@/lib/payment-status";
+import { exportToCsv, type CsvColumn } from "@/lib/export";
 import { cn } from "@/lib/utils";
 
 const numberFormatter = new Intl.NumberFormat("fr-FR");

@@ -1823,6 +1823,169 @@ export async function saveClassSessionWithAttendance(
 }
 
 // --------------------------------------
+// Server Action — Sauvegarde des présences d'une session
+// --------------------------------------
+
+/**
+ * Payload d'entrée pour la sauvegarde des présences d'une session existante.
+ * Utilisé par la feuille d'appel mobile (/dashboard/attendance/sheet).
+ */
+export type SaveSessionAttendancePayload = {
+  /** Identifiant de la ClassSession cible. */
+  sessionId: string;
+  /** Date de la séance (ISO « YYYY-MM-DD ») — pour cohérence avec la session. */
+  date: string;
+  /** Liste des présences à enregistrer/mettre à jour. */
+  attendances: Array<{
+    studentId: string;
+    status: AttendanceStatus;
+    notes?: string | null;
+    /** Heure d'arrivée (requise si status = LATE). */
+    arrivalTime?: string | null; // ISO « HH:MM » ou Date ISO
+  }>;
+};
+
+/**
+ * Sauvegarde ou met à jour la liste des présences pour une ClassSession donnée.
+ *
+ * Chaque ligne est écrite en `upsert` sur la clé unique [sessionId, studentId]
+ * afin de garantir la cohérence : ré-enregistrer une session met simplement
+ * à jour les statuts existants sans créer de doublon.
+ *
+ * Si le statut est LATE et qu'une `arrivalTime` est fournie, elle est
+ * automatiquement convertie en Date et persistée.
+ *
+ * Revalide le chemin /dashboard/attendance pour récalculer les statistiques.
+ */
+export async function saveSessionAttendance(
+  payload: SaveSessionAttendancePayload
+): Promise<AttendanceMutationResult> {
+  await assertCanMutate();
+  try {
+    const { sessionId, date, attendances } = payload;
+
+    if (!sessionId) {
+      return { ok: false, message: "Identifiant de la session manquant." };
+    }
+    if (!date) {
+      return { ok: false, message: "La date est requise." };
+    }
+    if (!attendances || attendances.length === 0) {
+      return { ok: false, message: "Aucune présence à enregistrer." };
+    }
+
+    const user = await getCurrentSessionUser();
+    const sessionDate = parseAttendanceDay(date);
+    if (!sessionDate) {
+      return { ok: false, message: "Date invalide." };
+    }
+
+    // Vérifie que la session appartient à l'organisation et récupère le classId
+    const session = await prisma.classSession.findFirst({
+      where: {
+        id: sessionId,
+        organizationId: user.organizationId,
+      },
+      select: { id: true, classId: true },
+    });
+
+    if (!session) {
+      return { ok: false, message: "Session introuvable ou non autorisée." };
+    }
+
+    // Vérifie que les étudiants appartiennent bien à la classe de la session
+    const studentIds = attendances.map((a) => a.studentId);
+    const validStudents = await prisma.student.findMany({
+      where: {
+        id: { in: studentIds },
+        organizationId: user.organizationId,
+        classEnrollments: { some: { classId: session.classId } },
+      },
+      select: { id: true },
+    });
+    const validStudentIds = new Set(validStudents.map((s) => s.id));
+
+    const filteredAttendances = attendances.filter((a) =>
+      validStudentIds.has(a.studentId)
+    );
+
+    if (filteredAttendances.length === 0) {
+      return {
+        ok: false,
+        message: "Aucun étudiant valide pour cette session.",
+      };
+    }
+
+    // Transaction : upsert de chaque présence sur [sessionId, studentId]
+    await prisma.$transaction(
+      filteredAttendances.map((entry) => {
+        // Calcul de l'heure d'arrivée si le statut est LATE
+        let arrivalDate: Date | null = null;
+        if (entry.status === "LATE" && entry.arrivalTime) {
+          const parsed = buildSessionDateTime(date, entry.arrivalTime);
+          if (parsed) {
+            arrivalDate = parsed;
+          } else {
+            // Fallback : tente de parser comme Date ISO complète
+            const fallback = new Date(entry.arrivalTime);
+            if (!isNaN(fallback.getTime())) {
+              arrivalDate = fallback;
+            }
+          }
+        }
+
+        return prisma.attendance.upsert({
+          where: {
+            sessionId_studentId: {
+              sessionId,
+              studentId: entry.studentId,
+            },
+          },
+          update: {
+            status: entry.status,
+            notes: entry.notes || null,
+            arrivalTime: entry.status === "LATE" ? arrivalDate : null,
+            date: sessionDate,
+          },
+          create: {
+            organizationId: user.organizationId,
+            sessionId,
+            classId: session.classId,
+            studentId: entry.studentId,
+            status: entry.status,
+            notes: entry.notes || null,
+            arrivalTime: entry.status === "LATE" ? arrivalDate : null,
+            date: sessionDate,
+          },
+        });
+      })
+    );
+
+    revalidatePath("/dashboard/attendance");
+    revalidatePath(`/dashboard/classes/${session.classId}`);
+
+    return { ok: true, savedCount: filteredAttendances.length };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error(
+      "[saveSessionAttendance] Échec d'enregistrement :",
+      error
+    );
+
+    return {
+      ok: false,
+      message:
+        error instanceof Error &&
+        (error.message.startsWith("Accès refusé") ||
+          error.message === "Session introuvable ou non autorisée.")
+          ? error.message
+          : "Une erreur est survenue lors de l'enregistrement des présences.",
+    };
+  }
+}
+
+// --------------------------------------
 // Server Action — Historique des séances d'une classe
 // --------------------------------------
 
@@ -1834,6 +1997,9 @@ export async function getClassSessionsHistory(
   classId: string,
   limit = 10
 ): Promise<ClassSessionHistoryEntryDTO[]> {
+// --------------------------------------
+// Helpers internes
+// --------------------------------------
   const user = await getCurrentSessionUser();
 
   if (user.role === "STUDENT") {
@@ -1948,4 +2114,142 @@ async function assertCourseAccessForClassWithCourse(classId: string) {
   }
 
   return { user, courseId: klass.courseId };
+}
+
+// --------------------------------------
+// Server Action — Statistiques de présences pour la page principale
+// --------------------------------------
+
+/** Statistiques d'affichage de la page de présences. */
+export type AttendanceOverviewStatsDTO = {
+  /** Taux de présence du jour (PRESENT + LATE / total, 0–100). */
+  todayRate: number | null;
+  /** Nombre total de présences enregistrées aujourd'hui. */
+  todayTotal: number;
+  /** Nombre de présents aujourd'hui. */
+  todayPresent: number;
+  /** Nombre d'absents aujourd'hui. */
+  todayAbsent: number;
+  /** Nombre de retards aujourd'hui. */
+  todayLate: number;
+  /** Taux de présence du mois en cours (0–100). */
+  monthRate: number | null;
+  /** Nombre total de présences enregistrées ce mois-ci. */
+  monthTotal: number;
+  /** Élèves avec un taux d'absence élevé (> 3 absences non justifiées). */
+  studentsWithHighAbsence: Array<{
+    studentId: string;
+    studentName: string;
+    absenceCount: number;
+  }>;
+};
+
+/**
+ * Récupère les statistiques de présences pour la page principale :
+ * taux du jour, totaux, et alertes absences élevées.
+ */
+export async function getAttendanceOverviewStats(): Promise<AttendanceOverviewStatsDTO> {
+  const user = await getCurrentSessionUser();
+
+  if (user.role === "STUDENT") {
+    throw new Error("Accès refusé : les étudiants n'ont pas accès au tableau de bord.");
+  }
+
+  const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setUTCHours(0, 0, 0, 0);
+  const startOfMonth = new Date(now.getUTCFullYear(), now.getMonth(), 1);
+  const startOfNextMonth = new Date(now.getUTCFullYear(), now.getMonth() + 1, 1);
+
+  try {
+    const [todayRows, monthRows, absenceRows] = await Promise.all([
+      prisma.attendance.findMany({
+        where: {
+          organizationId: user.organizationId,
+          date: { gte: startOfToday },
+          ...(user.role === "TEACHER"
+            ? { session: { class: { OR: [{ teacherId: user.id }, { course: { teacherId: user.id } }] } } }
+            : {}),
+        },
+        select: { status: true },
+      }),
+      prisma.attendance.findMany({
+        where: {
+          organizationId: user.organizationId,
+          date: { gte: startOfMonth, lt: startOfNextMonth },
+          ...(user.role === "TEACHER"
+            ? { session: { class: { OR: [{ teacherId: user.id }, { course: { teacherId: user.id } }] } } }
+            : {}),
+        },
+        select: { status: true },
+      }),
+      prisma.attendance.groupBy({
+        by: ["studentId"],
+        where: {
+          organizationId: user.organizationId,
+          status: "ABSENT",
+          ...(user.role === "TEACHER"
+            ? { session: { class: { OR: [{ teacherId: user.id }, { course: { teacherId: user.id } }] } } }
+            : {}),
+        },
+        _count: { studentId: true },
+        orderBy: { _count: { studentId: "desc" } },
+        take: 20,
+      }),
+    ]);
+
+    // Filtre les étudiants avec plus de 3 absences (côté JS pour compatibilité Prisma)
+    const highAbsenceRows = absenceRows.filter(
+      (r) => (r._count as unknown as { studentId: number }).studentId > 3
+    );
+
+    const todayTotal = todayRows.length;
+    const todayPresent = todayRows.filter((r) => r.status === "PRESENT" || r.status === "LATE").length;
+    const todayAbsent = todayRows.filter((r) => r.status === "ABSENT").length;
+    const todayLate = todayRows.filter((r) => r.status === "LATE").length;
+    const todayRate = todayTotal > 0 ? Math.round((todayPresent / todayTotal) * 1000) / 10 : null;
+
+    const monthTotal = monthRows.length;
+    const monthPresent = monthRows.filter((r) => r.status === "PRESENT" || r.status === "LATE").length;
+    const monthRate = monthTotal > 0 ? Math.round((monthPresent / monthTotal) * 1000) / 10 : null;
+
+    const studentIds = highAbsenceRows.map((r) => r.studentId);
+    const students = await prisma.student.findMany({
+      where: { id: { in: studentIds } },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    const studentMap = new Map(students.map((s) => [s.id, `${s.firstName} ${s.lastName}`]));
+
+    const studentsWithHighAbsence = highAbsenceRows.map((r) => ({
+      studentId: r.studentId,
+      studentName: studentMap.get(r.studentId) ?? "Inconnu",
+      absenceCount: (r._count as unknown as { studentId: number }).studentId,
+    }));
+
+    return {
+      todayRate,
+      todayTotal,
+      todayPresent,
+      todayAbsent,
+      todayLate,
+      monthRate,
+      monthTotal,
+      studentsWithHighAbsence,
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[getAttendanceOverviewStats] Échec de calcul :", error);
+
+    return {
+      todayRate: null,
+      todayTotal: 0,
+      todayPresent: 0,
+      todayAbsent: 0,
+      todayLate: 0,
+      monthRate: null,
+      monthTotal: 0,
+      studentsWithHighAbsence: [],
+    };
+  }
 }

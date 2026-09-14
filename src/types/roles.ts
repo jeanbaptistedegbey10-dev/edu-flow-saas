@@ -19,7 +19,12 @@ export type CustomRoleDTO = {
   userCount: number;
 };
 
-/** Utilisateur éligible à l'attribution d'un rôle personnalisé. */
+/**
+ * Utilisateur de l'organisation affiché dans le tableau « Attribution aux
+ * utilisateurs ». Les comptes ADMIN / SUPER_ADMIN y figurent également (avec
+ * une mention fixe côté interface) : ils ne sont pas éligibles à un rôle
+ * personnalisé (`customRoleId` reste null pour eux).
+ */
 export type RoleUserDTO = {
   id: string;
   firstName: string;

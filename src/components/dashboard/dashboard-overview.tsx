@@ -16,10 +16,12 @@ import type {
   StudentDistributionDTO,
   UnpaidAlertDTO,
 } from "@/actions/analytics";
+import type { ClassOptionDTO } from "@/actions/classes";
 import type { RecentPaymentDTO } from "@/actions/dashboard";
 import { AttendanceLineChart } from "@/components/dashboard/charts/attendance-line-chart";
 import { RevenueBarChart } from "@/components/dashboard/charts/revenue-bar-chart";
 import { StudentDistributionDonut } from "@/components/dashboard/charts/student-distribution-donut";
+import { DashboardQuickActions } from "@/components/dashboard/dashboard-quick-actions";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +63,10 @@ export type DashboardOverviewProps = {
   financialOverview: FinancialOverviewPointDTO[];
   distribution: StudentDistributionDTO;
   attendanceTrend: AttendanceTrendPointDTO[];
+  /** Classes / cohortes disponibles (raccourci « Nouvel apprenant »). */
+  classes: ClassOptionDTO[];
+  /** Frais d'inscription par défaut de l'organisation (FCFA). */
+  registrationFee: number;
 };
 
 // --------------------------------------
@@ -206,6 +212,8 @@ export function DashboardOverview({
   financialOverview,
   distribution,
   attendanceTrend,
+  classes,
+  registrationFee,
 }: DashboardOverviewProps) {
   const { collectedThisMonth, outstanding } = stats;
 
@@ -227,24 +235,11 @@ export function DashboardOverview({
           </p>
         </div>
 
-        <div
-          role="group"
-          aria-label="Actions rapides"
-          className="flex flex-wrap items-center gap-2"
-        >
-          <Button asChild variant="outline" size="sm">
-            <Link href="/dashboard/payments">
-              <WalletCardsIcon data-icon="inline-start" />
-              Paiements
-            </Link>
-          </Button>
-          <Button asChild variant="outline" size="sm">
-            <Link href="/dashboard/travels">
-              <PlaneIcon data-icon="inline-start" />
-              Voyages
-            </Link>
-          </Button>
-        </div>
+        {/* Raccourcis clés : création apprenant / prospect, paiement, classe. */}
+        <DashboardQuickActions
+          classes={classes}
+          registrationFee={registrationFee}
+        />
       </div>
 
       {/* Cartes KPI supérieures */}

@@ -12,6 +12,8 @@ import { sendPaymentConfirmationEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
+import { logAuditEvent } from "@/lib/actions/audit";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -419,7 +421,7 @@ export async function createPaymentAction(
 
     const paidAt = new Date();
 
-    await prisma.payment.create({
+    const payment = await prisma.payment.create({
       data: {
         organizationId,
         studentId: parsed.data.studentId,
@@ -434,6 +436,18 @@ export async function createPaymentAction(
 
     revalidatePath("/dashboard/payments");
 
+    // Journal d'audit : enregistrement de paiement
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.PAYMENT_RECEIVED,
+      entity: AUDIT_ENTITIES.PAYMENT,
+      entityId: payment.id,
+      details: {
+        amount: payment.amount,
+        method: payment.paymentMethod,
+        status: payment.status,
+      },
+    });
+
     // Reçu de règlement envoyé en arrière-plan (après la réponse) si l'étudiant
     // a une adresse e-mail valide. L'échec d'envoi ne bloque jamais la création.
     if (student.email) {
@@ -443,13 +457,27 @@ export async function createPaymentAction(
       const reference = parsed.data.reference;
 
       after(async () => {
-        await sendPaymentConfirmationEmail({
-          studentEmail: recipientEmail,
-          studentName: recipientName,
-          amount,
-          reference,
-          paidAt,
-        });
+        // Adresses de test (ex : etudiant@example.com) : Resend en mode Sandbox
+        // les refuse systématiquement. On ignore l'envoi pour ne jamais
+        // bloquer ni retarder la création du paiement.
+        if (recipientEmail.trim().toLowerCase().endsWith("@example.com")) {
+          console.info(
+            `[payments] Adresse de test « ${recipientEmail} » : envoi du reçu ignoré.`
+          );
+          return;
+        }
+
+        try {
+          await sendPaymentConfirmationEmail({
+            studentEmail: recipientEmail,
+            studentName: recipientName,
+            amount,
+            reference,
+            paidAt,
+          });
+        } catch (error) {
+          console.error("[payments] Échec de l'envoi du reçu :", error);
+        }
       });
     }
 
@@ -611,6 +639,13 @@ export async function deletePaymentAction(
 
     revalidatePath("/dashboard/payments");
     revalidatePath("/dashboard");
+
+    // Journal d'audit : suppression de paiement
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.PAYMENT_DELETED,
+      entity: AUDIT_ENTITIES.PAYMENT,
+      entityId: paymentId,
+    });
 
     return { ok: true };
   } catch (error) {

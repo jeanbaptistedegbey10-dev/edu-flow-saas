@@ -1,6 +1,10 @@
 /** PDF generator for student reports */
 import { Document, Page, Text, View, StyleSheet, Font } from "@react-pdf/renderer";
 
+// Libellés de statut : SOURCE UNIQUE partagée avec les badges et filtres
+// (src/lib/student-status.ts) — aucune carte dupliquée ici.
+import { getStudentStatusLabel } from "@/lib/student-status";
+
 Font.register({
   family: "Helvetica",
   fonts: [{ src: "Helvetica" }, { src: "Helvetica-Bold", fontWeight: "bold" }],
@@ -17,21 +21,6 @@ const styles = StyleSheet.create({
   value: { fontWeight: "bold" },
   footer: { position: "absolute", bottom: 30, left: 40, right: 40, borderTopWidth: 1, paddingTop: 8, fontSize: 8, color: "#9ca3af" },
 });
-const STATUS_LABELS: Record<string, string> = {
-  PROSPECT: "Prospect",
-  ENROLLED: "Inscrit",
-  IN_PROGRESS: "En cours",
-  COMPLETED: "Terminé",
-  SUSPENDED: "Suspendu",
-  DROPPED_OUT: "Abandonné",
-};
-
-const ATTENDANCE_LABELS: Record<string, string> = {
-  PRESENT: "Présent",
-  LATE: "En retard",
-  ABSENT: "Absent",
-  EXCUSED: "Excusé",
-};
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("fr-FR").format(amount) + " FCFA";
@@ -70,7 +59,7 @@ export function generateStudentReportPDF(data: {
           <Text style={styles.sectionTitle}>Informations personnelles</Text>
           <View style={styles.row}><Text style={styles.label}>Nom</Text><Text style={styles.value}>{studentName}</Text></View>
           <View style={styles.row}><Text style={styles.label}>Code</Text><Text style={styles.value}>{data.student.studentCode}</Text></View>
-          <View style={styles.row}><Text style={styles.label}>Statut</Text><Text style={styles.value}>{STATUS_LABELS[data.student.status] ?? data.student.status}</Text></View>
+          <View style={styles.row}><Text style={styles.label}>Statut</Text><Text style={styles.value}>{getStudentStatusLabel(data.student.status)}</Text></View>
           <View style={styles.row}><Text style={styles.label}>Téléphone</Text><Text style={styles.value}>{data.student.phone}</Text></View>
           {data.student.email ? <View style={styles.row}><Text style={styles.label}>Email</Text><Text style={styles.value}>{data.student.email}</Text></View> : null}
         </View>

@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import {
   CalendarClockIcon,
+  ClipboardListIcon,
   ClockIcon,
   GraduationCapIcon,
   LayersIcon,
@@ -105,6 +106,15 @@ function ClassCard({
           <CalendarClockIcon className="size-3.5 shrink-0" />
           Créée le {dateFormatter.format(klass.createdAt)}
         </div>
+
+        {/* Prise de présence : redirige vers la page d'émargement avec la classe */}
+        <Link
+          href={`/dashboard/attendance?classId=${klass.id}`}
+          className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          <ClipboardListIcon className="size-4" />
+          Marquer les présences
+        </Link>
       </div>
     </div>
   );

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import type { OrganizationProfileDTO } from "@/actions/payments";
+import type { CashSessionDTO } from "@/lib/actions/cash-register";
 import {
   createSaleAction,
   getSaleReceiptData,
@@ -72,6 +73,7 @@ import {
   type CreatedProduct,
 } from "@/components/pos/create-product-dialog";
 import { getPaymentMethodLabel } from "@/lib/payment-status";
+import { CashSessionBanner } from "@/components/pos/cash-session-status";
 
 const amountFormatter = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 0,
@@ -533,12 +535,14 @@ export function PosView({
   clients,
   stats,
   organization,
+  cashSession,
 }: {
   products: ProductServiceDTO[];
   categories: ProductCategoryDTO[];
   clients: PosClientOption[];
   stats: PosStatsDTO;
   organization: OrganizationProfileDTO;
+  cashSession: CashSessionDTO | null;
 }) {
   const router = useRouter();
 
@@ -728,6 +732,9 @@ export function PosView({
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
+      {/* Indicateur de session de caisse */}
+      <CashSessionBanner session={cashSession} onSessionChange={() => router.refresh()} />
+
       {/* En-tête */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>

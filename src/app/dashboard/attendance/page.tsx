@@ -1,5 +1,8 @@
-import { getMyClasses } from "@/actions/attendance";
-import { ClassAttendanceView } from "@/components/attendance/class-attendance-view";
+﻿import {
+  getAttendanceOverviewStats,
+  getMyClasses,
+} from "@/actions/attendance";
+import { AttendanceOverview } from "@/components/attendance/attendance-overview";
 
 export const metadata = {
   title: "Présences & Cahier de texte | EduFlow",
@@ -8,7 +11,11 @@ export const metadata = {
 };
 
 export default async function AttendancePage() {
-  const classes = await getMyClasses();
+  const [classes, stats] = await Promise.all([
+    getMyClasses(),
+    getAttendanceOverviewStats(),
+  ]);
 
-  return <ClassAttendanceView classes={classes} />;
+  return <AttendanceOverview classes={classes} stats={stats} />;
 }
+

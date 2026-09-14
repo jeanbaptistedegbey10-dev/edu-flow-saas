@@ -8,8 +8,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { ROLE_PERMISSIONS } from "@/lib/permissions";
 import type {
-  CustomRoleDTO,
-  RoleUserDTO,
   RolesOverview,
   RoleFormState,
   MemberFormState,
@@ -54,7 +52,7 @@ async function requireAdminContext() {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, organizationId: true },
+    select: { id: true, role: true, organizationId: true },
   });
 
   if (!user) {
@@ -75,6 +73,21 @@ function sanitizePermissionKeys(raw: FormDataEntryValue[]): string[] {
     .filter((key) => VALID_PERMISSION_KEYS.has(key));
 
   return Array.from(new Set(keys));
+}
+
+/**
+ * Extrait `customRoleId` du formulaire en tolérant la sentinelle Radix
+ * « none » (un `<SelectItem>` à valeur vide est proscrit) et les chaînes
+ * vides : les deux signifient « aucun rôle personnalisé ».
+ */
+function parseOptionalCustomRoleId(formData: FormData): string | null {
+  const raw = String(formData.get("customRoleId") ?? "").trim();
+  return raw === "" || raw === "none" ? null : raw;
+}
+
+/** Rôle de base administrateur : toutes les permissions sont déjà accordées. */
+function isAdminBaseRole(role: string): boolean {
+  return role === "ADMIN" || role === "SUPER_ADMIN";
 }
 
 // --------------------------------------
@@ -195,10 +208,12 @@ export async function getRolesOverview(): Promise<RolesOverview> {
         ...role,
         userCount: _count.users,
       })),
-      // Les administrateurs disposent déjà de toutes les permissions : seuls
-      // les comptes STAFF / TEACHER sont éligibles à un rôle personnalisé.
+      // TOUS les membres de l'organisation sont retournés (y compris les
+      // comptes ADMIN / SUPER_ADMIN) : le tableau « Attribution aux
+      // utilisateurs » doit refléter l'intégralité de l'équipe. Les
+      // administrateurs ne sont pas éligibles à un rôle personnalisé —
+      // l'interface leur affiche une mention fixe (« Tous les accès »).
       users: users
-        .filter((user) => user.role === "STAFF" || user.role === "TEACHER")
         .map(({ customRole, ...user }) => ({
           ...user,
           customRoleId: customRole?.id ?? null,
@@ -443,7 +458,7 @@ export async function createMemberAction(
     // généré et affiché UNE SEULE fois à l'administrateur (aucun e-mail SMTP).
     const password = String(formData.get("password") ?? "");
     const role = String(formData.get("role") ?? "STAFF");
-    const customRoleId = String(formData.get("customRoleId") ?? "").trim();
+    const customRoleId = parseOptionalCustomRoleId(formData);
 
     const fieldErrors: MemberFormState["fieldErrors"] = {};
 
@@ -488,8 +503,11 @@ export async function createMemberAction(
     const generatedPassword = password ? null : generateMemberPassword();
     const finalPassword = generatedPassword ?? password;
 
+    // Les administrateurs disposent déjà de toutes les permissions : aucun
+    // rôle personnalisé ne peut leur être associé (customRoleId forcé à null,
+    // même s'il est omis ou envoyé avec la sentinelle « none »).
     let assignedCustomRoleId: string | null = null;
-    if (customRoleId) {
+    if (customRoleId && role !== "ADMIN") {
       const customRole = await prisma.customRole.findFirst({
         where: { id: customRoleId, organizationId: admin.organizationId },
         select: { id: true },
@@ -559,8 +577,8 @@ export async function updateMemberAction(
     const lastName = String(formData.get("lastName") ?? "").trim();
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
-    const role = String(formData.get("role") ?? "STAFF");
-    const customRoleId = String(formData.get("customRoleId") ?? "").trim();
+    const submittedRole = String(formData.get("role") ?? "").trim();
+    const customRoleId = parseOptionalCustomRoleId(formData);
     const isActive = formData.get("isActive") === "on";
 
     const fieldErrors: MemberFormState["fieldErrors"] = {};
@@ -571,9 +589,6 @@ export async function updateMemberAction(
       fieldErrors.email = "L'email est obligatoire.";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       fieldErrors.email = "L'email n'est pas valide.";
-    }
-    if (!["STAFF", "TEACHER", "ADMIN"].includes(role)) {
-      fieldErrors.role = "Rôle de base invalide.";
     }
 
     if (Object.keys(fieldErrors).length > 0) {
@@ -590,6 +605,42 @@ export async function updateMemberAction(
       };
     }
 
+    /**
+     * Rôle final du membre :
+     * - le compte Super Administrateur conserve immuablement son rôle, quelle
+     *   que soit la valeur soumise (champ désactivé à l'écran) ;
+     * - les autres membres ne reçoivent que STAFF / TEACHER / ADMIN — toute
+     *   soumission « SUPER_ADMIN » est rejetée (aucune élévation possible).
+     */
+    const finalRole =
+      existingUser.role === "SUPER_ADMIN"
+        ? "SUPER_ADMIN"
+        : ["STAFF", "TEACHER", "ADMIN"].includes(submittedRole)
+          ? submittedRole
+          : null;
+
+    if (!finalRole) {
+      return {
+        status: "error",
+        fieldErrors: { role: "Rôle de base invalide." },
+        message: "Vérifiez les champs.",
+      };
+    }
+
+    // Sécurité : un administrateur ne peut pas retirer son propre rôle de base
+    // (verrouillage immédiat de l'accès à l'établissement).
+    if (
+      existingUser.id === admin.id &&
+      isAdminBaseRole(existingUser.role) &&
+      !isAdminBaseRole(finalRole)
+    ) {
+      return {
+        status: "error",
+        message:
+          "Vous ne pouvez pas retirer votre propre rôle d'administrateur.",
+      };
+    }
+
     const emailConflict = await prisma.user.findFirst({
       where: { email, id: { not: userId } },
     });
@@ -601,8 +652,12 @@ export async function updateMemberAction(
       };
     }
 
+    // Les administrateurs (ADMIN / SUPER_ADMIN) disposent déjà de toutes les
+    // permissions : customRoleId est forcé à null (valeur nulle / omise /
+    // sentinelle « none » acceptée). La promotion vers ADMIN réinitialise
+    // donc proprement tout rôle personnalisé précédent.
     let assignedCustomRoleId: string | null = null;
-    if (customRoleId) {
+    if (customRoleId && !isAdminBaseRole(finalRole)) {
       const customRole = await prisma.customRole.findFirst({
         where: { id: customRoleId, organizationId: admin.organizationId },
         select: { id: true },
@@ -620,9 +675,10 @@ export async function updateMemberAction(
       firstName,
       lastName,
       email,
-      role,
+      role: finalRole,
       customRoleId: assignedCustomRoleId,
-      isActive,
+      // Sécurité : un administrateur ne peut pas désactiver son propre compte.
+      isActive: existingUser.id === admin.id ? true : isActive,
     };
 
     if (password && password.length >= 6) {
@@ -677,6 +733,13 @@ export async function deleteMemberAction(
 
     if (!target) {
       return { ok: false, message: "Membre introuvable." };
+    }
+    // Sécurité : un administrateur ne peut pas révoquer son propre accès.
+    if (userId === admin.id) {
+      return {
+        ok: false,
+        message: "Vous ne pouvez pas révoquer votre propre accès.",
+      };
     }
     if (target.role === "SUPER_ADMIN") {
       return {

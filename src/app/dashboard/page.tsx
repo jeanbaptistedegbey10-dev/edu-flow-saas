@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getSuperAdminRoute } from "@/lib/super-admin-route";
 import { getOrganizationDataPresence } from "@/lib/demo-data";
+import { getClassOptions } from "@/actions/classes";
+import { getDefaultRegistrationFee } from "@/actions/organization";
 import {
   getAttendanceTrendAction,
   getDashboardStatsAction,
@@ -60,23 +62,49 @@ export default async function DashboardPage() {
   // transmises aux composants clients (graphiques Recharts inclus).
   // La trésorerie (cash flow) vit désormais dans la page dédiée
   // /dashboard/tresorerie — elle n'est plus chargée ici.
-  const [stats, financialOverview, distribution, attendanceTrend] =
-    await Promise.all([
-      getDashboardStatsAction(),
-      getFinancialOverviewAction(),
-      getStudentDistributionAction(),
-      getAttendanceTrendAction(),
-    ]);
+  // Les options de classes + frais d'inscription alimentent les raccourcis
+  // « Nouvel apprenant » / « Ajouter un prospect » (modale de création).
+  const [
+    stats,
+    financialOverview,
+    distribution,
+    attendanceTrend,
+    classes,
+    registrationFee,
+  ] = await Promise.all([
+    getDashboardStatsAction(),
+    getFinancialOverviewAction(),
+    getStudentDistributionAction(),
+    getAttendanceTrendAction(),
+    getClassOptions(),
+    getDefaultRegistrationFee(),
+  ]);
 
   // Le rôle SUPER_ADMIN a été redirigé ci-dessus : la gestion des données de
   // démonstration reste réservée aux administrateurs du centre.
   const isAdmin = role === "ADMIN";
 
+  // --------------------------------------
+  // Masquage de la carte « Données de démonstration » en production
+  // --------------------------------------
+  // La carte (injection / réinitialisation) n'est visible que lorsque les
+  // DEUX conditions sont réunies :
+  //   - NODE_ENV !== "production" (jamais sur un déploiement client payant) ;
+  //   - NEXT_PUBLIC_ENABLE_DEMO_DATA === "true" (sandbox explicitement
+  //     activée via la variable d'environnement).
+  // Toute autre configuration masque le composant. Les Server Actions
+  // correspondantes rejouent la même règle côté serveur
+  // (src/lib/actions/demo-data.ts) — défense en profondeur.
+  const showDemoData =
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_ENABLE_DEMO_DATA === "true";
+
   // Deletion guard de la carte démo : l'organisation contient-elle des données
   // (démonstration ou réelles) ? Sans donnée, « Supprimer la démo » est inactif.
-  const dataPresence = await getOrganizationDataPresence(
-    session?.user?.organizationId
-  );
+  // La requête est sautée lorsque la carte est masquée (production).
+  const dataPresence = showDemoData
+    ? await getOrganizationDataPresence(session?.user?.organizationId)
+    : { hasData: false, demoAccounts: 0 };
 
   return (
     <div className="grid gap-6">
@@ -85,10 +113,15 @@ export default async function DashboardPage() {
         financialOverview={financialOverview}
         distribution={distribution}
         attendanceTrend={attendanceTrend}
+        classes={classes}
+        registrationFee={registrationFee}
       />
 
-      {/* Gestion des données de démonstration (injection / réinitialisation) */}
-      <DemoDataCard isAdmin={isAdmin} hasData={dataPresence.hasData} />
+      {/* Gestion des données de démonstration (injection / réinitialisation) —
+          rendue UNIQUEMENT en développement / sandbox (cf. showDemoData). */}
+      {showDemoData ? (
+        <DemoDataCard isAdmin={isAdmin} hasData={dataPresence.hasData} />
+      ) : null}
     </div>
   );
 }

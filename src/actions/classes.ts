@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { ClassStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
@@ -36,6 +37,8 @@ export type ClassDTO = {
   teacherId: string | null;
   teacherName: string | null;
   studentCount: number;
+  /** Statut pédagogique : ACTIVE (en cours), COMPLETED (clôturée), ARCHIVED. */
+  status: ClassStatus;
   /** Créneaux hebdomadaires détaillés de la classe. */
   schedules: ClassScheduleDTO[];
   createdAt: Date;
@@ -246,6 +249,7 @@ export async function getClasses(): Promise<ClassDTO[]> {
         tuitionFee: true,
         courseId: true,
         createdAt: true,
+        status: true,
         course: {
           select: { title: true, code: true },
         },
@@ -280,6 +284,7 @@ export async function getClasses(): Promise<ClassDTO[]> {
         ? `${klass.teacher.firstName} ${klass.teacher.lastName}`
         : null,
       studentCount: klass._count.enrollments,
+      status: klass.status,
       schedules: klass.schedules.map((s) => ({
         id: s.id,
         dayOfWeek: s.dayOfWeek,
@@ -611,6 +616,8 @@ export type ClassDetailDTO = {
   courseCode: string;
   teacherId: string | null;
   teacherName: string | null;
+  /** Statut pédagogique : ACTIVE (en cours), COMPLETED (clôturée), ARCHIVED. */
+  status: ClassStatus;
   students: ClassStudentDTO[];
   /** Créneaux hebdomadaires détaillés de la classe. */
   schedules: ClassScheduleDTO[];
@@ -648,6 +655,7 @@ export async function getClassDetail(
       schedule: true,
       tuitionFee: true,
       courseId: true,
+      status: true,
       course: {
         select: { title: true, code: true },
       },
@@ -697,6 +705,7 @@ export async function getClassDetail(
     teacherName: klass.teacher
       ? `${klass.teacher.firstName} ${klass.teacher.lastName}`
       : null,
+    status: klass.status,
     students: klass.enrollments.map((enrollment) => ({
       studentId: enrollment.student.id,
       studentCode: enrollment.student.studentCode,

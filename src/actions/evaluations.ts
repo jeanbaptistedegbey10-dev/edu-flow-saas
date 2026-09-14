@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
+import { computeModuleStatus } from "@/lib/module-status";
 import {
   getCurrentOrganizationId,
   getCurrentSessionUser,
@@ -682,7 +683,8 @@ export async function saveGradesAction(
       select: {
         id: true,
         classId: true,
-        modules: { select: { id: true, maxScore: true } },
+        passMark: true,
+        modules: { select: { id: true, maxScore: true, passingScore: true } },
       },
     });
 
@@ -695,6 +697,18 @@ export async function saveGradesAction(
 
     const moduleMaxScores = new Map(
       evaluation.modules.map((module) => [module.id, module.maxScore])
+    );
+
+    /**
+     * Seuil de validation (passMark) effectif de chaque module : le barème
+     * propre au module (`passingScore`), sinon le seuil par défaut de la
+     * session. Fait l'objet d'un snapshot sur chaque note enregistrée.
+     */
+    const modulePassMarks = new Map(
+      evaluation.modules.map((module) => [
+        module.id,
+        module.passingScore ?? evaluation.passMark,
+      ])
     );
 
     // Extraction des cellules soumises depuis le FormData.
@@ -784,6 +798,10 @@ export async function saveGradesAction(
           });
         }
 
+        // Snapshot du seuil + statut de validation calculé au moment de la
+        // saisie (VALIDATED / FAILED — RETAKE est acté à la clôture).
+        const passMark = modulePassMarks.get(entry.moduleId) ?? 60;
+
         return prisma.grade.upsert({
           where: {
             evaluationModuleId_studentId: {
@@ -795,9 +813,13 @@ export async function saveGradesAction(
             evaluationModuleId: entry.moduleId,
             studentId: entry.studentId,
             score: entry.score,
+            passMark,
+            status: computeModuleStatus(entry.score, passMark),
           },
           update: {
             score: entry.score,
+            passMark,
+            status: computeModuleStatus(entry.score, passMark),
           },
         });
       })

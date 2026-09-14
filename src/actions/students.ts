@@ -1,6 +1,6 @@
 "use server";
 
-import { Prisma, type DiscountType, type StudentStatus } from "@prisma/client";
+import { Prisma, type DiscountType, type LeadSource, type StudentStatus } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
@@ -9,6 +9,8 @@ import { sendWelcomeEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
+import { logAuditEvent } from "@/lib/actions/audit";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -53,6 +55,10 @@ export type StudentDTO = {
   parentPhone1: string | null;
   /** Numéro de téléphone secondaire du parent / tuteur (optionnel). */
   parentPhone2: string | null;
+  /** Étape du pipeline CRM (null = non suivi). */
+  leadStage: string | null;
+  /** Source d'acquisition du prospect. */
+  leadSource: string | null;
   createdAt: Date;
 };
 
@@ -92,12 +98,11 @@ export type StudentMutationResult =
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Statuts acceptés à la validation serveur. Les contrôles de saisie ne
- * proposent plus que TROIS options produit (Prospect, Inscrit, Abandonné —
+ * Statuts acceptés à la validation serveur. Les contrôles de saisie proposent
+ * les QUATRE options produit (Prospect, Inscrit, Diplômé / Terminé, Abandonné —
  * voir `CANONICAL_STUDENT_STATUS_OPTIONS`), mais la validation reste tolérante
  * sur l'ensemble de l'enum afin de ne jamais bloquer l'édition de fiches
- * historiques créées avant la simplification (IN_PROGRESS, COMPLETED,
- * SUSPENDED).
+ * historiques créées avant l'harmonisation (IN_PROGRESS, SUSPENDED).
  */
 const STUDENT_STATUSES: readonly StudentStatus[] = [
   "PROSPECT",
@@ -764,6 +769,8 @@ export async function getStudents(): Promise<StudentDTO[]> {
         parentRelation: true,
         parentPhone1: true,
         parentPhone2: true,
+        leadStage: true,
+        leadSource: true,
         currentClass: { select: { name: true } },
         createdAt: true,
       },
@@ -790,6 +797,8 @@ export async function getStudents(): Promise<StudentDTO[]> {
       parentRelation: student.parentRelation,
       parentPhone1: student.parentPhone1,
       parentPhone2: student.parentPhone2,
+      leadStage: student.leadStage,
+      leadSource: student.leadSource,
       currentClassName: student.currentClass?.name ?? null,
       createdAt: student.createdAt,
     }));
@@ -1037,7 +1046,8 @@ export async function createStudentAction(
   //                         (comptabilité / trésorerie) ;
   //   - PAYE_HORS_SYSTEME → frais réputés réglés sur la fiche de l'étudiant,
   //                         AUCUNE écriture dans le journal de caisse.
-  // Pour un statut Prospect / Abandonné : aucun frais facturé.
+  // Pour un statut Prospect / Abandonné / Diplômé : aucun frais facturé
+  // (les frais d'inscription ne sont levés qu'au statut « Inscrit »).
   const rawFeeChoice = String(formData.get("registrationFeePayment") ?? "")
     .trim()
     .toUpperCase();
@@ -1089,8 +1099,8 @@ export async function createStudentAction(
 
   // Frais d'inscription réglés (fiche étudiant) pour tout étudiant « Inscrit »
   // dont les frais ont été déclarés payés (système OU hors système). Un
-  // Prospect / Abandonné n'a pas réglé les frais (ils pourront être facturés
-  // lors de son passage au statut « Inscrit »).
+  // Prospect / Abandonné / Diplômé n'a pas réglé les frais (ils pourront être
+  // facturés lors de son passage au statut « Inscrit »).
   const hasPaidRegistrationFee =
     registrationFee <= 0 || registrationFeeMode !== "NONE";
 
@@ -1219,6 +1229,20 @@ export async function createStudentAction(
       revalidatePath("/dashboard/students");
       revalidatePath("/dashboard/payments");
       revalidatePath("/dashboard/classes");
+
+      // Journal d'audit : trace de création d'étudiant
+      await logAuditEvent({
+        action: AUDIT_ACTIONS.STUDENT_CREATED,
+        entity: AUDIT_ENTITIES.STUDENT,
+        entityId: createdStudent.id,
+        details: {
+          studentCode: createdStudent.studentCode,
+          firstName: parsed.data.firstName,
+          lastName: parsed.data.lastName,
+          email: parsed.data.email ?? null,
+          status: parsed.data.status,
+        },
+      });
 
       // E-mail de bienvenue en arrière-plan (après la réponse) si l'étudiant
       // a une adresse e-mail valide. L'échec d'envoi ne bloque jamais la création.
@@ -1758,6 +1782,13 @@ export async function deleteStudentAction(
     revalidatePath("/dashboard/payments");
     revalidatePath("/dashboard/travels");
 
+    // Journal d'audit : trace de suppression d'étudiant
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.STUDENT_DELETED,
+      entity: AUDIT_ENTITIES.STUDENT,
+      entityId: studentId,
+    });
+
     return { ok: true };
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -1770,4 +1801,182 @@ export async function deleteStudentAction(
         "Une erreur est survenue lors de la suppression de l'étudiant.",
     };
   }
+}
+
+// --------------------------------------
+// Import CSV d'étudiants / prospects
+// --------------------------------------
+
+/** Mapping des libellés français de statut vers l'enum Prisma. */
+const STATUS_LABEL_MAP: Record<string, StudentStatus> = {
+  prospect: "PROSPECT",
+  inscrit: "ENROLLED",
+  abandoned: "DROPPED_OUT",
+  abandonné: "DROPPED_OUT",
+  "in progress": "IN_PROGRESS",
+  "en cours": "IN_PROGRESS",
+  completed: "COMPLETED",
+  diplômé: "COMPLETED",
+  suspended: "SUSPENDED",
+};
+
+/** Normalise un libellé de statut vers l'enum Prisma. */
+function normalizeStatus(label: string): StudentStatus {
+  const key = label.trim().toLowerCase();
+  return STATUS_LABEL_MAP[key] ?? "PROSPECT";
+}
+
+/** Normalise une source libre (CSV) vers l'enum Prisma LeadSource. */
+function normalizeLeadSource(source: string | null): LeadSource | null {
+  if (!source) return null;
+  const key = source.trim().toLowerCase();
+  if (key.includes("facebook") || key.includes("instagram") || key.includes("tiktok")) return "FACEBOOK_INSTAGRAM";
+  if (key.includes("recommandation") || key.includes("parrain") || key.includes("bouche")) return "RECOMMENDATION";
+  if (key.includes("site") || key.includes("web") || key.includes("internet")) return "WEBSITE";
+  if (key.includes("passage") || key.includes("visite") || key.includes("walk")) return "WALK_IN";
+  return "OTHER";
+}
+
+/**
+ * Importe des étudiants/prospects depuis un contenu CSV.
+ * Gère les doublons d'email/téléphone en les ignorant.
+ */
+export async function importStudentsFromCsvAction(
+  _prevState: ImportState,
+  formData: FormData
+): Promise<ImportState> {
+  try {
+    await assertCanMutate();
+
+    const csvContent = formData.get("csvContent");
+    // Le contenu réel est lu via le fichier uploadé, mais comme on utilise
+    // un formulaire classique, on passe par une approche différente :
+    // le composant client lit le fichier et l'envoie via le champ caché.
+    // Cependant, les FileReader API ne sont pas disponibles côté serveur.
+    // On utilise donc une approche alternative : le fichier est envoyé
+    // via un champ file standard et lu ici.
+
+    // Pour cette implémentation, on utilise une approche simplifiée :
+    // le contenu CSV est envoyé comme texte dans un champ hidden.
+    // Le composant client lit le fichier et le transmet via le formulaire.
+
+    if (!csvContent || typeof csvContent !== "string") {
+      return { status: "error", message: "Aucun contenu CSV fourni." };
+    }
+
+    return await processCsvImport(csvContent);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[importStudentsFromCsvAction] Échec :", error);
+    return {
+      status: "error",
+      message: "Une erreur est survenue lors de l'import.",
+    };
+  }
+}
+
+/** Type retourné par l'action d'import CSV. */
+export type ImportState = {
+  status: "idle" | "pending" | "success" | "error";
+  message?: string;
+  imported?: number;
+  skipped?: number;
+};
+
+/** Traite le contenu CSV et importe les étudiants. */
+async function processCsvImport(csvContent: string): Promise<ImportState> {
+  const lines = csvContent
+    .replace(/^﻿/, "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "");
+
+  if (lines.length < 2) {
+    return { status: "error", message: "Le fichier CSV est vide ou sans données." };
+  }
+
+  // Ignore la première ligne (en-têtes)
+  const dataLines = lines.slice(1);
+  let imported = 0;
+  let skipped = 0;
+  const importDetails: Array<{ name: string; status: string }> = [];
+
+  for (const line of dataLines) {
+    const delimiter = line.includes(";") ? ";" : ",";
+    const cells = line.split(delimiter).map((cell) => cell.trim().replace(/^"|"$/g, ""));
+
+    const firstName = cells[0]?.trim();
+    const lastName = cells[1]?.trim();
+    const email = cells[2]?.trim() || null;
+    const phone = cells[3]?.trim();
+    const statusLabel = cells[4]?.trim() || "Prospect";
+    const source = cells[5]?.trim() || null;
+
+    // Validation minimale : prénom et nom requis
+    if (!firstName || !lastName) {
+      skipped++;
+      continue;
+    }
+
+    // Vérifie les doublons par email ou téléphone
+    const existingStudent = await prisma.student.findFirst({
+      where: {
+        organizationId: await getCurrentOrganizationId(),
+        OR: [
+          ...(email ? [{ email }] : []),
+          ...(phone ? [{ phone }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (existingStudent) {
+      skipped++;
+      continue;
+    }
+
+    // Génère le code étudiant
+    const studentCode = await generateStudentCode();
+
+    // Crée l'étudiant
+    const status = normalizeStatus(statusLabel);
+    const organizationId = await getCurrentOrganizationId();
+
+    const student = await prisma.student.create({
+      data: {
+        organizationId,
+        studentCode,
+        firstName,
+        lastName,
+        email,
+        phone: phone || studentCode, // Fallback si téléphone absent
+        status,
+        ...(normalizeLeadSource(source) ? { leadSource: normalizeLeadSource(source) as LeadSource } : {}),
+      },
+    });
+
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.STUDENT_CREATED,
+      entity: AUDIT_ENTITIES.STUDENT,
+      entityId: student.id,
+      details: {
+        source: "csv_import",
+        name: `${firstName} ${lastName}`,
+        status,
+      },
+    });
+
+    imported++;
+    importDetails.push({ name: `${firstName} ${lastName}`, status });
+  }
+
+  // Invalide le cache de la liste des étudiants
+  revalidatePath("/dashboard/students");
+
+  return {
+    status: "success",
+    imported,
+    skipped,
+    message: `${imported} étudiant(s) importé(s), ${skipped} ignoré(s).`,
+  };
 }

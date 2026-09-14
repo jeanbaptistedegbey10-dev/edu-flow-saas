@@ -13,11 +13,30 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 
 const INITIAL_STATE: MemberFormState = { status: "idle" };
-const BASE_ROLE_OPTIONS = [
+
+/**
+ * Rôles de base attribuables via le formulaire. « SUPER_ADMIN » est un rôle
+ * système : il est affiché pour le compte existant mais jamais attribuable.
+ */
+const BASE_ROLE_OPTIONS: {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}[] = [
   { value: "STAFF", label: "Personnel / Secrétaire" },
   { value: "TEACHER", label: "Enseignant" },
   { value: "ADMIN", label: "Administrateur" },
+  {
+    value: "SUPER_ADMIN",
+    label: "Super admin (système — non attribuable)",
+    disabled: true,
+  },
 ];
+
+/** Rôle de base administrateur : toutes les permissions sont déjà accordées. */
+function isAdminBaseRole(role: string): boolean {
+  return role === "ADMIN" || role === "SUPER_ADMIN";
+}
 
 interface MemberFormDialogProps {
   open: boolean;
@@ -30,6 +49,22 @@ export function MemberFormDialog({ open, onOpenChange, member, roles }: MemberFo
   const isEditing = member !== null;
   const [state, formAction, pending] = useActionState(isEditing ? updateMemberAction : createMemberAction, INITIAL_STATE);
   const fieldErrors = state.fieldErrors ?? {};
+
+  // Le compte Super Administrateur conserve son rôle système (non modifiable).
+  const isSuperAdmin = member?.role === "SUPER_ADMIN";
+
+  // Rôle de base contrôlé : permet de désactiver le rôle personnalisé pour un
+  // administrateur (tous les accès déjà accordés).
+  const [baseRole, setBaseRole] = React.useState(member?.role ?? "STAFF");
+  const isAdminRole = isAdminBaseRole(baseRole);
+
+  // Rôle personnalisé contrôlé — forcé à la sentinelle « none » (valeur vide
+  // interdite dans un <SelectItem> Radix) pour un administrateur.
+  // Réinitialisation : le parent remonte ce composant via sa `key` à chaque
+  // ouverture, les initialiseurs ci-dessus repartent donc de zéro.
+  const [customRoleId, setCustomRoleId] = React.useState(
+    member?.customRoleId ?? "none"
+  );
 
   useEffect(() => {
     if (state.status === "success") {
@@ -96,23 +131,51 @@ export function MemberFormDialog({ open, onOpenChange, member, roles }: MemberFo
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="member-role">Rôle de base *</Label>
-            <Select name="role" defaultValue={member?.role ?? "STAFF"} required disabled={pending}>
+            <Select
+              name="role"
+              value={baseRole}
+              onValueChange={setBaseRole}
+              required
+              disabled={pending || isSuperAdmin}
+            >
               <SelectTrigger id="member-role"><SelectValue placeholder="Choisir un rôle" /></SelectTrigger>
               <SelectContent>
-                {BASE_ROLE_OPTIONS.map((o) => (<SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>))}
+                {BASE_ROLE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} disabled={o.disabled}>
+                    {o.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            {isSuperAdmin ? (
+              <p className="text-xs text-muted-foreground">
+                Rôle système : le Super Administrateur conserve tous les accès.
+              </p>
+            ) : null}
             {fieldErrors.role && <p className="text-xs text-destructive">{fieldErrors.role}</p>}
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="member-customRole">Rôle personnalisé (optionnel)</Label>
-            <Select name="customRoleId" defaultValue={member?.customRoleId ?? ""} disabled={pending}>
+            {/* « none » = sentinelle Radix (valeur vide interdite) ; désactivé
+                pour un administrateur (tous les accès déjà accordés). */}
+            <Select
+              name="customRoleId"
+              value={isAdminRole ? "none" : customRoleId}
+              onValueChange={setCustomRoleId}
+              disabled={pending || isAdminRole}
+            >
               <SelectTrigger id="member-customRole"><SelectValue placeholder="Aucun" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Aucun</SelectItem>
+                <SelectItem value="none">Aucun</SelectItem>
                 {roles.map((r) => (<SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>))}
               </SelectContent>
             </Select>
+            {isAdminRole ? (
+              <p className="text-xs text-muted-foreground">
+                Non applicable : un administrateur dispose déjà de tous les
+                accès.
+              </p>
+            ) : null}
           </div>
           {isEditing && (
             <div className="flex items-center gap-2">

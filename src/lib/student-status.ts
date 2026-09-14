@@ -1,25 +1,29 @@
 import type { StudentStatus } from "@prisma/client";
 
 /**
- * Libellés français des statuts étudiants.
+ * Libellés français des statuts étudiants — SOURCE UNIQUE de vérité.
  *
- * ⚠️ Le produit n'expose plus que TROIS statuts sélectionnables
- * (`CANONICAL_STUDENT_STATUS_OPTIONS`) : Prospect, Inscrit, Abandonné.
- * Les libellés des anciens statuts (IN_PROGRESS, COMPLETED, SUSPENDED) sont
- * conservés uniquement pour l'affichage des fiches historiques créées avant
- * la simplification — ils ne doivent plus être proposés dans les formulaires.
+ * Nomenclature canonique du produit (4 statuts sélectionnables) :
+ *   - PROSPECT    → « Prospect »
+ *   - ENROLLED    → « Inscrit »
+ *   - DROPPED_OUT → « Abandonné »
+ *   - COMPLETED   → « Diplômé / Terminé »
+ *
+ * Les libellés des anciens statuts (IN_PROGRESS, SUSPENDED) sont conservés
+ * uniquement pour l'affichage des fiches historiques créées avant
+ * l'harmonisation — ils ne doivent plus être proposés dans les formulaires.
  */
 export const STUDENT_STATUS_LABELS: Record<StudentStatus, string> = {
   PROSPECT: "Prospect",
   ENROLLED: "Inscrit",
   IN_PROGRESS: "En cours",
-  COMPLETED: "Terminé",
+  COMPLETED: "Diplômé / Terminé",
   SUSPENDED: "Suspendu",
   DROPPED_OUT: "Abandonné",
 };
 
 /**
- * Les TROIS seuls statuts sélectionnables dans les contrôles de formulaire
+ * Les QUATRE seuls statuts sélectionnables dans les contrôles de formulaire
  * (création / édition d'étudiant) et les filtres de la vue liste.
  */
 export const CANONICAL_STUDENT_STATUS_OPTIONS: ReadonlyArray<{
@@ -28,6 +32,7 @@ export const CANONICAL_STUDENT_STATUS_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "PROSPECT", label: "Prospect" },
   { value: "ENROLLED", label: "Inscrit" },
+  { value: "COMPLETED", label: "Diplômé / Terminé" },
   { value: "DROPPED_OUT", label: "Abandonné" },
 ];
 
@@ -59,15 +64,20 @@ export const STUDENT_STATUS_FILTERS = [
   { value: "ALL", label: "Tous" },
   { value: "ENROLLED", label: "Inscrits" },
   { value: "PROSPECT", label: "Prospects" },
+  { value: "COMPLETED", label: "Diplômés" },
   { value: "DROPPED_OUT", label: "Abandonnés" },
 ] as const;
 
 export type StudentStatusFilter = (typeof STUDENT_STATUS_FILTERS)[number]["value"];
 
-export function getStudentStatusLabel(status: StudentStatus): string {
+export function getStudentStatusLabel(
+  status: StudentStatus | string
+): string {
   // Tolérant aux valeurs hors enum (donnée historique / incohérente) :
   // retourne toujours une chaîne affichable au lieu de `undefined`.
-  return STUDENT_STATUS_LABELS[status] ?? "Inconnu";
+  // Le paramètre élargi (`string`) permet à tous les consommateurs — y compris
+  // les PDF dont le DTO est typé `string` — d'utiliser CETTE source unique.
+  return STUDENT_STATUS_LABELS[status as StudentStatus] ?? "Inconnu";
 }
 
 export function getStudentStatusBadgeClass(status: StudentStatus): string {

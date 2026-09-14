@@ -114,6 +114,91 @@ enum RegistrationFeePolicy {
   EVERY_NEW_ENROLLMENT
 }
 
+/// Statut pédagogique d'une classe / cohorte.
+/// Une classe clôturée (fin d'année / de session) devient `COMPLETED` — son
+/// historique (inscriptions, notes, décisions de passage) reste consultable.
+enum ClassStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+/// Décision de fin de session pour une inscription d'étudiant dans une classe :
+/// - `ACTIVE` : inscription en cours (classe non clôturée) ;
+/// - `PASSED` : passage en classe supérieure validé automatiquement ;
+/// - `PROMOTED_MANUALLY` : passage accordé manuellement par l'administrateur ;
+/// - `FAILED` : redoublement / non-passage de l'étudiant ;
+/// - `DROPPED` : abandon de l'étudiant au moment de la clôture.
+enum ClassEnrollmentStatus {
+  ACTIVE
+  PASSED
+  FAILED
+  PROMOTED_MANUALLY
+  DROPPED
+}
+
+/// Statut de validation d'un module pour un étudiant :
+/// - `VALIDATED` : note >= seuil de validation (passMark) ;
+/// - `FAILED` : note < seuil de validation ;
+/// - `RETAKE` : module échoué à reprendre (décision de redoublement actée).
+enum ModuleStatus {
+  VALIDATED
+  FAILED
+  RETAKE
+  NOT_GRADED
+}
+
+/// Statut d'une session d'évaluation interne :
+/// - `DRAFT` : session créée, notes non encore saisies ;
+/// - `PUBLISHED` : notes saisies et visibles par l'équipe pédagogique ;
+/// - `COMPLETED` : session clôturée, décisions de passage actées.
+enum EvaluationStatus {
+  DRAFT
+  PUBLISHED
+  COMPLETED
+}
+
+/// Statut d'une session de caisse (ouverture / clôture quotidienne).
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+/// Statut d'une échéance d'un échéancier de paiement.
+enum ScheduleItemStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+/// Étape du pipeline CRM d'un prospect dans le processus d'admission.
+enum LeadStage {
+  NEW_LEAD
+  CONTACTED
+  ASSESSMENT_TEST
+  ENROLLED
+  LOST
+}
+
+/// Source d'acquisition d'un prospect.
+enum LeadSource {
+  FACEBOOK_INSTAGRAM
+  RECOMMENDATION
+  WALK_IN
+  WEBSITE
+  OTHER
+}
+
+/// Motif de perte d'un prospect (applicable lorsque `LeadStage = LOST`).
+enum LostReason {
+  PRICE
+  SCHEDULE_CONFLICT
+  LOCATION
+  CHOOSEN_COMPETITOR
+  NO_RESPONSE
+}
+
 // --------------------------------------
 // Documents & Pièces jointes
 // --------------------------------------
@@ -241,6 +326,12 @@ model Organization {
   customRoles      CustomRole[]
   housings         Housing[]
   invoices         Invoice[]
+  cashRegisterSessions CashRegisterSession[]
+  paymentSchedules PaymentSchedule[]
+  certificates     Certificate[]
+  leadNotes        LeadNote[]
+  auditLogs        AuditLog[]
+
 }
 
 model User {
@@ -279,6 +370,12 @@ model User {
   courseLogs      CourseLog[]       @relation("TeacherCourseLogs")
   sentReferrals   Referral[]        @relation("ReferrerUser")
   receivedReferrals Referral[]      @relation("ReferredUser")
+  openedCashSessions CashRegisterSession[] @relation("CashSessionOpener")
+  closedCashSessions CashRegisterSession[] @relation("CashSessionCloser")
+  createdCertificates Certificate[]
+  createdLeadNotes    LeadNote[]
+  auditLogs           AuditLog[]
+
 }
 
 // --------------------------------------
@@ -327,6 +424,15 @@ model Student {
   parentPhone2           String?
   /// Token d'accès public non modifiable pour le rapport parent.
   publicReportToken      String?       @unique
+  // --- CRM Pipeline Admissions ---
+  /// Étape actuelle du pipeline CRM (null = non suivi en pipeline).
+  leadStage              LeadStage?
+  /// Source d'acquisition du prospect.
+  leadSource             LeadSource?
+  /// Motif de perte (requis si `leadStage = LOST`).
+  lostReason             LostReason?
+  /// Date de conversion en inscrit (passage à ENROLLED).
+  convertedAt            DateTime?
   createdAt              DateTime      @default(now())
   updatedAt              DateTime      @updatedAt
 
@@ -342,6 +448,9 @@ model Student {
   grades           Grade[]
   documents        Document[]
   housings         Housing[]
+  paymentSchedules PaymentSchedule[]
+  certificates     Certificate[]
+  leadNotes        LeadNote[]
 }
 
 model Course {
@@ -361,6 +470,7 @@ model Course {
   enrollments  Enrollment[]
   classes      Class[]
   courseLogs   CourseLog[]
+  certificates Certificate[]
 }
 
 // --------------------------------------
@@ -370,7 +480,7 @@ model Course {
 /// Classe = cohorte concrète d'un cours avec son créneau horaire
 /// (ex : « A1 - Matin », créneau « 08h-11h »).
 model Class {
-  id             String   @id @default(cuid())
+  id             String      @id @default(cuid())
   organizationId String
   courseId       String
   teacherId      String?
@@ -382,8 +492,14 @@ model Class {
   /// Frais de scolarité configurés pour la classe (FCFA). Lorsqu'il est
   /// absent, le prix du cours porteur est utilisé comme montant par défaut.
   tuitionFee     Float?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  /// Seuil de validation (passMark) de la classe — note minimale sur 100 requise
+  /// pour valider un module. Surcharge le barème par défaut des évaluations.
+  passMark       Float        @default(60)
+  /// Statut pédagogique de la classe : ACTIVE (en cours), COMPLETED (session
+  /// clôturée) ou ARCHIVED (classe inutilisée).
+  status         ClassStatus @default(ACTIVE)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   course       Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
@@ -394,6 +510,8 @@ model Class {
   sessions     ClassSession[]
   evaluations  Evaluation[]
   schedules    ClassSchedule[]
+
+  @@index([organizationId, status])
 }
 
 /// Créneau hebdomadaire d'une classe / cohorte. Plusieurs créneaux peuvent
@@ -424,13 +542,20 @@ model ClassSchedule {
 /// Historique des affectations d'un étudiant aux classes / cohortes.
 /// Une nouvelle inscription (ex : passage A1 → A2) crée une nouvelle ligne
 /// sans supprimer l'historique ; `Student.currentClassId` pointe vers la
-/// classe active.
+/// classe active. Le statut et l'appréciation finale sont renseignés lors de
+/// la clôture de la classe (décision de passage / redoublement / abandon).
 model ClassEnrollment {
-  id             String   @id @default(cuid())
-  organizationId String
-  studentId      String
-  classId        String
-  enrolledAt     DateTime @default(now())
+  id                String               @id @default(cuid())
+  organizationId    String
+  studentId         String
+  classId           String
+  /// Statut de fin de session : ACTIVE tant que la classe n'est pas clôturée,
+  /// puis PASSED / PROMOTED_MANUALLY / FAILED / DROPPED selon la décision.
+  status            ClassEnrollmentStatus @default(ACTIVE)
+  /// Appréciation / note de décision laissée par l'administrateur lors de la
+  /// clôture (ex : « Excellente année, passage accordé. »).
+  finalDecisionNote String?
+  enrolledAt        DateTime              @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -438,6 +563,8 @@ model ClassEnrollment {
 
   @@unique([studentId, classId])
   @@index([classId])
+  @@index([studentId, status])
+  @@index([organizationId])
 }
 
 model Enrollment {
@@ -548,7 +675,13 @@ model Evaluation {
   /// Intitulé de l'examen (ex : « Examen Continu N°1 »).
   title          String
   date           DateTime @default(now())
-  createdAt      DateTime @default(now())
+  /// Seuil de validation par défaut de la session (ex : 60 / 100). Chaque
+  /// module peut le surcharger via son propre `passingScore`.
+  passMark       Float           @default(60)
+  /// Statut de la session d'évaluation : DRAFT (en préparation), PUBLISHED
+  /// (notes saisies) ou COMPLETED (clôturée).
+  status         EvaluationStatus @default(DRAFT)
+  createdAt      DateTime         @default(now())
 
   organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   class        Class              @relation(fields: [classId], references: [id], onDelete: Cascade)
@@ -581,16 +714,24 @@ model EvaluationModule {
 /// L'unicité [moduleId, studentId] permet un upsert idempotent lors de la
 /// saisie / re-saisie de la grille de notes.
 model Grade {
-  id                 String @id @default(cuid())
+  id                 String       @id @default(cuid())
   evaluationModuleId String
   studentId          String
   score              Float
+  /// Seuil de validation (passMark) appliqué au moment de la saisie — snapshot
+  /// historique : un bulletin d'une classe passée reste exact même si le
+  /// professeur modifie le seuil plus tard.
+  passMark           Float        @default(60)
+  /// Statut de validation calculé : VALIDATED (score >= passMark), FAILED
+  /// (score < passMark) ou RETAKE (module à reprendre, acté à la clôture).
+  status             ModuleStatus?
 
   evaluationModule EvaluationModule @relation(fields: [evaluationModuleId], references: [id], onDelete: Cascade)
   student          Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([evaluationModuleId, studentId])
   @@index([studentId])
+  @@index([studentId, status])
 }
 
 // --------------------------------------
@@ -689,6 +830,88 @@ model Payment {
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   student         Student?         @relation(fields: [studentId], references: [id], onDelete: SetNull)
   travelProcedure TravelProcedure? @relation(fields: [travelProcedureId], references: [id], onDelete: SetNull)
+}
+
+// --------------------------------------
+// Caisse — Sessions de clôture quotidienne
+// --------------------------------------
+
+/// Session de caisse (ouverture / clôture quotidienne) permettant de tracer
+/// les encaissements et décaissements d'une journée et de calculer l'écart
+/// entre le solde théorique et le montant réel compté lors de la clôture.
+model CashRegisterSession {
+  id             String           @id @default(cuid())
+  organizationId String
+  openedById     String
+  closedById     String?
+  status         CashSessionStatus @default(OPEN)
+  initialAmount  Float            @default(0)
+  /// Somme totale des encaissements (paiements + ventes) sur la session.
+  totalIncoming  Float            @default(0)
+  /// Somme totale des décaissements (dépenses) sur la session.
+  totalOutgoing  Float            @default(0)
+  /// Solde théorique = Fond initial + Encaissements − Décaissements.
+  theoreticalBalance Float        @default(0)
+  /// Montant réel compté par le caissier lors de la clôture.
+  countedAmount  Float?
+  /// Écart de caisse = Montant compté − Solde théorique (positif = trop-perçu, négatif = manquant).
+  gapAmount      Float?
+  /// Notes / commentaires de clôture.
+  notes          String?
+  openedAt       DateTime         @default(now())
+  closedAt       DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  openedBy     User         @relation("CashSessionOpener", fields: [openedById], references: [id])
+  closedBy     User?        @relation("CashSessionCloser", fields: [closedById], references: [id])
+
+  @@index([organizationId, status])
+  @@index([organizationId, openedAt])
+}
+
+// --------------------------------------
+// Échéanciers de paiement (tranches)
+// --------------------------------------
+
+/// Échéancier de paiement rattaché à un étudiant : découpe une dette totale
+/// en N tranches avec dates d'échéance précises.
+model PaymentSchedule {
+  id                String    @id @default(cuid())
+  organizationId    String
+  studentId         String
+  totalAmount       Float
+  installmentsCount Int
+  startDate         DateTime
+  status            PaymentStatus @default(PENDING)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student      Student                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  items        PaymentScheduleItem[]
+
+  @@index([organizationId, studentId])
+  @@index([status])
+}
+
+/// Tranche individuelle d'un échéancier de paiement.
+model PaymentScheduleItem {
+  id                String            @id @default(cuid())
+  scheduleId        String
+  installmentNumber Int
+  amount            Float
+  dueDate           DateTime
+  status            ScheduleItemStatus @default(PENDING)
+  paidAmount        Float             @default(0)
+  paidAt            DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  schedule PaymentSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, installmentNumber])
+  @@index([scheduleId, status])
+  @@index([dueDate])
 }
 
 model Expense {
@@ -993,4 +1216,92 @@ model Referral {
 
   @@index([referrerId])
   @@index([status])
+}
+
+// --------------------------------------
+// Certificats & Attestations sécurisés (QR Code)
+// --------------------------------------
+
+/// Certificat / attestation pédagogique délivré à un apprenant.
+/// Sécurisé par un code de vérification unique (utilisé dans le QR Code).
+model Certificate {
+  id               String   @id @default(cuid())
+  organizationId   String
+  studentId        String
+  courseId         String?
+  /// Niveau validé (ex: "Allemand B2 - CECRL", "Anglais C1").
+  level            String
+  /// Note obtenue le cas échéant (pourcentage 0–100).
+  score            Float?
+  issueDate        DateTime @default(now())
+  /// Code court unique de vérification (8 caractères hex) — imprimé dans le QR Code.
+  verificationCode String   @unique
+  /// Indique si le certificat a été révoqué (annulé / invalidé).
+  revoked          Boolean  @default(false)
+  /// Motif de révocation (optionnel).
+  revokedReason    String?
+  createdById      String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  course       Course?      @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([studentId])
+  @@index([verificationCode])
+}
+
+// --------------------------------------
+// Notes de suivi CRM (Lead Notes)
+// --------------------------------------
+
+/// Note de suivi / relance attachée à un prospect dans le pipeline CRM.
+model LeadNote {
+  id             String   @id @default(cuid())
+  organizationId String
+  studentId      String
+  content        String
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  createdBy     User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentId])
+  @@index([createdAt])
+}
+
+// --------------------------------------
+// Journal d'Audit (Audit Log)
+// --------------------------------------
+
+/// Journal des opérations sensibles réalisées par les utilisateurs.
+/// Trace qui a fait quoi, quand et sur quelle entité.
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  /// Type d'action réalisée (ex: STUDENT_CREATED, PAYMENT_RECEIVED, CASH_CLOSED, CERTIFICATE_REVOKED, DEMO_RESET).
+  action         String
+  /// Entité concernée (ex: Student, Payment, CashRegisterSession, Certificate).
+  entity         String
+  /// Identifiant de l'entité concernée (optionnel).
+  entityId       String?
+  /// Détails de l'opération (anciennes/nouvelles valeurs, métadonnées) au format JSON.
+  details        Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
 }

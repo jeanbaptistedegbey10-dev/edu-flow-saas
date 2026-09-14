@@ -13,6 +13,7 @@ import {
 
 import type { ClassOptionDTO } from "@/actions/classes";
 import { createStudentAction, type StudentFormState } from "@/actions/students";
+import type { StudentStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -58,11 +59,24 @@ function FieldError({ message }: { message?: string }) {
 export function AddStudentDialog({
   classes,
   registrationFee,
+  defaultStatus = "PROSPECT",
+  trigger,
 }: {
   /** Classes / cohortes disponibles pour l'affectation. */
   classes: ClassOptionDTO[];
   /** Frais d'inscription par défaut de l'organisation (FCFA). */
   registrationFee: number;
+  /**
+   * Statut présélectionné à l'ouverture de la modale (défaut : « Prospect »).
+   * Utilisé par les raccourcis du tableau de bord (« Nouvel apprenant » →
+   * ENROLLED, « Ajouter un prospect » → PROSPECT).
+   */
+  defaultStatus?: StudentStatus;
+  /**
+   * Bouton déclencheur personnalisé (raccourcis du tableau de bord). Absent :
+   * le bouton par défaut « Nouvel étudiant » est rendu (page Étudiants).
+   */
+  trigger?: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
 
@@ -88,7 +102,10 @@ export function AddStudentDialog({
   const [isSelfFinanced, setIsSelfFinanced] = React.useState(false);
   // Statut sélectionné (contrôlé) : conditionne l'affichage du champ obligatoire
   // « Frais d'inscription » (visible uniquement pour le statut « Inscrit »).
-  const [statusValue, setStatusValue] = React.useState("PROSPECT");
+  // Initialisé — puis réinitialisé après succès — au statut par défaut du
+  // contexte d'appel (`defaultStatus`).
+  const [statusValue, setStatusValue] =
+    React.useState<StudentStatus>(defaultStatus);
   // Statut de paiement des frais d'inscription : « Payé » (recette créée dans
   // le système) ou « Payé hors système » (aucune écriture comptable).
   const [registrationFeePayment, setRegistrationFeePayment] =
@@ -124,7 +141,7 @@ export function AddStudentDialog({
         setDiscount("");
         setLegacyExcluded(true);
         setLegacyPaidAmountInput("");
-        setStatusValue("PROSPECT");
+        setStatusValue(defaultStatus);
         setRegistrationFeePayment("");
       }
 
@@ -177,10 +194,12 @@ export function AddStudentDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
-          <PlusIcon data-icon="inline-start" />
-          Nouvel étudiant
-        </Button>
+        {trigger ?? (
+          <Button>
+            <PlusIcon data-icon="inline-start" />
+            Nouvel étudiant
+          </Button>
+        )}
       </DialogTrigger>
 
       <DialogContent className="sm:max-w-lg">
@@ -266,7 +285,7 @@ export function AddStudentDialog({
               <Select
                 name="status"
                 value={statusValue}
-                onValueChange={setStatusValue}
+                onValueChange={(value) => setStatusValue(value as StudentStatus)}
               >
                 <SelectTrigger id="status" className="w-full">
                   <SelectValue placeholder="Sélectionner un statut" />
