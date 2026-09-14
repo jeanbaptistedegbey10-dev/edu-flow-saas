@@ -138,6 +138,9 @@ function PaymentProviderCard({
 
   const isProductionKey = !isKkiapay && fedapayPubKey.startsWith("pk_live_");
   const showModeWarning = !isKkiapay && isProductionKey && fedapayMode === "test";
+  const kkiapayPublicKeyDisplay = settings.kkiapay.publicKey ?? "";
+  const kkiapayPrivateKeyDisplay = settings.kkiapay.privateKey ?? "";
+  const kkiapaySecretDisplay = settings.kkiapay.secret ?? "";
 
   // Mode effectif affiché : pour FedaPay on suit l'état local (auto-bascule),
   // pour KKiaPay on affiche la valeur enregistrée côté serveur.
