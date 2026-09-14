@@ -6,6 +6,7 @@ import {
   getProductServices,
 } from "@/actions/pos";
 import { getCashSessionStatus } from "@/lib/actions/cash-register";
+import { getPaymentGatewaysStatus } from "@/lib/payment";
 import { PosView } from "@/components/pos/pos-view";
 
 export const metadata = {
@@ -15,7 +16,7 @@ export const metadata = {
 };
 
 export default async function PosPage() {
-  const [products, categories, clients, stats, organization, cashSession] =
+  const [products, categories, clients, stats, organization, cashSession, gatewayStatus] =
     await Promise.all([
       getProductServices(),
       getProductCategories(),
@@ -23,6 +24,7 @@ export default async function PosPage() {
       getPosStats(),
       getCurrentOrganizationProfile(),
       getCashSessionStatus(),
+      getPaymentGatewaysStatus(),
     ]);
 
   return (
@@ -33,6 +35,7 @@ export default async function PosPage() {
       stats={stats}
       organization={organization}
       cashSession={cashSession}
+      gatewayStatus={gatewayStatus}
     />
   );
 }

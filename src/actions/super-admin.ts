@@ -980,18 +980,22 @@ export type PaymentSettingsDTO = {
     privateKey: string;
     secret: string;
     mode: PaymentMode;
+    isActive: boolean;
     publicKeyFromDb: boolean;
     privateKeyFromDb: boolean;
     secretFromDb: boolean;
     modeFromDb: boolean;
+    isActiveFromDb: boolean;
   };
   fedapay: {
     publicKey: string;
     secretKey: string;
     mode: PaymentMode;
+    isActive: boolean;
     publicKeyFromDb: boolean;
     secretKeyFromDb: boolean;
     modeFromDb: boolean;
+    isActiveFromDb: boolean;
   };
 };
 
@@ -1008,6 +1012,25 @@ async function getSettingValue(key: string): Promise<string | null> {
 }
 
 /**
+ * Nettoie les fausses valeurs saisies par erreur dans les champs KKiaPay.
+ * Ces valeurs ("admin@excellence-formation.com" en clé publique,
+ * "password123" en clé privée/secret) ne sont pas des clés valides et
+ * doivent être ignorées / réinitialisées pour éviter tout échec silencieux
+ * de l'initiation de paiement.
+ */
+const KKIA_PAY_FALSE_VALUES = [
+  "admin@excellence-formation.com",
+  "password123",
+];
+
+function sanitizeKkiapayValue(value: string | null): string | null {
+  if (value && KKIA_PAY_FALSE_VALUES.includes(value.trim())) {
+    return null;
+  }
+  return value;
+}
+
+/**
  * Récupère les paramètres de paiement pour l'UI Super-Admin.
  *
  * Stratégie de résolution (par clé) :
@@ -1017,6 +1040,9 @@ async function getSettingValue(key: string): Promise<string | null> {
  *
  * Le DTO retourné inclut des drapeaux `xxxFromDb` pour que l'UI puisse
  * indiquer à l'administrateur si une clé provient de la BDD ou de l'env.
+ *
+ * Les fausses valeurs KKiaPay ("admin@excellence-formation.com",
+ * "password123") sont filtrées et non affichées (réinitialisation silencieuse).
  */
 export async function getPaymentSettingsAction(): Promise<PaymentSettingsDTO> {
   const admin = await getSuperAdminContext();
@@ -1030,17 +1056,21 @@ export async function getPaymentSettingsAction(): Promise<PaymentSettingsDTO> {
     kkiapayPrivateKeyDb,
     kkiapaySecretDb,
     kkiapayModeDb,
+    kkiapayIsActiveDb,
     fedapayPublicKeyDb,
     fedapaySecretKeyDb,
     fedapayModeDb,
+    fedapayIsActiveDb,
   ] = await Promise.all([
     getSettingValue(PAYMENT_SETTING_KEYS.KKIA_PAY_PUBLIC_KEY),
-    getSettingValue(PAYMENT_SETTING_KEYS.KKIA_PAY_PRIVATE_KEY),
-    getSettingValue(PAYMENT_SETTING_KEYS.KKIA_PAY_SECRET),
+    sanitizeKkiapayValue(await getSettingValue(PAYMENT_SETTING_KEYS.KKIA_PAY_PRIVATE_KEY)),
+    sanitizeKkiapayValue(await getSettingValue(PAYMENT_SETTING_KEYS.KKIA_PAY_SECRET)),
     getSettingValue(PAYMENT_SETTING_KEYS.KKIA_PAY_MODE),
+    getSettingValue(PAYMENT_SETTING_KEYS.KKIA_PAY_IS_ACTIVE),
     getSettingValue(PAYMENT_SETTING_KEYS.FEDA_PAY_PUBLIC_KEY),
     getSettingValue(PAYMENT_SETTING_KEYS.FEDA_PAY_SECRET_KEY),
     getSettingValue(PAYMENT_SETTING_KEYS.FEDA_PAY_MODE),
+    getSettingValue(PAYMENT_SETTING_KEYS.FEDA_PAY_IS_ACTIVE),
   ]);
 
   // Fallback sur les variables d'environnement (rétrocompatibilité).
@@ -1052,6 +1082,10 @@ export async function getPaymentSettingsAction(): Promise<PaymentSettingsDTO> {
     kkiapaySecretDb ?? process.env.KKIAPAY_SECRET?.trim() ?? process.env.PAYMENT_WEBHOOK_SECRET?.trim() ?? "";
   const kkiapayMode: PaymentMode =
     kkiapayModeDb === "live" || process.env.KKIAPAY_MODE?.trim() === "live" ? "live" : "test";
+  const kkiapayIsActive =
+    kkiapayIsActiveDb === null
+      ? true
+      : kkiapayIsActiveDb === "true";
 
   const fedapayPublicKey =
     fedapayPublicKeyDb ?? process.env.FEDA_PAY_PUBLIC_KEY?.trim() ?? "";
@@ -1059,6 +1093,10 @@ export async function getPaymentSettingsAction(): Promise<PaymentSettingsDTO> {
     fedapaySecretKeyDb ?? process.env.FEDA_PAY_SECRET_KEY?.trim() ?? "";
   const fedapayMode: PaymentMode =
     fedapayModeDb === "live" || process.env.FEDA_PAY_MODE?.trim() === "live" ? "live" : "test";
+  const fedapayIsActive =
+    fedapayIsActiveDb === null
+      ? true
+      : fedapayIsActiveDb === "true";
 
   return {
     kkiapay: {
@@ -1066,18 +1104,22 @@ export async function getPaymentSettingsAction(): Promise<PaymentSettingsDTO> {
       privateKey: kkiapayPrivateKey,
       secret: kkiapaySecret,
       mode: kkiapayMode,
+      isActive: kkiapayIsActive,
       publicKeyFromDb: kkiapayPublicKeyDb !== null,
       privateKeyFromDb: kkiapayPrivateKeyDb !== null,
       secretFromDb: kkiapaySecretDb !== null,
       modeFromDb: kkiapayModeDb !== null,
+      isActiveFromDb: kkiapayIsActiveDb !== null,
     },
     fedapay: {
       publicKey: fedapayPublicKey,
       secretKey: fedapaySecretKey,
       mode: fedapayMode,
+      isActive: fedapayIsActive,
       publicKeyFromDb: fedapayPublicKeyDb !== null,
       secretKeyFromDb: fedapaySecretKeyDb !== null,
       modeFromDb: fedapayModeDb !== null,
+      isActiveFromDb: fedapayIsActiveDb !== null,
     },
   };
 }
@@ -1105,20 +1147,38 @@ export async function updatePaymentSettingsAction(
     };
   }
 
-  const modeParse = (raw: string | null): PaymentMode | null => {
+    const modeParse = (raw: string | null): PaymentMode | null => {
     const v = (raw ?? "").trim().toLowerCase();
     if (v === "test" || v === "live") return v;
     return null;
   };
 
-  const kkiapayPublicKey = String(formData.get("kkiapayPublicKey") ?? "").trim();
-  const kkiapayPrivateKey = String(formData.get("kkiapayPrivateKey") ?? "").trim();
-  const kkiapaySecret = String(formData.get("kkiapaySecret") ?? "").trim();
+  const kkiapayPublicKey = sanitizeKkiapayValue(String(formData.get("kkiapayPublicKey") ?? "").trim());
+  const kkiapayPrivateKey = sanitizeKkiapayValue(String(formData.get("kkiapayPrivateKey") ?? "").trim());
+  const kkiapaySecret = sanitizeKkiapayValue(String(formData.get("kkiapaySecret") ?? "").trim());
   const kkiapayMode = modeParse(String(formData.get("kkiapayMode") ?? ""));
 
   const fedapayPublicKey = String(formData.get("fedapayPublicKey") ?? "").trim();
   const fedapaySecretKey = String(formData.get("fedapaySecretKey") ?? "").trim();
-  const fedapayMode = modeParse(String(formData.get("fedapayMode") ?? ""));
+  let fedapayMode = modeParse(String(formData.get("fedapayMode") ?? ""));
+
+  // Activation / désactivation des agrégateurs (commutateurs toggles).
+  const kkiapayIsActive = String(formData.get("kkiapayIsActive") ?? "").trim() !== "";
+  const fedapayIsActive = String(formData.get("fedapayIsActive") ?? "").trim() !== "";
+
+  // Détection automatique d'une clé de production FedaPay (pk_live_*) :
+  // bascule le mode sur « live » ou force un warning si le mode est « test ».
+  if (fedapayPublicKey.startsWith("pk_live_")) {
+    if (fedapayMode === "test") {
+      return {
+        status: "error",
+        message:
+          "La clé FedaPay saisie est une clé de production (pk_live_…). " +
+          "Veuillez sélectionner le mode « Live (Production) » pour l'utiliser.",
+      };
+    }
+    fedapayMode = "live";
+  }
 
   if (kkiapayMode === null) {
     return { status: "error", message: "Mode KKiaPay invalide." };
@@ -1154,11 +1214,23 @@ export async function updatePaymentSettingsAction(
     }
   };
 
-  upsertKey(PAYMENT_SETTING_KEYS.KKIA_PAY_PUBLIC_KEY, kkiapayPublicKey, "KKiaPay — Clé publique", false);
-  upsertKey(PAYMENT_SETTING_KEYS.KKIA_PAY_PRIVATE_KEY, kkiapayPrivateKey, "KKiaPay — Clé privée", true);
-  upsertKey(PAYMENT_SETTING_KEYS.KKIA_PAY_SECRET, kkiapaySecret, "KKiaPay — Secret (webhook)", true);
+  const upsertBool = (key: string, value: boolean, label: string) => {
+    upserts.push(
+      prisma.systemSettings.upsert({
+        where: { key },
+        create: { key, value: value ? "true" : "false", label, isSecret: false, category: "payment", updatedBy: admin.userId },
+        update: { value: value ? "true" : "false", label, updatedBy: admin.userId },
+      })
+    );
+  };
+
+  upsertKey(PAYMENT_SETTING_KEYS.KKIA_PAY_PUBLIC_KEY, kkiapayPublicKey ?? "", "KKiaPay — Clé publique", false);
+  upsertKey(PAYMENT_SETTING_KEYS.KKIA_PAY_PRIVATE_KEY, kkiapayPrivateKey ?? "", "KKiaPay — Clé privée", true);
+  upsertKey(PAYMENT_SETTING_KEYS.KKIA_PAY_SECRET, kkiapaySecret ?? "", "KKiaPay — Secret (webhook)", true);
+  upsertBool(PAYMENT_SETTING_KEYS.KKIA_PAY_IS_ACTIVE, kkiapayIsActive, "KKiaPay — Actif");
   upsertKey(PAYMENT_SETTING_KEYS.FEDA_PAY_PUBLIC_KEY, fedapayPublicKey, "FedaPay — Clé publique", false);
   upsertKey(PAYMENT_SETTING_KEYS.FEDA_PAY_SECRET_KEY, fedapaySecretKey, "FedaPay — Clé secrète", true);
+  upsertBool(PAYMENT_SETTING_KEYS.FEDA_PAY_IS_ACTIVE, fedapayIsActive, "FedaPay — Actif");
 
   upserts.push(
     prisma.systemSettings.upsert({

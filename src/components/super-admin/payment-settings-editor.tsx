@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import {
+  AlertTriangleIcon,
   EyeIcon,
   EyeOffIcon,
   Loader2Icon,
@@ -25,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 const INITIAL_STATE: UpdatePaymentSettingsFormState = { status: "idle" };
@@ -101,7 +103,7 @@ function SecretInput({
 
 /**
  * Carte de configuration d'un agrégateur de paiement (KKiaPay ou FedaPay) :
- * clés publiques/privées/secret + switch mode Test/Live.
+ * clés publiques/privées/secret + switch mode Test/Live + toggle d'activation.
  */
 function PaymentProviderCard({
   provider,
@@ -118,7 +120,36 @@ function PaymentProviderCard({
 
   const publicKey = isKkiapay ? settings.kkiapay.publicKey : settings.fedapay.publicKey;
   const publicKeyFromDb = isKkiapay ? settings.kkiapay.publicKeyFromDb : settings.fedapay.publicKeyFromDb;
-  const mode = isKkiapay ? settings.kkiapay.mode : settings.fedapay.mode;
+  const modeSetting = isKkiapay ? settings.kkiapay : settings.fedapay;
+  const mode = modeSetting.mode;
+  const isActiveDefault = modeSetting.isActive;
+
+  // État local du toggle d'activation (soumis via input caché).
+  const [isActive, setIsActive] = React.useState(isActiveDefault);
+
+  // Pour FedaPay : détection d'une clé de production (pk_live_*) et bascule
+  // automatique du mode sur « Live (Production) ».
+  const [fedapayPubKey, setFedapayPubKey] = React.useState(
+    isKkiapay ? "" : settings.fedapay.publicKey
+  );
+  const [fedapayMode, setFedapayMode] = React.useState<"test" | "live">(
+    isKkiapay ? "test" : mode
+  );
+
+  const isProductionKey = !isKkiapay && fedapayPubKey.startsWith("pk_live_");
+  const showModeWarning = !isKkiapay && isProductionKey && fedapayMode === "test";
+
+  // Mode effectif affiché : pour FedaPay on suit l'état local (auto-bascule),
+  // pour KKiaPay on affiche la valeur enregistrée côté serveur.
+  const effectiveMode: "test" | "live" = isKkiapay ? mode : fedapayMode;
+
+  // Auto-basculement : une clé de production (pk_live_) force le mode Live.
+  React.useEffect(() => {
+    if (isKkiapay) return;
+    if (isProductionKey && fedapayMode === "test") {
+      setFedapayMode("live");
+    }
+  }, [fedapayPubKey, fedapayMode, isKkiapay, isProductionKey]);
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border bg-background p-5 shadow-sm">
@@ -130,14 +161,32 @@ function PaymentProviderCard({
         <span
           className={cn(
             "rounded-full px-2.5 py-0.5 text-xs font-medium",
-            mode === "live"
+            effectiveMode === "live"
               ? "border border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
               : "border border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
           )}
         >
-          {mode === "live" ? "LIVE" : "TEST"}
+          {effectiveMode === "live" ? "LIVE" : "TEST"}
         </span>
       </div>
+
+      {/* Toggle d'activation du moyen de paiement */}
+      <div className="flex items-center justify-between rounded-lg border border-dashed p-3">
+        <div className="flex items-center gap-2">
+          <Switch
+            id={`${provider}-isActive`}
+            checked={isActive}
+            onCheckedChange={setIsActive}
+          />
+          <Label htmlFor={`${provider}-isActive`} className="cursor-pointer">
+            Activer ce moyen de paiement
+          </Label>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {isActive ? "Activé" : "Désactivé"}
+        </span>
+      </div>
+      <input type="hidden" name={`${provider}IsActive`} value={isActive ? "on" : ""} />
 
       <div className="grid gap-3">
         {/* Clé publique */}
@@ -162,7 +211,23 @@ function PaymentProviderCard({
             defaultValue={publicKey}
             placeholder="pk_xxx..."
             className="font-mono text-xs"
+            onChange={
+              !isKkiapay ? (e) => setFedapayPubKey(e.target.value) : undefined
+            }
           />
+          {!isKkiapay && isProductionKey && (
+            <p className="flex items-center gap-1 text-xs text-emerald-600">
+              <ShieldCheckIcon className="size-3" />
+              Clé de production détectée — le mode est automatiquement réglé sur « Live (Production) ».
+            </p>
+          )}
+          {showModeWarning ? (
+            <p className="flex items-center gap-1 text-xs text-red-600">
+              <AlertTriangleIcon className="size-3" />
+              Attention : vous avez saisi une clé de production (pk_live_...) mais
+              le mode est réglé sur « Test (sandbox) ». Basculez sur « Live ».
+            </p>
+          ) : null}
         </div>
 
         {/* Clé privée / secrète */}
@@ -196,27 +261,53 @@ function PaymentProviderCard({
         {/* Mode Test / Live */}
         <div className="grid gap-1.5">
           <Label htmlFor={`${provider}-mode`}>Mode</Label>
-          <Select defaultValue={mode} name={`${provider}Mode`}>
-            <SelectTrigger id={`${provider}-mode`}>
-              <SelectValue placeholder="Choisir le mode" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="test">
-                <span className="flex items-center gap-2">
-                  <span className="size-2 rounded-full bg-amber-500" />
-                  Test (sandbox)
-                </span>
-              </SelectItem>
-              <SelectItem value="live">
-                <span className="flex items-center gap-2">
-                  <span className="size-2 rounded-full bg-red-500" />
-                  Live (production)
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          {!isKkiapay ? (
+            <Select
+              value={fedapayMode}
+              onValueChange={(v) => setFedapayMode(v as "test" | "live")}
+              name={`${provider}Mode`}
+            >
+              <SelectTrigger id={`${provider}-mode`}>
+                <SelectValue placeholder="Choisir le mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="test">
+                  <span className="flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-amber-500" />
+                    Test (sandbox)
+                  </span>
+                </SelectItem>
+                <SelectItem value="live">
+                  <span className="flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-red-500" />
+                    Live (production)
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          ) : (
+            <Select defaultValue={mode} name={`${provider}Mode`}>
+              <SelectTrigger id={`${provider}-mode`}>
+                <SelectValue placeholder="Choisir le mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="test">
+                  <span className="flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-amber-500" />
+                    Test (sandbox)
+                  </span>
+                </SelectItem>
+                <SelectItem value="live">
+                  <span className="flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-red-500" />
+                    Live (production)
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <p className="text-xs text-muted-foreground">
-            {mode === "live"
+            {effectiveMode === "live"
               ? "⚠️ Transactions réelles — les clés de production sont obligatoires."
               : "Mode bac à sable : utilisez les clés de test fournies par le prestataire."}
           </p>

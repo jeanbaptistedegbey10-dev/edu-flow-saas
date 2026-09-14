@@ -155,6 +155,7 @@ export default async function BillingPage({
   // affichés. Le composant client ne reçoit que des chaînes déjà formatées.
   const gateway = await getPaymentConfigWithDb();
   const gatewayConfigured = Boolean(gateway.publicKey && gateway.secretKey && gateway.webhookSecret);
+  const gatewayIsActive = gateway.provider === "fedapay" ? gateway.activeGateways.fedapay : gateway.activeGateways.kkiapay;
 
   const organizationId = await getCurrentOrganizationId();
   const catalog = await getPricingCatalogForOrganization(organizationId).catch(
@@ -341,7 +342,7 @@ export default async function BillingPage({
           provider={gateway.provider}
           providerLabel={gateway.provider === "fedapay" ? "Fedapay" : "Kkiapay"}
           sandbox={gateway.sandbox}
-          configured={gatewayConfigured}
+          configured={gatewayConfigured && gatewayIsActive}
         />
       </section>
 

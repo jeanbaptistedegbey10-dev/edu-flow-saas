@@ -22,6 +22,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -101,6 +108,48 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
   minute: "2-digit",
 });
 
+/**
+ * Cellule « Détails » : aperçu JSON tronqué + modale « Voir détails ».
+ *
+ * La troncature CSS (`max-w-[12rem] truncate`) empêche la colonne de
+ * s'étirer indéfiniment (les données JSON sont volumineuses) et garantit
+ * que le reste du tableau — dont les boutons d'action à droite — reste
+ * visible sans débordement horizontal de la page.
+ */
+function AuditLogDetailsCell({ details }: { details: unknown }) {
+  if (details === null || details === undefined) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+
+  const compact = JSON.stringify(details);
+  const pretty = JSON.stringify(details, null, 2);
+
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <span
+        className="max-w-[12rem] truncate text-xs text-muted-foreground"
+        title={compact}
+      >
+        {compact}
+      </span>
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button type="button" variant="outline" size="xs">
+            Voir détails
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Détails de l&apos;entrée d&apos;audit</DialogTitle>
+          </DialogHeader>
+          <pre className="max-h-[60vh] overflow-auto rounded-md border bg-muted/30 p-3 text-xs whitespace-pre-wrap break-words">
+            {pretty}
+          </pre>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
 export function AuditLogsView({ organizationId }: { organizationId: string }) {
   const [logs, setLogs] = React.useState<AuditLogWithUser[]>([]);
@@ -245,7 +294,7 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
         </Button>
       </div>
 
-      <div className="rounded-lg border">
+      <div className="overflow-x-auto rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -253,7 +302,7 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
               <TableHead>Utilisateur</TableHead>
               <TableHead>Action</TableHead>
               <TableHead>Entité</TableHead>
-              <TableHead className="text-right">Détails</TableHead>
+              <TableHead className="w-[1%] text-right">Détails</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -292,14 +341,7 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {log.details ? (
-                      <span className="text-xs text-muted-foreground">
-                        {JSON.stringify(log.details).slice(0, 50)}
-                        {JSON.stringify(log.details).length > 50 ? "…" : ""}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
+                    <AuditLogDetailsCell details={log.details} />
                   </TableCell>
                 </TableRow>
               ))

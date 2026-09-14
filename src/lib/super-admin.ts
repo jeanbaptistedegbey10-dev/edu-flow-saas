@@ -73,7 +73,9 @@ export const PAYMENT_SETTING_KEYS = {
   KKIA_PAY_PRIVATE_KEY: "kkiapay.privateKey",
   KKIA_PAY_SECRET: "kkiapay.secret",
   KKIA_PAY_MODE: "kkiapay.mode",
+  KKIA_PAY_IS_ACTIVE: "kkiapay.isActive",
   FEDA_PAY_PUBLIC_KEY: "fedapay.publicKey",
   FEDA_PAY_SECRET_KEY: "fedapay.secretKey",
   FEDA_PAY_MODE: "fedapay.mode",
+  FEDA_PAY_IS_ACTIVE: "fedapay.isActive",
 } as const;

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { verifyLicenseKey } from "@/lib/crypto-license";
 import {
+  getPaymentGatewaysStatus,
   initiateSubscriptionPayment,
   type KkiapayWidgetPayment,
 } from "@/lib/payment";
@@ -197,6 +198,17 @@ export async function initiateSubscriptionPaymentAction(
     return {
       status: "error",
       message: "Aucune organisation associée à votre compte.",
+    };
+  }
+
+  // Vérifie qu'au moins une passerelle de paiement est active côté serveur.
+  const gatewayStatus = await getPaymentGatewaysStatus();
+
+  if (!gatewayStatus.kkiapay.active && !gatewayStatus.fedapay.active) {
+    return {
+      status: "error",
+      message:
+        "Aucun moyen de paiement en ligne n'est activé pour le moment. Contactez l'administrateur.",
     };
   }
 

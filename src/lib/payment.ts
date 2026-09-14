@@ -262,6 +262,13 @@ export { formatXOF } from "@/lib/plan-pricing";
 export type PaymentProvider = "fedapay" | "kkiapay";
 
 /**
+ * Mode d'exécution d'une passerelle :
+ * - `test` : bac à sable (sandbox), aucune transaction réelle ;
+ * - `live` : production, transactions réelles.
+ */
+export type PaymentMode = "test" | "live";
+
+/**
  * Clés de TEST (sandbox) utilisées PAR DÉFAUT dès qu'aucune clé réelle n'est
  * renseignée dans l'environnement (donc tant que PAYMENT_SANDBOX n'est pas
  * « false ») :
@@ -361,9 +368,19 @@ export async function getPaymentConfigWithDb(): Promise<{
   secretKey: string;
   webhookSecret: string;
   sandbox: boolean;
+  activeGateways: { kkiapay: boolean; fedapay: boolean };
 }> {
   const settings = await prisma.systemSettings.findMany({
-    where: { key: { in: ["kkiapay.publicKey", "kkiapay.privateKey", "kkiapay.secret", "kkiapay.mode", "fedapay.publicKey", "fedapay.secretKey", "fedapay.mode"] } },
+    where: {
+      key: {
+        in: [
+          "kkiapay.publicKey", "kkiapay.privateKey", "kkiapay.secret",
+          "kkiapay.mode", "kkiapay.isActive",
+          "fedapay.publicKey", "fedapay.secretKey", "fedapay.mode",
+          "fedapay.isActive",
+        ],
+      },
+    },
     select: { key: true, value: true },
   });
 
@@ -375,12 +392,25 @@ export async function getPaymentConfigWithDb(): Promise<{
   const fedapayDbKey = get("fedapay.publicKey");
   const fedapayDbSecret = get("fedapay.secretKey");
 
+  // Un agrégateur est actif s'il n'y a pas de valeur en base (défaut: activé)
+  // ou si la valeur enregistrée vaut explicitement "true".
+  const kkiapayIsActiveDb = get("kkiapay.isActive");
+  const fedapayIsActiveDb = get("fedapay.isActive");
+  const kkiapayIsActive = kkiapayIsActiveDb === "" ? true : kkiapayIsActiveDb === "true";
+  const fedapayIsActive = fedapayIsActiveDb === "" ? true : fedapayIsActiveDb === "true";
+
   const providerRaw = (process.env.PAYMENT_PROVIDER ?? "kkiapay").toLowerCase();
   let provider: PaymentProvider = providerRaw === "fedapay" ? "fedapay" : "kkiapay";
 
-  if (fedapayDbKey && fedapayDbSecret) {
+  // Résolution du fournisseur en respectant le drapeau `isActive` :
+  // un agrégateur désactivé (IsActive = false) est ignoré, même s'il a des clés.
+  if (fedapayIsActive && fedapayDbKey && fedapayDbSecret) {
     provider = "fedapay";
-  } else if (kkiapayDbKey) {
+  } else if (kkiapayIsActive && kkiapayDbKey) {
+    provider = "kkiapay";
+  } else if (fedapayIsActive && (process.env.FEDA_PAY_PUBLIC_KEY || process.env.FEDA_PAY_SECRET_KEY)) {
+    provider = "fedapay";
+  } else if (kkiapayIsActive && process.env.KKIAPAY_PUBLIC_KEY) {
     provider = "kkiapay";
   }
 
@@ -415,7 +445,69 @@ export async function getPaymentConfigWithDb(): Promise<{
     ? fedapaySecretKey || fallback?.webhookSecret || ""
     : kkiapaySecret || fallback?.webhookSecret || "";
 
-  return { provider, publicKey, secretKey, webhookSecret, sandbox };
+  return {
+    provider,
+    publicKey,
+    secretKey,
+    webhookSecret,
+    sandbox,
+    activeGateways: { kkiapay: kkiapayIsActive, fedapay: fedapayIsActive },
+  };
+}
+
+/** Métadonnées d'availability des passerelles (pour l'UI). */
+const PAYMENT_GATEWAY_QUERY_KEYS: string[] = [
+  "kkiapay.publicKey", "kkiapay.privateKey", "kkiapay.secret",
+  "kkiapay.mode", "kkiapay.isActive",
+  "fedapay.publicKey", "fedapay.secretKey", "fedapay.mode",
+  "fedapay.isActive",
+];
+
+/**
+ * Retourne l'état de chaque agrégateur (actif + configuré + mode) pour
+ * l'affichage dans l'UI. Permet de savoir quelles passerelles proposer
+ * lors d'un checkout client.
+ *
+ * Un agrégateur apparaît comme « configuré » s'il possède des clés réelles
+ * (base ou variables d'environnement). Il est « actif » si le commutateur
+ * `isActive` est activé en base (ou absent → activé par défaut).
+ */
+export async function getPaymentGatewaysStatus(): Promise<{
+  kkiapay: { active: boolean; configured: boolean; mode: PaymentMode };
+  fedapay: { active: boolean; configured: boolean; mode: PaymentMode };
+}> {
+  const settings = await prisma.systemSettings.findMany({
+    where: { key: { in: PAYMENT_GATEWAY_QUERY_KEYS } },
+    select: { key: true, value: true },
+  });
+
+  const get = (k: string) => settings.find((s) => s.key === k)?.value?.trim() || "";
+
+  const kkiapayPublicKey = get("kkiapay.publicKey") || process.env.KKIAPAY_PUBLIC_KEY?.trim() || process.env.PAYMENT_PUBLIC_KEY?.trim() || "";
+  const kkiapayPrivateKey = get("kkiapay.privateKey") || process.env.KKIAPAY_PRIVATE_KEY?.trim() || "";
+  const kkiapaySecret = get("kkiapay.secret") || process.env.KKIAPAY_SECRET?.trim() || process.env.PAYMENT_WEBHOOK_SECRET?.trim() || "";
+  const kkiapayMode: PaymentMode = get("kkiapay.mode") === "live" || process.env.KKIAPAY_MODE?.trim() === "live" ? "live" : "test";
+  const kkiapayIsActiveDb = get("kkiapay.isActive");
+  const kkiapayIsActive = kkiapayIsActiveDb === "" ? true : kkiapayIsActiveDb === "true";
+
+  const fedapayPublicKey = get("fedapay.publicKey") || process.env.FEDA_PAY_PUBLIC_KEY?.trim() || "";
+  const fedapaySecretKey = get("fedapay.secretKey") || process.env.FEDA_PAY_SECRET_KEY?.trim() || "";
+  const fedapayMode: PaymentMode = get("fedapay.mode") === "live" || process.env.FEDA_PAY_MODE?.trim() === "live" ? "live" : "test";
+  const fedapayIsActiveDb = get("fedapay.isActive");
+  const fedapayIsActive = fedapayIsActiveDb === "" ? true : fedapayIsActiveDb === "true";
+
+  return {
+    kkiapay: {
+      active: kkiapayIsActive,
+      configured: Boolean(kkiapayPublicKey && kkiapayPrivateKey && kkiapaySecret),
+      mode: kkiapayMode,
+    },
+    fedapay: {
+      active: fedapayIsActive,
+      configured: Boolean(fedapayPublicKey && fedapaySecretKey),
+      mode: fedapayMode,
+    },
+  };
 }
 
 /** `true` si l'agrégateur est utilisable (initiation + vérification webhook). */
@@ -631,6 +723,16 @@ export async function initiateSubscriptionPayment(
       status: "error",
       message:
         "La passerelle de paiement n'est pas configurée sur le serveur (PAYMENT_PUBLIC_KEY / PAYMENT_SECRET_KEY / PAYMENT_WEBHOOK_SECRET).",
+    };
+  }
+
+  // Vérifie que le fournisseur résolu est bien actif (IsActive = true en base).
+  const isActive = config.provider === "fedapay" ? config.activeGateways.fedapay : config.activeGateways.kkiapay;
+  if (!isActive) {
+    return {
+      status: "error",
+      message:
+        "Cette passerelle de paiement a été désactivée par l'administrateur. Aucun moyen de paiement en ligne n'est disponible pour le moment.",
     };
   }
 

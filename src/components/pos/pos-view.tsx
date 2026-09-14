@@ -101,6 +101,9 @@ const PAYMENT_METHOD_OPTIONS = [
   "CHECK",
 ] as const;
 
+/** Moyen de règlement sélectionnable au comptoir. */
+type PaymentMethod = (typeof PAYMENT_METHOD_OPTIONS)[number];
+
 const CATEGORY_FILTERS = [
   { value: "ALL", label: "Tout" },
   { value: "UNCATEGORIZED", label: "Sans catégorie" },
@@ -536,6 +539,7 @@ export function PosView({
   stats,
   organization,
   cashSession,
+  gatewayStatus,
 }: {
   products: ProductServiceDTO[];
   categories: ProductCategoryDTO[];
@@ -543,6 +547,10 @@ export function PosView({
   stats: PosStatsDTO;
   organization: OrganizationProfileDTO;
   cashSession: CashSessionDTO | null;
+  gatewayStatus: {
+    kkiapay: { active: boolean; configured: boolean; mode: string };
+    fedapay: { active: boolean; configured: boolean; mode: string };
+  };
 }) {
   const router = useRouter();
 
@@ -589,6 +597,19 @@ export function PosView({
     }
     return catalog.filter((product) => product.categoryId === categoryFilter);
   }, [catalog, categoryFilter]);
+
+  /** Moyens de paiement disponibles (hors caisse / virement / chèque) :
+   *  MOBILE_MONEY, CREDIT_CARD sont réservés aux agrégateurs de paiement en ligne.
+   *  Ils sont affichés uniquement si un agrégateur est actif et configuré.
+   */
+  const availablePaymentMethods = React.useMemo<readonly PaymentMethod[]>(() => {
+    const methods: PaymentMethod[] = ["CASH", "BANK_TRANSFER", "CHECK"];
+    const hasActiveGateway = gatewayStatus.kkiapay.active || gatewayStatus.fedapay.active;
+    if (hasActiveGateway) {
+      methods.push("MOBILE_MONEY", "CREDIT_CARD");
+    }
+    return methods;
+  }, [gatewayStatus]);
 
   /** Regroupement des clients pour le Select (étudiants / candidats voyage). */
   const studentClients = React.useMemo(
@@ -1113,7 +1134,7 @@ export function PosView({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PAYMENT_METHOD_OPTIONS.map((option) => (
+                  {availablePaymentMethods.map((option) => (
                     <SelectItem key={option} value={option}>
                       {getPaymentMethodLabel(option)}
                     </SelectItem>
