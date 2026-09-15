@@ -418,7 +418,6 @@ export async function getPaymentConfigWithDb(): Promise<{
   const fedapayModeDb = get("fedapay.mode");
   const envSandbox = (process.env.PAYMENT_SANDBOX ?? "true").toLowerCase() !== "false";
   const dbSandbox = kkiapayModeDb === "live" || fedapayModeDb === "live" ? false : undefined;
-  const sandbox = dbSandbox ?? envSandbox;
 
   const kkiapayPublicKey = kkiapayDbKey || process.env.KKIAPAY_PUBLIC_KEY?.trim() || process.env.PAYMENT_PUBLIC_KEY?.trim() || "";
   const kkiapayPrivateKey = kkiapayDbPrivate || process.env.KKIAPAY_PRIVATE_KEY?.trim() || "";
@@ -426,6 +425,16 @@ export async function getPaymentConfigWithDb(): Promise<{
 
   const fedapayPublicKey = fedapayDbKey || process.env.FEDA_PAY_PUBLIC_KEY?.trim() || "";
   const fedapaySecretKey = fedapayDbSecret || process.env.FEDA_PAY_SECRET_KEY?.trim() || "";
+
+  // Cohérence clé ↔ environnement : une clé FedaPay LIVE (`pk_live_*` /
+  // `sk_live_*`) force le mode Production (sandbox = false) même si le
+  // commutateur « fedapay.mode » est resté sur « test » — même automatisme
+  // que l'UI Super-Admin (détection pk_live_* → bascule sur « live »).
+  const fedapayLiveKeyDetected =
+    provider === "fedapay" &&
+    (fedapayPublicKey.startsWith("pk_live_") ||
+      fedapaySecretKey.startsWith("sk_live_"));
+  const sandbox = fedapayLiveKeyDetected ? false : dbSandbox ?? envSandbox;
 
   const hasRealKeys = Boolean(kkiapayPublicKey || kkiapayPrivateKey || fedapayPublicKey || fedapaySecretKey);
   if (sandbox && !hasRealKeys) {
@@ -590,20 +599,81 @@ export type InitiateSubscriptionResult =
     }
   | { status: "error"; message: string };
 
+// --------------------------------------
+// API FedaPay : hôtes officiels
+// --------------------------------------
+// Source : OpenAPI FedaPay (`servers`, docs.fedapay.com/api-reference) :
+//   - Production : https://api.fedapay.com/v1
+//   - Sandbox    : https://sandbox-api.fedapay.com/v1
+// (ATTENTION : l'ancien hôte « api-sandbox.fedapay.com » N'EXISTE PAS —
+// toute requête vers lui échouait en DNS → « passerelle injoignable ».)
+
+/** Hôte officiel de l'API FedaPay en Production (clés live). */
+const FEDAPAY_LIVE_API_BASE_URL = "https://api.fedapay.com";
+
+/** Hôte officiel de l'API FedaPay en Sandbox (clés de test). */
+const FEDAPAY_SANDBOX_API_BASE_URL = "https://sandbox-api.fedapay.com";
+
+/**
+ * Résout l'hôte de l'API FedaPay à partir des CLÉS réellement utilisées :
+ *
+ * - une clé LIVE (`pk_live_*` pour la clé publique, `sk_live_*` pour la
+ *   clé secrète) est TOUJOURS adressée à la Production
+ *   (`https://api.fedapay.com`) — même si le commutateur « fedapay.mode »
+ *   de la base ou `PAYMENT_SANDBOX` est resté sur « test » (on évite ainsi
+ *   un appel Sandbox avec une clé Live, systématiquement refusé 401) ;
+ * - une clé SANDBOX (`pk_sandbox_*` / `sk_sandbox_*`) part vers l'hôte de
+ *   test officiel (`https://sandbox-api.fedapay.com`) ;
+ * - clés non préfixées reconnaissables → on retombe sur le drapeau
+ *   `sandbox` de la configuration résolue.
+ */
+export function resolveFedapayApiBaseUrl(
+  publicKey: string,
+  secretKey: string,
+  sandbox: boolean
+): string {
+  if (publicKey.startsWith("pk_live_") || secretKey.startsWith("sk_live_")) {
+    return FEDAPAY_LIVE_API_BASE_URL;
+  }
+
+  if (
+    publicKey.startsWith("pk_sandbox_") ||
+    secretKey.startsWith("sk_sandbox_")
+  ) {
+    return FEDAPAY_SANDBOX_API_BASE_URL;
+  }
+
+  return sandbox
+    ? FEDAPAY_SANDBOX_API_BASE_URL
+    : FEDAPAY_LIVE_API_BASE_URL;
+}
+
 /**
  * Crée une transaction Fedapay et renvoie l'URL de la page de paiement.
  * Contrat : POST /v1/transactions (montant XOF, callback + custom_data) puis
  * POST /v1/transactions/{id}/token → URL checkout.fedapay.com.
+ *
+ * `fetchImpl` : injection facultative du client HTTP (tests de fumée) —
+ * en production, le `fetch` global de Node est utilisé.
  */
-async function initiateFedapayCheckout(
+export async function initiateFedapayCheckout(
   input: InitiateSubscriptionInput,
   reference: string,
   config: ReturnType<typeof getPaymentConfig>,
-  pricing: SubscriptionPrice
+  pricing: SubscriptionPrice,
+  fetchImpl: typeof fetch = fetch
 ): Promise<string> {
-  const baseUrl = config.sandbox
-    ? "https://api-sandbox.fedapay.com"
-    : "https://api.fedapay.com";
+  // L'hôte est déduit des clés (pk_live_* → Production) : voir
+  // `resolveFedapayApiBaseUrl` ci-dessus.
+  const baseUrl = resolveFedapayApiBaseUrl(
+    config.publicKey,
+    config.secretKey,
+    config.sandbox
+  );
+
+  console.log(
+    `[payment][fedapay] Initiation de la transaction ${reference} — hôte API : ${baseUrl} (drapeau sandbox de la config : ${config.sandbox ? "true" : "false"})`
+  );
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${config.secretKey}`,
@@ -613,7 +683,7 @@ async function initiateFedapayCheckout(
   };
 
   // Étape 1 : création de la transaction.
-  const createResponse = await fetch(`${baseUrl}/v1/transactions`, {
+  const createResponse = await fetchImpl(`${baseUrl}/v1/transactions`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -633,23 +703,37 @@ async function initiateFedapayCheckout(
   if (!createResponse.ok) {
     const body = await createResponse.text().catch(() => "");
 
+    // Erreur PRÉCISE : statut HTTP + corps renvoyé par FedaPay (clé invalide,
+    // montant refusé, compte non vérifié…). C'est ce message qui remonte
+    // jusqu'à l'UI via le `catch` de `initiateSubscriptionPayment`.
     throw new Error(
       `Fedapay /v1/transactions a répondu ${createResponse.status} : ${body.slice(0, 300)}`
     );
   }
 
+  // Réponse tantôt enveloppée (`v1`), tantôt plate — l'OpenAPI FedaPay
+  // documente POST /transactions → 201 avec l'objet transaction directement
+  // (`{ id, reference, … }`). Les trois formes sont donc acceptées.
   const created = (await createResponse.json()) as {
-    v1?: { transaction?: { id?: number } };
+    id?: number;
     transaction?: { id?: number };
+    v1?: { transaction?: { id?: number } };
   };
-  const transactionId = created.v1?.transaction?.id ?? created.transaction?.id;
+  const transactionId =
+    created.v1?.transaction?.id ?? created.transaction?.id ?? created.id;
 
   if (typeof transactionId !== "number") {
-    throw new Error("Fedapay : identifiant de transaction introuvable.");
+    throw new Error(
+      `Fedapay : identifiant de transaction introuvable dans la réponse de création : ${JSON.stringify(created).slice(0, 300)}`
+    );
   }
 
+  console.log(
+    `[payment][fedapay] Transaction ${reference} créée (id ${transactionId}) — génération du token de paiement…`
+  );
+
   // Étape 2 : génération du token de paiement → URL de checkout.
-  const tokenResponse = await fetch(
+  const tokenResponse = await fetchImpl(
     `${baseUrl}/v1/transactions/${transactionId}/token`,
     { method: "POST", headers }
   );
@@ -662,18 +746,27 @@ async function initiateFedapayCheckout(
     );
   }
 
+  // Contrat FedaPay : `{ token, url }` (cf. docs « Get the payment link for
+  // a transaction ») — on tolère aussi une enveloppe `v1` éventuelle.
   const tokenData = (await tokenResponse.json()) as {
     token?: string;
     url?: string;
+    v1?: { token?: string; url?: string };
   };
+  const token = tokenData.token ?? tokenData.v1?.token;
+  const checkoutUrl = tokenData.url ?? tokenData.v1?.url;
 
-  if (!tokenData.token) {
+  if (!token) {
     throw new Error("Fedapay : token de paiement manquant dans la réponse.");
   }
 
+  // L'URL de guichet retournée par FedaPay (`url`) prime ; à défaut on
+  // reconstruit le guichet officiel checkout.fedapay.com/<token>. Cette URL
+  // est renvoyée à l'action `initiateSubscriptionPaymentAction` qui la
+  // transmet au composant client (redirection `window.location.assign`).
   return (
-    tokenData.url ??
-    `https://checkout.fedapay.com/${tokenData.token}?reference=${encodeURIComponent(reference)}`
+    checkoutUrl ??
+    `https://checkout.fedapay.com/${token}?reference=${encodeURIComponent(reference)}`
   );
 }
 
@@ -788,15 +881,34 @@ export async function initiateSubscriptionPayment(
       },
     };
   } catch (error) {
+    // Journalisation PRÉCISE de la cause : message de l'erreur (statut HTTP +
+    // corps renvoyé par FedaPay lorsque la création de transaction échoue),
+    // cause réseau sous-jacente (`fetch failed` → `getaddrinfo ENOTFOUND …`)
+    // et pile d'appels. La VRAIE raison est ainsi tracée côté serveur ET
+    // remontée à l'interface, au lieu du message générique « passerelle
+    // injoignable ».
+    const detail = error instanceof Error ? error.message : String(error);
+    const cause =
+      error instanceof Error && error.cause instanceof Error
+        ? error.cause.message
+        : undefined;
+
     console.error(
-      "[payment] Échec d'initiation du paiement :",
-      error instanceof Error ? error.message : error
+      `[payment] Échec d'initiation du paiement (référence ${reference}) :`,
+      {
+        message: detail,
+        cause: cause ?? null,
+        stack: error instanceof Error ? error.stack : undefined,
+      }
     );
 
     return {
       status: "error",
-      message:
-        "Impossible de joindre la passerelle de paiement. Réessayez dans quelques instants.",
+      // La cause exacte est affichée à l'utilisateur (les erreurs FedaPay
+      // levées par `initiateFedapayCheckout` incluent déjà le statut HTTP +
+      // le corps de la réponse) ; la cause réseau est ajoutée entre
+      // parenthèses le cas échéant.
+      message: `Le paiement n'a pas pu être démarré : ${detail}${cause ? ` (${cause})` : ""}`,
     };
   }
 }

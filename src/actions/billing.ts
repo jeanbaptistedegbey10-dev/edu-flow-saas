@@ -222,6 +222,14 @@ export async function initiateSubscriptionPaymentAction(
   });
 
   if (result.status === "error") {
+    // Log PRÉCIS côté action : la cause exacte remontée par
+    // `initiateSubscriptionPayment` (statut HTTP + corps de réponse FedaPay,
+    // hôte injoignable, clé refusée…) est tracée avec l'organisation pour
+    // corréler avec les logs passerelle — au lieu d'un échec opaque.
+    console.error(
+      `[payment][action] Initiation du paiement refusée pour l'organisation ${organization.id} : ${result.message}`
+    );
+
     return { status: "error", message: result.message };
   }
 
@@ -232,6 +240,14 @@ export async function initiateSubscriptionPaymentAction(
     // avec les paramètres préparés (clé publique, montant, metadata…).
     return { status: "kkiapay_widget", widget: result.widget };
   }
+
+  // FedaPay : l'URL de guichet (champ `url` de POST /v1/transactions/{id}/token
+  // ou reconstruite depuis le token) est transmise TELLE QUELLE au composant
+  // client `SubscriptionCheckout`, qui redirige vers elle
+  // (`window.location.assign(result.checkoutUrl)`).
+  console.log(
+    `[payment][action] Transaction FedaPay créée pour l'organisation ${organization.id} — redirection vers le guichet : ${result.checkoutUrl}`
+  );
 
   return {
     status: "success",

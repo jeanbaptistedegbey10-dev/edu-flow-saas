@@ -165,7 +165,16 @@ export function SubscriptionCheckout({
         }
 
         if (result.status === "success") {
-          // Fedapay : page de checkout de l'agrégateur.
+          // Fedapay : le serveur a transmis l'URL de guichet (token généré
+          // par POST /v1/transactions/{id}/token ou champ `url` renvoyé par
+          // FedaPay) — redirection du navigateur vers cette URL.
+          if (!result.checkoutUrl) {
+            setError(
+              "La passerelle de paiement n'a pas retourné d'URL de paiement. Réessayez dans quelques instants."
+            );
+            return;
+          }
+
           window.location.assign(result.checkoutUrl);
           return;
         }
