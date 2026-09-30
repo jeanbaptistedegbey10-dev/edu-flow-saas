@@ -125,8 +125,21 @@ function mapSchedule(schedule: {
   };
 }
 
-/** Met à jour le statut des échéances arrivées à terme (OVERDUE). */
-export async function refreshOverdueStatus(organizationId: string): Promise<number> {
+/**
+ * Rafraîchit le statut des échéances échues (OVERDUE) de l'organisation.
+ *
+ * SÉCURITÉ — cette fonction n'est PAS exportée volontairement. Dans un
+ * fichier « use server », tout export devient un endpoint HTTP appelable
+ * depuis le client ; une signature prenant `organizationId` aurait permis
+ * à n'importe quel utilisateur authentifié de recalculer les échéances
+ * d'un autre établissement (écriture cross-tenant). Elle dérive désormais
+ * l'organisation de la session et reste un utilitaire interne au module.
+ *
+ * @returns le nombre d'échéances passées en OVERDUE.
+ */
+async function refreshOverdueStatus(): Promise<number> {
+  const organizationId = await getCurrentOrganizationId();
+
   const now = new Date();
   const result = await prisma.paymentScheduleItem.updateMany({
     where: {
@@ -333,8 +346,8 @@ export async function getOverdueSchedules(): Promise<{
   const organizationId = await getCurrentOrganizationId();
 
   try {
-    // Rafraîchit les statuts en amont
-    await refreshOverdueStatus(organizationId);
+    // Rafraîchit les statuts en amont (organisation dérivée de la session).
+    await refreshOverdueStatus();
 
     // Récupère toutes les échéances en retard
     const overdueItems = await prisma.paymentScheduleItem.findMany({
@@ -418,7 +431,7 @@ export async function getStudentSchedules(
   const organizationId = await getCurrentOrganizationId();
 
   try {
-    await refreshOverdueStatus(organizationId);
+    await refreshOverdueStatus();
 
     const schedules = await prisma.paymentSchedule.findMany({
       where: { organizationId, studentId },

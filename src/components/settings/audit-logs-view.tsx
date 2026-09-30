@@ -137,7 +137,18 @@ function AuditLogDetailsCell({
   );
 }
 
-export function AuditLogsView({ organizationId }: { organizationId: string }) {
+/**
+ * Vue du journal d'audit.
+ *
+ * ⚠️ Le composant ne reçoit PLUS d'`organizationId` : toutes les Server
+ * Actions appelées (`getAuditLogs`, `getDistinctAuditActions`,
+ * `getDistinctAuditEntities`, `getAuditLogUsers`) résolvent désormais
+ * l'organisation DEPUIS LA SESSION côté serveur. Transmettre cet
+ * identifiant au client exposait une surface IDOR : il suffisait de
+ * forger la valeur dans l'appel HTTP pour lire le journal d'un autre
+ * établissement.
+ */
+export function AuditLogsView() {
   const [logs, setLogs] = React.useState<AuditLogWithUser[]>([]);
   const [total, setTotal] = React.useState(0);
   const [page, setPage] = React.useState(1);
@@ -199,7 +210,6 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
     setLoading(true);
     try {
       const result = await getAuditLogs({
-        organizationId,
         ...(actionFilter !== "all" ? { action: actionFilter } : {}),
         ...(entityFilter !== "all" ? { entity: entityFilter } : {}),
         ...(userFilter !== "all" ? { userId: userFilter } : {}),
@@ -216,21 +226,23 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [organizationId, actionFilter, entityFilter, userFilter, startDate, endDate, page]);
+  }, [actionFilter, entityFilter, userFilter, startDate, endDate, page]);
 
   React.useEffect(() => {
     async function loadOptions() {
+      // ISOLATION MULTI-TENANT : ces actions ne prennent plus d'identifiant
+      // d'organisation — elles lisent celui de la session côté serveur.
       const [actionsData, entitiesData, usersData] = await Promise.all([
-        getDistinctAuditActions(organizationId),
-        getDistinctAuditEntities(organizationId),
-        getAuditLogUsers(organizationId),
+        getDistinctAuditActions(),
+        getDistinctAuditEntities(),
+        getAuditLogUsers(),
       ]);
       setActions(actionsData);
       setEntities(entitiesData);
       setUsers(usersData);
     }
     loadOptions();
-  }, [organizationId]);
+  }, []);
 
   /**
    * Chargement initial des logs + rechargement à chaque changement de filtre

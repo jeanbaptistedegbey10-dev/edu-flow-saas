@@ -25,6 +25,25 @@ const GEMINI_ENDPOINT =
 const GEMINI_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_TOKENS = 400;
 
+/**
+ * Règles métier EduFlow injectées dans l'instruction système.
+ *
+ * Ces règles ne sont PAS redécouvertes par le modèle : elles décrivent les
+ * invariants du domaine (cycle de vie des classes, garde-fou de clôture,
+ * sauvegardes automatiques, encaissement libre POS, bulletin A4) qui
+ * conditionnent la validité des réponses. Sans elles, Gemini peut proposer un
+ * menu inexistant, inventer un blocage de caisse ou laisser croire qu'une
+ * suppression est définitive.
+ */
+const BUSINESS_RULES = [
+  "CYCLE DE VIE D'UNE CLASSE : Planifiée → En cours (Démarrer) → Clôturée (Terminer) → Archivée. Le désarchivage réactive la classe ET son effectif : rien n'est jamais supprimé définitivement.",
+  "PRÉREQUIS DE CLÔTURE (3, bloquants) : au moins une séance avec présences saisies, au moins une séance avec cahier de texte rempli, et des évaluations créées et entièrement notées. Si l'un manque : dialogue « Clôture impossible — prérequis manquants » et navigation bloquée.",
+  "SAUVEGARDE & RESTAURATION : une sauvegarde automatique de l'organisation est créée AVANT toute purge, réinitialisation ou restauration. Les snapshots expirent après 14 jours. La restauration exige le mot RESTAURER et crée elle-même une sauvegarde de sécurité de l'état courant.",
+  "CAISSE POS : le fonctionnement est en ENCAISSEMENT LIBRE — aucune ouverture ni fermeture de session n'est nécessaire pour vendre. Toute mention de « caisse fermée » ou « veuillez ouvrir la caisse » est FAUSSE. Chaque vente est tracée dans le journal d'audit avec l'identifiant et le nom de son auteur, et produit une facturette imprimable.",
+  "BULLETIN A4 : la fiche d'un élève dispose d'un bouton « Voir / Imprimer le rapport » produisant un bulletin A4 (logo, en-tête, notes par module, assiduité, appréciation, signatures). L'appréciation est générée automatiquement mais reste personnalisable, et le texte personnalisé est conservé à l'impression.",
+  "RÔLES : ADMIN et SUPER_ADMIN gèrent le cycle de vie, les sauvegardes et les rôles ; STAFF (secrétariat) gère l'inscription et la caisse ; TEACHER ne voit que ses cours, ses classes et ses émargements, sans aucun accès financier.",
+];
+
 /** Ancrage du prompt : la liste officielle des workflows EduFlow. */
 function buildSystemPrompt(): string {
   const topics = HELP_TOPICS.map(
@@ -38,6 +57,9 @@ function buildSystemPrompt(): string {
     "",
     "Sujets documentés (base de connaissances officielle) :",
     topics,
+    "",
+    "Règles métier impératives (EduFlow) :",
+    ...BUSINESS_RULES,
     "",
     "Consignes :",
     "- Réponds toujours en français, de façon concise (120 mots maximum).",

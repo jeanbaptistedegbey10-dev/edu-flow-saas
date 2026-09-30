@@ -355,6 +355,9 @@ model Organization {
   /// Appréciations personnalisées des bulletins (examen / récapitulatif).
   bulletinAppreciations BulletinAppreciation[]
 
+  /// Sauvegardes JSON automatiques créées AVANT toute purge / réinitialisation.
+  backups             OrganizationBackup[]
+
 }
 
 model User {
@@ -399,6 +402,8 @@ model User {
   createdCertificates Certificate[]
   createdLeadNotes    LeadNote[]
   auditLogs           AuditLog[]
+  /// Sauvegardes déclenchées par cet utilisateur (SetNull à sa suppression).
+  createdBackups      OrganizationBackup[] @relation("OrganizationBackupCreator")
 
 }
 
@@ -1428,4 +1433,56 @@ model AuditLog {
   @@index([action])
   @@index([entity])
   @@index([createdAt])
+}
+
+// --------------------------------------
+// Sauvegardes automatiques (Auto-Backup / Restore)
+// --------------------------------------
+
+/// Sauvegarde JSON complète des données métier d'une organisation, créée
+/// AUTOMATIQUEMENT avant toute purge de démonstration ou réinitialisation des
+/// données (cf. `src/lib/organization-backup.ts`).
+///
+/// Principe : la suppression n'est jamais « sans filet ». Avant chaque purge,
+/// l'intégralité des tables métier est sérialisée dans `dataJson` ; la purge
+/// n'est engagée qu'APRÈS l'écriture réussie de ce snapshot. En cas de
+/// suppression accidentelle ou d'injection de démonstration abusive, la
+/// sauvegarde permet de restaurer l'intégralité de l'organisation.
+///
+/// Le snapshot est rattaché à l'organisation (Cascade : il disparaît avec
+/// elle) et porte une date d'expiration (`expiresAt`, 14 jours par défaut)
+/// permettant de purger automatiquement les sauvegardes obsolètes.
+model OrganizationBackup {
+  id             String   @id @default(cuid())
+  organizationId String
+  /// Libellé lisible de la sauvegarde (ex : « Sauvegarde automatique du
+  /// 30/09/2026 à 14:32 »), affiché dans l'historique côté interface.
+  backupName     String
+  /// Motif de la sauvegarde : AUTO_PURGE (avant suppression), AUTO_RESTORE
+  /// (garde-fou avant restauration), MANUAL (à la demande).
+  reason         String   @default("AUTO_PURGE")
+  /// Version du format de snapshot — permet de faire évoluer la structure
+  /// JSON sans casser la restauration des sauvegardes historiques.
+  schemaVersion  Int      @default(1)
+  /// Snapshot sérialisé (JSON) de l'ensemble des données métier.
+  dataJson       String
+  /// Poids du snapshot en octets (affiché dans l'historique, utile pour
+  /// diagnostiquer les volumes).
+  sizeBytes      Int      @default(0)
+  /// Nombre total de lignes sauvegardées (toutes tables confondues).
+  rowCount       Int      @default(0)
+  /// Auteur ayant déclenché la sauvegarde (NULLABLE : le compte peut être
+  /// supprimé entre-temps sans faire perdre l'historique de sauvegarde).
+  createdById    String?
+  createdAt      DateTime @default(now())
+  /// Fin de validité : la sauvegarde est purgée automatiquement au-delà
+  /// (14 jours par défaut, cf. `BACKUP_RETENTION_DAYS`).
+  expiresAt      DateTime
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("OrganizationBackupCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([expiresAt])
+  @@map("organization_backups")
 }

@@ -568,7 +568,12 @@ export function DemoDataCard({
                   Élèves, cours, sessions, paiements, ventes, présences,
                   dossiers voyage… <strong>toutes</strong> les données de
                   l&apos;organisation seront définitivement supprimées (compte
-                  administrateur conservé). Tapez{" "}
+                  administrateur conservé).{" "}
+                  <strong>
+                    Une sauvegarde automatique complète est créée juste avant,
+                  </strong>{" "}
+                  vous pourrez donc revenir en arrière depuis &laquo;&nbsp;Historique
+                  des sauvegardes&nbsp;&raquo;. Tapez{" "}
                   <span className="font-mono font-semibold">
                     {DELETE_CONFIRM_WORD}
                   </span>{" "}

@@ -55,6 +55,8 @@ export const AUDIT_ACTION_LABELS = {
   CERTIFICATE_REVOKED: "Certificat révoqué",
   DEMO_RESET: "Démo réinitialisée",
   DEMO_SEEDED: "Jeu de démonstration créé",
+  BACKUP_CREATED: "Sauvegarde créée",
+  BACKUP_RESTORED: "Sauvegarde restaurée",
   SETTINGS_UPDATED: "Paramètres modifiés",
   CLASS_STARTED: "Classe démarrée",
   CLASS_CLOSED: "Classe clôturée",
@@ -98,6 +100,7 @@ export const AUDIT_ENTITY_LABELS = {
   CustomRole: "Rôle personnalisé",
   Class: "Classe",
   Demo: "Démonstration",
+  OrganizationBackup: "Sauvegarde",
 } satisfies Record<AuditEntity, string>;
 
 /** Libellé français d'une entité auditée (jamais le nom de modèle brut). */
@@ -144,7 +147,10 @@ export function getAuditActionCategory(action: string): AuditActionCategory {
     action.includes("STARTED") ||
     action.includes("ENDED") ||
     action.includes("IMPORTED") ||
-    action.includes("IMPORT")
+    action.includes("IMPORT") ||
+    // Restauration d'une sauvegarde : réécriture de l'état de l'organisation,
+    // ni création ni suppression au sens du journal.
+    action.includes("RESTORED")
   ) {
     return "modification";
   }

@@ -74,7 +74,13 @@ export async function logAuditEvent(input: AuditLogInput): Promise<void> {
 
 /** Filtres pour la consultation du journal d'audit. */
 export type AuditLogFilters = {
-  organizationId: string;
+  /**
+   * OBSOLÈTE — conservé uniquement pour la compatibilité de type avec les
+   * appelants historiques. La valeur transmise est IGNORÉE : c'est
+   * systématiquement `getCurrentSessionUser().organizationId` qui fait foi.
+   * Ne jamais s'appuyer dessus pour autoriser un accès (IDOR cross-tenant).
+   */
+  organizationId?: string;
   userId?: string | null;
   action?: string | null;
   entity?: string | null;
@@ -112,12 +118,24 @@ export type AuditLogWithUser = {
   };
 };
 
-/** Récupère les entrées du journal d'audit avec filtres et pagination. */
+/**
+ * Récupère les entrées du journal d'audit avec filtres et pagination.
+ *
+ * ISOLATION MULTI-TENANT — l'identifiant d'organisation provient
+ * EXCLUSIVEMENT de la session (`getCurrentSessionUser`), jamais du
+ * `filters.organizationId` reçu du client. Sans cette règle, cette
+ * Server Action (endpoint HTTP public dans Next.js) permettrait à n'importe
+ * quel utilisateur authentifié de lire le journal d'un autre établissement
+ * en forgeant l'identifiant — fuite de noms, e-mails et d'historique
+ * financier (IDOR cross-tenant).
+ *
+ * Si l'appelant fournit un `organizationId` différent de celui de sa
+ * session, l'écart est journalisé puis ignoré.
+ */
 export async function getAuditLogs(
   filters: AuditLogFilters
 ): Promise<AuditLogPage> {
   const {
-    organizationId,
     userId,
     action,
     entity,
@@ -126,6 +144,21 @@ export async function getAuditLogs(
     page = 1,
     pageSize = 25,
   } = filters;
+
+  // Source de vérité : la session, pas le client.
+  const sessionUser = await getCurrentSessionUser();
+  const organizationId = sessionUser.organizationId;
+
+  if (
+    filters.organizationId &&
+    filters.organizationId !== organizationId
+  ) {
+    console.warn(
+      `[audit] Tentative de consultation cross-tenant du journal ` +
+        `(demandée : ${filters.organizationId}, session : ${organizationId}) — ` +
+        `requête restreinte à l'organisation de l'utilisateur.`
+    );
+  }
 
   const createdAt: Prisma.DateTimeFilter | undefined =
     startDate || endDate
@@ -173,10 +206,17 @@ export async function getAuditLogs(
   };
 }
 
-/** Récupère les actions distinctes pour une organisation. */
-export async function getDistinctAuditActions(
-  organizationId: string
-): Promise<string[]> {
+/**
+ * Récupère les actions distinctes du journal pour l'organisation courante.
+ *
+ * ISOLATION MULTI-TENANT — aucun paramètre d'organisation : l'identifiant
+ * provient exclusivement de la session. Cette fonction étant exportée d'un
+ * fichier « use server », elle constitue un endpoint HTTP public ; accepter
+ * un `organizationId` aurait permis d'énumérer les actions d'un autre tenant.
+ */
+export async function getDistinctAuditActions(): Promise<string[]> {
+  const { organizationId } = await getCurrentSessionUser();
+
   const results = await prisma.auditLog.findMany({
     where: { organizationId },
     distinct: ["action"],
@@ -186,10 +226,13 @@ export async function getDistinctAuditActions(
   return results.map((r) => r.action);
 }
 
-/** Récupère les entités distinctes pour une organisation. */
-export async function getDistinctAuditEntities(
-  organizationId: string
-): Promise<string[]> {
+/**
+ * Récupère les entités distinctes du journal pour l'organisation courante.
+ * ISOLATION MULTI-TENANT — voir `getDistinctAuditActions`.
+ */
+export async function getDistinctAuditEntities(): Promise<string[]> {
+  const { organizationId } = await getCurrentSessionUser();
+
   const results = await prisma.auditLog.findMany({
     where: { organizationId },
     distinct: ["entity"],
@@ -199,10 +242,19 @@ export async function getDistinctAuditEntities(
   return results.map((r) => r.entity);
 }
 
-/** Récupère les utilisateurs ayant des entrées d'audit. */
-export async function getAuditLogUsers(
-  organizationId: string
-): Promise<{ id: string; firstName: string; lastName: string }[]> {
+/**
+ * Récupère les utilisateurs de l'organisation courante ayant des entrées
+ * d'audit.
+ *
+ * ISOLATION MULTI-TENANT — l'identifiant vient de la session. Les identifiants
+ * collectés le sont via les lignes d'audit déjà filtrées sur l'organisation ;
+ * le `findMany` utilisateur est donc borné à ce même périmètre.
+ */
+export async function getAuditLogUsers(): Promise<
+  { id: string; firstName: string; lastName: string }[]
+> {
+  const { organizationId } = await getCurrentSessionUser();
+
   const ids = await prisma.auditLog.findMany({
     where: { organizationId },
     distinct: ["userId"],

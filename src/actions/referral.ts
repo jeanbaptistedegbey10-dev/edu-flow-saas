@@ -3,15 +3,15 @@
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
-import { REFERRAL_REWARD_AMOUNT } from "@/lib/referral";
 import { getValidatedSessionContext } from "@/lib/session";
 
 // --------------------------------------
 // Récompense de parrainage
 // --------------------------------------
-// `REFERRAL_REWARD_AMOUNT` (10 000 FCFA) vit dans `@/lib/referral` :
-// la contrainte Next.js interdit d'exporter des constantes depuis un
-// fichier « use server » (build « Only async functions are allowed »).
+// La constante `REFERRAL_REWARD_AMOUNT` (10 000 FCFA) vit dans `@/lib/referral` :
+// la contrainte Next.js interdit d'exporter des constantes depuis un fichier
+// « use server » (build « Only async functions are allowed »). Elle n'est
+// directement utilisée que par `@/lib/referral-conversion` (voir ci-dessous).
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -133,54 +133,16 @@ export async function getReferralStats(
   }
 }
 
-/**
- * Met à jour le statut d'une referral en CONVERTED lorsque le filleul
- * souscrit un paiement réussi. Appelée par le webhook de paiement
- * (src/lib/payment.ts → activateSubscriptionAfterPayment).
- *
- * Montant de la récompense = 10 000 FCFA FIXES (voir REFERRAL_REWARD_AMOUNT),
- * indépendant du montant du premier abonnement. La conversion n'est effectuée
- * qu'une seule fois (une referral déjà CONVERTED est ignorée).
- *
- * @param userId        Identifiant du filleul (utilisateur administrateur parrainé).
- * @param paymentAmount Montant du paiement (conservé pour compatibilité d'appel ;
- *                      la récompense étant fixe, il n'entre plus dans le calcul).
- */
-export async function convertReferralOnPayment(
-  userId: string,
-  paymentAmount: number
-): Promise<void> {
-  try {
-    const referral = await prisma.referral.findUnique({
-      where: { referredId: userId },
-      select: { id: true, status: true },
-    });
-
-    if (!referral || referral.status === "CONVERTED") {
-      return;
-    }
-
-    void paymentAmount; // récompense fixe — le montant du paiement n'est plus utilisé.
-    const rewardAmount = REFERRAL_REWARD_AMOUNT; // 10 000 FCFA fixes
-
-    await prisma.referral.update({
-      where: { id: referral.id },
-      data: {
-        status: "CONVERTED",
-        rewardAmount,
-      },
-    });
-
-    console.log(
-      `[referral] Referral ${referral.id} convertie : récompense fixe=${rewardAmount} FCFA`
-    );
-  } catch (error) {
-    console.error(
-      "[convertReferralOnPayment] Échec de mise à jour :",
-      error
-    );
-  }
-}
+// --------------------------------------
+// Conversion d'une referral lors d'un paiement
+// --------------------------------------
+//
+// `convertReferralOnPayment` s'est déplacée vers `@/lib/referral-conversion`
+// (module « server-only »). Motif de sécurité : tout export d'un fichier
+// « use server » — donc de CE fichier — devient un endpoint HTTP public.
+// Exposer ici la conversion aurait permis à n'importe quel utilisateur
+// authentifié de forcer la conversion du parrainage d'un tiers et de
+// créditer une récompense de 10 000 FCFA induite.
 
 /**
  * Génère (ou régénère) le code de parrainage d'un utilisateur.

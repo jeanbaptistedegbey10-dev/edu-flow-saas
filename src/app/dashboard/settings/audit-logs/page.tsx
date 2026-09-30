@@ -11,17 +11,20 @@ export const metadata = {
 export default async function AuditLogsPage() {
   await connection();
 
-  const organizationId = await getCurrentOrganizationId();
+  // Garde de session : redirige vers /login si le contexte est résoluble.
+  // L'identifiant n'est PAS transmis au composant — chaque Server Action
+  // le recharge depuis la session (isolation multi-tenant).
+  await getCurrentOrganizationId();
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Journal d'audit</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Journal d&apos;audit</h1>
         <p className="text-sm text-muted-foreground">
           Historique des opérations sensibles réalisées par les utilisateurs de votre organisation.
         </p>
       </div>
-      <AuditLogsView organizationId={organizationId} />
+      <AuditLogsView />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getSuperAdminRoute } from "@/lib/super-admin-route";
 import { getOrganizationDataPresence } from "@/lib/demo-data";
+import { listOrganizationBackupsAction } from "@/lib/actions/organization-backup";
 import { getClassOptions } from "@/actions/classes";
 import { getDefaultRegistrationFee } from "@/actions/organization";
 import {
@@ -15,6 +16,7 @@ import {
 import { getTeacherDashboardStats } from "@/actions/dashboard";
 import { DashboardOverview } from "@/components/dashboard/dashboard-overview";
 import { DemoDataCard } from "@/components/dashboard/demo-data-card";
+import { BackupHistory } from "@/components/dashboard/backup-history-section";
 import { TeacherDashboardOverview } from "@/components/dashboard/teacher-dashboard-overview";
 
 export const metadata = {
@@ -106,6 +108,15 @@ export default async function DashboardPage() {
     ? await getOrganizationDataPresence(session?.user?.organizationId)
     : { hasData: false, demoAccounts: 0 };
 
+  // Historique des sauvegardes : alimenté par les sauvegardes automatiques
+  // créées AVANT chaque purge. La requête n'est jouée que pour les
+  // administrateurs (les autres n'ont aucun droit de restauration) et hors
+  // production, où la carte démo est masquée.
+  const backups =
+    showDemoData && isAdmin
+      ? await listOrganizationBackupsAction()
+      : [];
+
   return (
     <div className="grid gap-6">
       <DashboardOverview
@@ -121,6 +132,15 @@ export default async function DashboardPage() {
           rendue UNIQUEMENT en développement / sandbox (cf. showDemoData). */}
       {showDemoData ? (
         <DemoDataCard isAdmin={isAdmin} hasData={dataPresence.hasData} />
+      ) : null}
+
+      {/* Historique des sauvegardes + restauration (après une suppression). */}
+      {showDemoData ? (
+        <BackupHistory
+          backups={backups}
+          isAdmin={isAdmin}
+          hasData={dataPresence.hasData}
+        />
       ) : null}
     </div>
   );

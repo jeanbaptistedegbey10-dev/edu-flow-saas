@@ -12,8 +12,12 @@ import {
   resetOrganizationData,
   resetStudentsAndSchoolingData,
 } from "@/lib/demo-data";
-import type { DemoDataActionState } from "@/lib/demo-data-constants";
+import {
+  BACKUP_REASONS,
+  type DemoDataActionState,
+} from "@/lib/demo-data-constants";
 import { assertCanMutate } from "@/lib/license-check";
+import { createOrganizationBackup } from "@/lib/organization-backup";
 import {
   getValidatedSessionContext,
   isNextRedirectError,
@@ -54,6 +58,17 @@ import {
 // /billing), rôle ADMIN / SUPER_ADMIN et confirmation mot-clé (SUPPRIMER ou
 // CONFIRMER). Une erreur de redirection (`NEXT_REDIRECT`) est TOUJOURS
 // relancée, jamais convertie en état d'erreur métier.
+//
+// ---------------------------------------------------------------
+// Sauvegarde automatique AVANT suppression (auto-backup)
+// ---------------------------------------------------------------
+// Aucune suppression ne s'engage « sans filet » : chaque point d'entrée de la
+// purge (étape 1 du flux pas-à-pas, `resetDemoDataAction`,
+// `injectDemoDataAction` en écrasement) crée d'abord un snapshot JSON complet
+// via `ensurePrePurgeBackup`. Si la sauvegarde échoue, la suppression est
+// REFUSÉE — mieux vaut interrompre l'opération que détruire des données sans
+// possibilité de retour en arrière. L'historique est consultable et
+// restaurable depuis le tableau de bord (« Historique des sauvegardes »).
 
 /** Mots de confirmation reconnus par les étapes de nettoyage. */
 type ResetConfirmationWord = "SUPPRIMER" | "CONFIRMER";
@@ -177,6 +192,59 @@ async function resolveDemoMutationContext(
 // foreign key (P2003/P2014), notamment Task.createdBy → User (onDelete: Restrict).
 
 /**
+ * Sauvegarde automatique AVANT suppression — garde-fou « sans filet ».
+ *
+ * Appelée par chaque point d'entrée de la suppression (étape 1 du flux
+ * pas-à-pas, action monolithique `resetDemoDataAction`, écrasement par
+ * `injectDemoDataAction`). Elle s'appuie sur un drapeau `backupCreated`
+ * transmis dans le `FormData` : l'étape 1 crée réellement la sauvegarde, les
+ * étapes 2 et 3 la réutilisent (une seule sauvegarde par flux, pas de doublon
+ * à chaque étape).
+ *
+ * Si la sauvegarde échoue, la suppression est REFUSÉE : mieux vaut interrompre
+ * une opération demandée par l'utilisateur que détruire des données sans
+ * possibility de retour en arrière.
+ *
+ * Retourne `null` lorsque la suppression peut être engagée, sinon l'état
+ * d'erreur à renvoyer au client.
+ */
+async function ensurePrePurgeBackup(
+  organizationId: string,
+  userId: string | null,
+  formData?: FormData
+): Promise<DemoDataActionState | null> {
+  // Sauvegarde déjà réalisée pour ce flux (étapes 2 et 3) : on n'en crée pas
+  // une seconde, ce qui saturerait l'historique de sauvegardes identiques.
+  if (String(formData?.get("backupCreated") ?? "") === "1") {
+    return null;
+  }
+
+  const result = await createOrganizationBackup(
+    organizationId,
+    userId,
+    BACKUP_REASONS.AUTO_PURGE
+  );
+
+  if (!result.ok) {
+    console.error(
+      "[demo-data] Sauvegarde automatique refusée, suppression annulée :",
+      result.reason
+    );
+
+    return {
+      status: "error",
+      message:
+        result.reason === "TOO_LARGE"
+          ? "Les données de l'organisation sont trop volumineuses pour une sauvegarde automatique. " +
+            "Suppression annulée : contactez le support pour une restauration manuelle."
+          : "La sauvegarde automatique a échoué : la suppression a été interrompue pour protéger vos données.",
+    };
+  }
+
+  return null;
+}
+
+/**
  * ÉTAPE 1 — Dépendances & financier (Feuilles / Leaves).
  *
  * Requête courte (< 3 s, transaction Prisma bornée) et idempotente :
@@ -185,6 +253,8 @@ async function resolveDemoMutationContext(
  *
  * DOIT ÊTRE EXÉCUTÉ EN PREMIER : supprime les tâches (Task) avant les
  * utilisateurs (User) pour respecter la contrainte `onDelete: Restrict`.
+ * C'est aussi le point d'entrée du flux de suppression : une sauvegarde
+ * automatique y est créée AVANT toute écriture (cf. `ensurePrePurgeBackup`).
  * Vérifications serveur : session, garde d'écriture, rôle admin et
  * confirmation mot-clé (SUPPRIMER ou CONFIRMER selon le flux appelant).
  */
@@ -195,6 +265,14 @@ export async function resetFinancialStepAction(
   try {
     const resolved = await resolveDemoMutationContext(formData);
     if (!resolved.ok) return resolved.state;
+
+    // Sauvegarde automatique AVANT suppression (point d'entrée du flux).
+    const backupError = await ensurePrePurgeBackup(
+      resolved.organizationId,
+      null,
+      formData
+    );
+    if (backupError) return backupError;
 
     const counts = await resetFinancialAndSettingsData(
       resolved.organizationId
@@ -380,7 +458,17 @@ export async function injectDemoDataAction(
         };
       }
 
-      // 4b. Données résiduelles présentes : réinitialisation complète avant
+      // 4b. Sauvegarde automatique AVANT l'écrasement : la démo va remplacer
+      //     des données existantes, la suppression n'est jamais « sans filet ».
+      //     En cas d'échec, l'injection est interrompue (rien n'est détruit).
+      const backupError = await ensurePrePurgeBackup(
+        context.organizationId,
+        context.id,
+        formData
+      );
+      if (backupError) return backupError;
+
+      // 4c. Données résiduelles présentes : réinitialisation complète avant
       //     l'injection (« reset-before-inject » idempotent, sans échappatoire).
       const reset = await resetOrganizationData(context.organizationId);
 
@@ -397,7 +485,7 @@ export async function injectDemoDataAction(
       }
     }
 
-    // 4c. OPTIMISATION ANTI-TIMEOUT : si l'organisation est DÉJÀ VIDE (cas
+    // 4d. OPTIMISATION ANTI-TIMEOUT : si l'organisation est DÉJÀ VIDE (cas
     //     nominal après le pas-à-pas de la carte, ou toute première injection),
     //     la réinitialisation complète est SKIPPÉE. Elle coûterait ~15
     //     allers-retours SQL dans la MÊME requête HTTP que l'injection et
@@ -538,7 +626,18 @@ export async function resetDemoDataAction(
       };
     }
 
-    // 7. Opérations de données — trois étapes EXÉCUTÉES SÉQUENTIELLEMENT
+    // 7. Sauvegarde automatique AVANT suppression (double confirmation
+    //    déjà validée). Si la sauvegarde échoue, la suppression est
+    //    interrompue : aucune donnée n'est détruite sans possibilité de
+    //    restauration.
+    const backupError = await ensurePrePurgeBackup(
+      context.organizationId,
+      context.id,
+      formData
+    );
+    if (backupError) return backupError;
+
+    // 8. Opérations de données — trois étapes EXÉCUTÉES SÉQUENTIELLEMENT
     //    (une requête HTTP par étape) dans l'ordre « Leaves to Root » :
     //      Étape 1 = dépendances/financier (Task, Payment, Document, User non-admin…)
     //      Étape 2 = cours, évaluations, présences, classes

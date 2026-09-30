@@ -29,7 +29,6 @@ import {
 } from "@/lib/crypto-license";
 import {
   DEFAULT_PLAN_PRICING,
-  PRICING_DEPLOYMENT_LABELS,
   PRICING_PLAN_LABELS,
   PRICING_PLAN_TAGLINES,
   PRICING_PLAN_TYPES,
@@ -44,6 +43,12 @@ import {
   type SubscriptionPriceKind,
 } from "@/lib/plan-pricing";
 import { prisma } from "@/lib/prisma";
+import {
+  validateTransactionReference,
+  validateWebhookAmount,
+  validateWebhookLabel,
+  validateWebhookMetadata,
+} from "@/lib/payment-webhook-schema";
 
 // --------------------------------------
 // Tarification dynamique (modèle commercial hybride)
@@ -268,17 +273,23 @@ export type PaymentProvider = "fedapay" | "kkiapay";
  */
 export type PaymentMode = "test" | "live";
 
-/**
- * Clés de TEST (sandbox) utilisées PAR DÉFAUT dès qu'aucune clé réelle n'est
- * renseignée dans l'environnement (donc tant que PAYMENT_SANDBOX n'est pas
- * « false ») :
- * - Kkiapay : le widget officiel s'ouvre côté navigateur avec la seule clé
- *   publique sandbox (aucun appel server-to-server n'est nécessaire à
- *   l'initiation) → idéal pour tester / démontrer le parcours de paiement.
- * - Fedapay : valeurs de complément si l'intégrateur force « fedapay » en
- *   sandbox (les appels réels échoueront tant que de vraies clés ne seront
- *   pas configurées).
- */
+// --------------------------------------
+// Clés de TEST (sandbox) utilisées PAR DÉFAUT dès qu'aucune clé réelle n'est
+// renseignée dans l'environnement ET que le bac à sable est autorisé
+// (voir `isPaymentSandboxEnabled`) :
+// - Kkiapay : le widget officiel s'ouvre côté navigateur avec la seule clé
+//   publique sandbox (aucun appel server-to-server n'est nécessaire à
+//   l'initiation) → idéal pour tester / démontrer le parcours de paiement.
+// - Fedapay : valeurs de complément si l'intégrateur force « fedapay » en
+//   sandbox (les appels réels échoueront tant que de vraies clés ne seront
+//   pas configurées).
+//
+// ⚠️ SÉCURITÉ — Ces valeurs sont PUBLIQUES (versionnées dans le dépôt).
+// Leur `webhookSecret` permet à quiconque de forger une notification de
+// paiement signée. Elles ne doivent donc JAMAIS être utilisées en
+// production : `isPaymentSandboxEnabled()` garantit que le repli n'a lieu
+// que hors production, et le webhook refuse explicitement les secrets de
+// test lorsqu'il tourne avec `NODE_ENV === "production"`.
 const SANDBOX_TEST_KEYS: Record<
   PaymentProvider,
   { publicKey: string; secretKey: string; webhookSecret: string }
@@ -296,18 +307,80 @@ const SANDBOX_TEST_KEYS: Record<
 };
 
 /**
+ * Détermine si le mode bac à sable (simulation) est AUTORISÉ.
+ *
+ * Règle de sécurité (fail-closed) — le sandbox n'est actif que si :
+ *   1. `PAYMENT_PROVIDER_MODE` vaut explicitement « sandbox » OU
+ *   2. `NODE_ENV` n'est PAS « production ».
+ *
+ * En production, le mode sandbox est donc refusé SAUF demande explicite de
+ * l'opérateur via `PAYMENT_PROVIDER_MODE="sandbox"`. Cette exception
+ * volontaire permet à un environnement de recette hébergé en production de
+ * tester le tunnel, tout en garantissant qu'un déploiement classique
+ * (`NODE_ENV=production` sans variable supplémentaire) ne retombe JAMAIS
+ * sur les clés de test publiques.
+ *
+ * `PAYMENT_SANDBOX` reste honoré comme désactivation explicite (prioritaire
+ * sur l'autorisation) : `PAYMENT_SANDBOX="false"` force le mode réel même en
+ * développement.
+ */
+export function isPaymentSandboxEnabled(): boolean {
+  // Désactivation explicite : l'opérateur veut de vraies transactions.
+  if ((process.env.PAYMENT_SANDBOX ?? "").trim().toLowerCase() === "false") {
+    return false;
+  }
+
+  const providerMode = (process.env.PAYMENT_PROVIDER_MODE ?? "")
+    .trim()
+    .toLowerCase();
+
+  // Activation explicite, y compris en production.
+  if (providerMode === "sandbox") {
+    return true;
+  }
+
+  // Hors production : autorisé par défaut (dev, recette, CI).
+  return process.env.NODE_ENV !== "production";
+}
+
+/**
+ * Secrets de webhook issus de `SANDBOX_TEST_KEYS` — publics, donc
+ * INTERDITS en production (ils permettraient de forger un paiement).
+ */
+const KNOWN_TEST_WEBHOOK_SECRETS: ReadonlySet<string> = new Set(
+  Object.values(SANDBOX_TEST_KEYS).map((keys) => keys.webhookSecret)
+);
+
+/**
+ * `true` si le secret de webhook correspond à une valeur de test publique.
+ *
+ * Utilisé par la route webhook pour refuser, en production, toute
+ * notification signée avec un secret de bac à sable (défense en
+ * profondeur : même si une régression réintroduisait le repli sandbox,
+ * aucune activation d'abonnement ne pourrait être forgée).
+ */
+export function isTestWebhookSecret(secret: string): boolean {
+  return KNOWN_TEST_WEBHOOK_SECRETS.has(secret.trim());
+}
+
+/**
  * Lit la configuration de la passerelle depuis l'environnement :
  * - `PAYMENT_PROVIDER`       : « kkiapay » (défaut) ou « fedapay » ;
  * - `PAYMENT_PUBLIC_KEY`     : clé publique (widget Kkiapay / identification) ;
  * - `PAYMENT_SECRET_KEY`     : clé secrète (appels server-to-server) ;
  * - `PAYMENT_WEBHOOK_SECRET` : secret de vérification des webhooks ;
- * - `PAYMENT_SANDBOX`        : « true » (défaut) / « false ».
+ * - `PAYMENT_SANDBOX`        : « false » pour forcer le mode réel ;
+ * - `PAYMENT_PROVIDER_MODE`  : « sandbox » pour autoriser le bac à sable.
  *
- * Mode démo/sandbox par défaut : si `PAYMENT_SANDBOX` est « true » (défaut) et
- * qu'AUCUNE clé réelle n'est fournie, la configuration retombe sur des clés
- * de TEST et le fournisseur est forcé sur Kkiapay — le paiement en ligne
- * reste donc testable (ouverture du widget sandbox) sur une instance vierge,
- * au lieu de bloquer l'UI avec « Le paiement en ligne n'est pas encore
+ * Mode démo/sandbox : si le bac à sable est AUTORISÉ (voir
+ * `isPaymentSandboxEnabled`) et qu'AUCUNE clé réelle n'est fournie, la
+ * configuration retombe sur des clés de TEST et le fournisseur est forcé sur
+ * Kkiapay — le paiement en ligne reste testable sur une instance vierge.
+ *
+ * En production, ce repli sur les clés de test est IMPOSSIBLE : sans clés
+ * réelles, la configuration reste vide et le webhook répond 503 plutôt que
+ * d'accepter une signature falsifiable.
+ *
  * NOTE : cette fonction lit UNIQUEMENT les variables d'environnement.
  * Pour la résolution complète (BDD → env → défaut), utiliser
  * `getPaymentConfigWithDb()` qui interroge d'abord `SystemSettings`.
@@ -323,8 +396,7 @@ export function getPaymentConfig(): {
   let provider: PaymentProvider =
     providerRaw === "fedapay" ? "fedapay" : "kkiapay";
 
-  const sandbox =
-    (process.env.PAYMENT_SANDBOX ?? "true").toLowerCase() !== "false";
+  const sandbox = isPaymentSandboxEnabled();
 
   // Aucune clé réelle ? → mode démo : on force Kkiapay, le seul agrégateur
   // dont le widget sandbox s'ouvre avec la seule clé publique (testable).
@@ -416,7 +488,11 @@ export async function getPaymentConfigWithDb(): Promise<{
 
   const kkiapayModeDb = get("kkiapay.mode");
   const fedapayModeDb = get("fedapay.mode");
-  const envSandbox = (process.env.PAYMENT_SANDBOX ?? "true").toLowerCase() !== "false";
+  // Le bac à sable n'est AUTORISÉ que si l'environnement l'y autorise
+  // (PAYMENT_PROVIDER_MODE=sandbox ou NODE_ENV !== production). Le mode
+  // « test » stocké en base ne peut donc jamais, à lui seul, rouvrir le
+  // repli sur les clés de test publiques en production.
+  const envSandbox = isPaymentSandboxEnabled();
   const dbSandbox = kkiapayModeDb === "live" || fedapayModeDb === "live" ? false : undefined;
 
   const kkiapayPublicKey = kkiapayDbKey || process.env.KKIAPAY_PUBLIC_KEY?.trim() || process.env.PAYMENT_PUBLIC_KEY?.trim() || "";
@@ -1261,14 +1337,20 @@ export async function activateSubscriptionAfterPayment(
 
   const { organizationId, planType, durationMonths } = webhook.metadata;
 
+  // VALIDATION ZOD — Défense en profondeur. La signature HMAC garantit
+  // l'origine du message, pas la validité de son contenu : on revalide la
+  // forme des metadata AVANT toute écriture en base.
+  const metadataCheck = validateWebhookMetadata(webhook.metadata);
+
   if (
     !organizationId ||
     !isPricingPlanType(planType) ||
-    !isBillingDuration(durationMonths)
+    !isBillingDuration(durationMonths) ||
+    !metadataCheck.valid
   ) {
     console.error(
-      "[payment][webhook] Metadata manquante ou formule/durée inconnue :",
-      webhook.metadata
+      "[payment][webhook] Metadata manquante, invalide ou formule/durée inconnue :",
+      metadataCheck.valid ? webhook.metadata : metadataCheck.reason
     );
 
     return {
@@ -1281,9 +1363,27 @@ export async function activateSubscriptionAfterPayment(
 
   try {
     // Idempotence : une référence de transaction déjà traitée est ignorée.
-    if (webhook.transactionReference) {
+    // La reference est d'abord validee (Zod) : une chaine arbitraire
+    // injectee par un tiers ne doit jamais atteindre une requete Prisma.
+    const referenceCheck = validateTransactionReference(
+      webhook.transactionReference
+    );
+
+    if (!referenceCheck.valid) {
+      console.error(
+        `[payment][webhook] ${referenceCheck.reason} Notification rejetée.`
+      );
+
+      return {
+        status: "error",
+        message: "Référence de transaction inexploitable.",
+        retryable: false,
+      };
+    }
+
+    if (referenceCheck.value) {
       const existing = await prisma.invoice.findUnique({
-        where: { transactionReference: webhook.transactionReference },
+        where: { transactionReference: referenceCheck.value },
         select: { id: true },
       });
 
@@ -1344,7 +1444,28 @@ export async function activateSubscriptionAfterPayment(
       );
     }
 
-    // 4. Mise à jour de l'organisation + enregistrement de la facture.
+    // Montant et moyen de paiement : validés (Zod) avant persistance pour
+    // écarter les valeurs aberrantes transmises par l'agregateur.
+    const amountCheck = validateWebhookAmount(webhook.amount);
+    const methodCheck = validateWebhookLabel(webhook.method);
+
+    if (!amountCheck.valid || !methodCheck.valid) {
+      const reason = !amountCheck.valid
+        ? amountCheck.reason
+        : methodCheck.valid
+          ? "Moyen de paiement inexploitable."
+          : methodCheck.reason;
+
+      console.error(`[payment][webhook] ${reason} Notification rejetée.`);
+
+      return {
+        status: "error",
+        message: "Montant ou moyen de paiement inexploitable.",
+        retryable: false,
+      };
+    }
+
+    // 4. Mise a jour de l'organisation + enregistrement de la facture.
     await prisma.$transaction([
       prisma.organization.update({
         where: { id: organizationId },
@@ -1360,11 +1481,11 @@ export async function activateSubscriptionAfterPayment(
         data: {
           organizationId,
           planType: licensePlanType,
-          amount: webhook.amount ?? pricing.amount,
+          amount: amountCheck.value ?? pricing.amount,
           currency: pricing.currency,
           paymentProvider: getPaymentConfig().provider,
-          paymentMethod: webhook.method,
-          transactionReference: webhook.transactionReference,
+          paymentMethod: methodCheck.value,
+          transactionReference: referenceCheck.value,
           status: "COMPLETED",
           description: `${pricing.label} EduFlow — ${organization.name}`,
           licenseKey,
@@ -1381,9 +1502,14 @@ export async function activateSubscriptionAfterPayment(
 
     // Parrainage : si l'administrateur de cette organisation a été parrainé,
     // convertit la referral une seule fois — le parrain reçoit une RÉCOMPENSE
-    // FIXE de 10 000 FCFA (voir src/actions/referral.ts).
+    // FIXE de 10 000 FCFA (voir src/lib/referral-conversion.ts, module
+    // « server-only » : cette logique ne doit surtout pas être exposée
+    // comme Server Action, sinon un utilisateur pourrait créditer la
+    // récompense d'un tiers).
     try {
-      const { convertReferralOnPayment } = await import("@/actions/referral");
+      const { convertReferralOnPayment } = await import(
+        "@/lib/referral-conversion"
+      );
       const orgAdmin = await prisma.user.findFirst({
         where: { organizationId, role: "ADMIN", referredById: { not: null } },
         select: { id: true },

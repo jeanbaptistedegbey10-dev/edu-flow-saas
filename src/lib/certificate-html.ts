@@ -7,7 +7,37 @@
  * CSS d'impression conforme au protocole :
  * - `@page { size: A4 landscape; margin: 0; }`
  * - `-webkit-print-color-adjust: exact` (conserve les aplats de couleur).
+ *
+ * ⚠️ SÉCURITÉ (XSS) — Ce HTML est injecté via `iframe srcDoc` (même origine)
+ * puis imprimé. TOUTE valeur issue de la base ou du client doit donc être
+ * échappée avant interpolation : noms d'étudiants, nom d'organisation, titre
+ * de formation et code de verification sont saisissables par un
+ * utilisateur de l'établissement et pourraient contenir `</style><script>`
+ * ou `"` pour s'évader de l'attribut. Sans échappement, un enseignant
+ * malveillant pouvait exécuter du JavaScript dans le contexte du
+ * dashboard d'un collègue (vol de session).
  */
+
+// Constantes de caractères (même approche que `receipt.ts`) : évite toute
+// dépendance à une police de caractères dans ce module client-safe.
+const AMP = String.fromCharCode(38);
+const LT = String.fromCharCode(60);
+const GT = String.fromCharCode(62);
+const DQ = String.fromCharCode(34);
+
+/**
+ * Échappe `& < > "` — le quartet nécessaire pour interpoler une valeur
+ * en toute sécurité dans du texte HTML **et** dans un attribut entre
+ * guillemets doubles.
+ */
+function escapeHtml(value: string): string {
+  return String(value)
+    .replace(new RegExp(AMP, "g"), `${AMP}amp;`)
+    .replace(new RegExp(LT, "g"), `${AMP}lt;`)
+    .replace(new RegExp(GT, "g"), `${AMP}gt;`)
+    .replace(new RegExp(DQ, "g"), `${AMP}quot;`);
+}
+
 export function buildCertificateHtml(data: {
   studentName: string;
   studentCode: string;
@@ -30,6 +60,16 @@ export function buildCertificateHtml(data: {
     organizationName,
     courseTitle,
   } = data;
+
+  // ÉCHAPPEMENT SYSTÉMATIQUE — toute valeur dynamique passe par
+  // `escapeHtml` AVANT d'être interpolée (texte HTML ou attribut).
+  const safeStudentName = escapeHtml(studentName);
+  const safeStudentCode = escapeHtml(studentCode);
+  const safeLevel = escapeHtml(level);
+  const safeOrganizationName = escapeHtml(organizationName);
+  const safeVerificationCode = escapeHtml(verificationCode);
+  // `level` n'est utilisé que pour choisir le libellé du document, mais on
+  // l'échappe quand même avant de le comparer (défense en profondeur).
   const title = level.toUpperCase().includes("ATTESTATION")
     ? "ATTESTATION DE RÉUSSITE"
     : "CERTIFICAT DE COMPÉTENCE LINGUISTIQUE";
@@ -38,13 +78,17 @@ export function buildCertificateHtml(data: {
     month: "long",
     year: "numeric",
   }).format(issueDate);
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(verificationUrl)}`;
+  // L'URL de vérification est encodée puis échappée : elle atterrit dans un
+  // attribut `src="..."`.
+  const qrUrl = escapeHtml(
+    `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(verificationUrl)}`
+  );
   const scoreHtml =
     score !== null
       ? `<div style="margin-top:10px"><span style="font-size:9px;color:#718096;text-transform:uppercase;letter-spacing:1px">Mention / Score</span><div style="font-size:14px;font-weight:bold;color:#2d3748;font-family:monospace">${score.toFixed(1)} %</div></div>`
       : "";
   const courseHtml = courseTitle
-    ? `<p style="font-size:11px;color:#2d3748;margin:10px 0 0"><span style="color:#718096">Formation :</span> <strong>${courseTitle}</strong></p>`
+    ? `<p style="font-size:11px;color:#2d3748;margin:10px 0 0"><span style="color:#718096">Formation :</span> <strong>${escapeHtml(courseTitle)}</strong></p>`
     : "";
 
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>${title}</title>
@@ -105,17 +149,17 @@ export function buildCertificateHtml(data: {
   <div id="certificate"><div class="watermark">CERTIFIÉ</div>
     <div class="header">
       <div style="display:flex;align-items:center;gap:14px">
-        <div class="logo"><span>${organizationName.charAt(0).toUpperCase()}</span></div>
-        <div><div class="org-name">${organizationName}</div><p class="org-sub" style="margin:2px 0 0">Organisme de formation agréé</p></div>
+        <div class="logo"><span>${escapeHtml(organizationName.charAt(0).toUpperCase())}</span></div>
+        <div><div class="org-name">${safeOrganizationName}</div><p class="org-sub" style="margin:2px 0 0">Organisme de formation agréé</p></div>
       </div>
-      <div class="verify-chip"><p class="verify-label">Code de vérification</p><div class="verify-code">${verificationCode}</div></div>
+      <div class="verify-chip"><p class="verify-label">Code de vérification</p><div class="verify-code">${safeVerificationCode}</div></div>
     </div>
     <div class="title"><div class="divider"></div><h1>${title}</h1><p>Centre de Formation de Langues</p></div>
     <div class="body">
       <div class="col-main">
         <p class="intro">Il est officiellement certifié par la présente que</p>
-        <h2 class="student-name">${studentName}</h2>
-        <p class="student-code">Matricule : ${studentCode}</p>
+        <h2 class="student-name">${safeStudentName}</h2>
+        <p class="student-code">Matricule : ${safeStudentCode}</p>
         <p style="font-size:12px;color:#2d3748">a validé avec succès la formation de langue et atteint le niveau de compétence suivant.</p>
         ${courseHtml}
         <p style="font-size:10px;color:#2d3748;margin:16px auto 0;max-width:380px">Ce certificat atteste des compétences linguistiques acquises et validées au terme de l'évaluation finale.</p>
@@ -123,7 +167,7 @@ export function buildCertificateHtml(data: {
       <div class="col-side">
         <div class="level-box">
           <p class="level-label">Niveau certifié</p>
-          <p class="level-value">${level}</p>
+          <p class="level-value">${safeLevel}</p>
           <p class="level-sub">Diplôme reconnu internationalement</p>
         </div>
         ${scoreHtml}
@@ -134,7 +178,7 @@ export function buildCertificateHtml(data: {
         <div class="signature"><div class="sig-line"></div><p class="sig-role">Direction</p></div>
         <div class="signature"><div class="sig-line"></div><p class="sig-role">Pédagogique</p></div>
       </div>
-      <div class="seal"><span class="seal-letter">${organizationName.charAt(0).toUpperCase()}</span><span class="seal-text">Sceau officiel</span></div>
+      <div class="seal"><span class="seal-letter">${escapeHtml(organizationName.charAt(0).toUpperCase())}</span><span class="seal-text">Sceau officiel</span></div>
       <div class="qr-section"><img src="${qrUrl}" class="qr-code" alt="QR de vérification"><p class="qr-label">Scanner pour vérifier</p></div>
       <div class="issued"><p class="issued-label">Certificat émis le</p><p class="issued-value">${formattedDate}</p></div>
     </div>

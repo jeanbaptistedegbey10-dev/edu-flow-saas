@@ -23,6 +23,7 @@ const DASHBOARD_ROUTE_TITLES: ReadonlyArray<{ path: string; title: string }> = [
   // Les entrées les plus spécifiques (préfixes les plus longs) en premier.
   { path: "/dashboard/settings/roles", title: "Rôles & Permissions" },
   { path: "/dashboard/settings", title: "Paramètres" },
+  { path: "/dashboard/guide", title: "Manuel d'Utilisation" },
   { path: "/dashboard/students", title: "Apprenants" },
   { path: "/dashboard/classes", title: "Classes" },
   { path: "/dashboard/courses", title: "Cours" },

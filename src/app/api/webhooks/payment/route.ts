@@ -27,9 +27,11 @@ import { NextResponse } from "next/server";
 import {
   activateSubscriptionAfterPayment,
   getPaymentConfigWithDb,
+  isTestWebhookSecret,
   normalizeWebhookPayload,
   verifyWebhookSignature,
 } from "@/lib/payment";
+import { validateWebhookEnvelope } from "@/lib/payment-webhook-schema";
 
 // Les webhooks ne doivent jamais être mis en cache ni pré-rendus.
 export const dynamic = "force-dynamic";
@@ -71,7 +73,25 @@ export async function POST(request: Request): Promise<Response> {
 
   const provider = gatewayConfig.provider;
 
-  // 2. Vérification de la signature — fail-closed.
+  // 2. Garde-fou production : les secrets de webhook de TEST sont publiés
+  //    dans le dépôt (SANDBOX_TEST_KEYS). Les accepter en production
+  //    reviendrait à accepter des notifications signables par n'importe
+  //    qui. Defense en profondeur, meme si le repli sandbox est bloque.
+  if (
+    process.env.NODE_ENV === "production" &&
+    isTestWebhookSecret(gatewayConfig.webhookSecret)
+  ) {
+    console.error(
+      "[webhooks/payment] Secret de webhook de TEST detecte en production — notification rejetee."
+    );
+
+    return NextResponse.json(
+      { error: "Configuration de securite invalide." },
+      { status: 503 }
+    );
+  }
+
+  // 3. Vérification de la signature — fail-closed.
   const verification = verifyWebhookSignature(
     provider,
     rawBody,
@@ -100,6 +120,19 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "JSON invalide." }, { status: 400 });
   }
 
+  // 4. Validation Zod de l'ENVELOPPE avant normalisation. La signature
+  //    prouve l'origine du message, pas la validité de sa structure.
+  const envelope = validateWebhookEnvelope(provider, parsed);
+
+  if (!envelope.valid) {
+    console.error(`[webhooks/payment] ${envelope.reason}`);
+
+    return NextResponse.json(
+      { error: "Payload de paiement inexploitable." },
+      { status: 400 }
+    );
+  }
+
   const webhook = normalizeWebhookPayload(provider, parsed);
 
   if (!webhook) {
@@ -109,7 +142,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // 4. Paiement réussi → activation automatique de l'abonnement
+  // 5. Paiement réussi → activation automatique de l'abonnement
   //    (licence Ed25519 + mise à jour de l'organisation + facture).
   const outcome = await activateSubscriptionAfterPayment(webhook);
 

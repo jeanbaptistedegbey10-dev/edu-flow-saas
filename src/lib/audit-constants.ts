@@ -27,6 +27,10 @@ export const AUDIT_ACTIONS = {
   CERTIFICATE_REVOKED: "CERTIFICATE_REVOKED",
   DEMO_RESET: "DEMO_RESET",
   DEMO_SEEDED: "DEMO_SEEDED",
+  /** Sauvegarde automatique / manuelle de l'organisation. */
+  BACKUP_CREATED: "BACKUP_CREATED",
+  /** Restauration d'une sauvegarde existante. */
+  BACKUP_RESTORED: "BACKUP_RESTORED",
   SETTINGS_UPDATED: "SETTINGS_UPDATED",
   CLASS_CLOSED: "CLASS_CLOSED",
   CLASS_STARTED: "CLASS_STARTED",
@@ -59,6 +63,8 @@ export const AUDIT_ENTITIES = {
   CUSTOM_ROLE: "CustomRole",
   CLASS: "Class",
   DEMO: "Demo",
+  /** Sauvegardes automatiques avant suppression / restauration. */
+  ORGANIZATION_BACKUP: "OrganizationBackup",
 } as const;
 
 export type AuditEntity = (typeof AUDIT_ENTITIES)[keyof typeof AUDIT_ENTITIES];

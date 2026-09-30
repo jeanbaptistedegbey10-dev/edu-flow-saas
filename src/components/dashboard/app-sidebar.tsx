@@ -21,6 +21,7 @@ import {
   Coins,
   AwardIcon,
   ScrollTextIcon,
+  BookMarked,
   type LucideIcon,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
@@ -55,6 +56,20 @@ type MenuItem = {
    * « Paramètres » ne s'active aussi sur /dashboard/settings/roles.
    */
   exact?: boolean
+}
+
+/**
+ * Manuel d'Utilisation : entrée commune à TOUS les rôles, y compris
+ * l'enseignant. Elle est volontairement placée dans `mainMenu` ET
+ * `teacherMenu` (et non dans un groupe « Organisation » réservé aux rôles
+ * administratifs) : la documentation d'un outil doit rester lisible par
+ * quiconque l'utilise au quotidien.
+ */
+const MANUAL_MENU_ITEM: MenuItem = {
+  title: "Manuel d'Utilisation",
+  url: "/dashboard/guide",
+  icon: BookMarked,
+  exact: true,
 }
 
 const mainMenu: MenuItem[] = [
@@ -104,6 +119,7 @@ const mainMenu: MenuItem[] = [
     url: "/dashboard/certificates",
     icon: AwardIcon,
   },
+  MANUAL_MENU_ITEM,
 ]
 
 const teacherMenu: MenuItem[] = [
@@ -127,6 +143,7 @@ const teacherMenu: MenuItem[] = [
     url: "/dashboard/teacher/students",
     icon: UsersRound,
   },
+  MANUAL_MENU_ITEM,
 ]
 
 const managementMenu: MenuItem[] = [
