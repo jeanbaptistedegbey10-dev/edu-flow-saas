@@ -55,6 +55,11 @@ import {
 import { getPaymentMethodLabel } from "@/lib/payment-status";
 import { cn } from "@/lib/utils";
 
+/** Date du jour au format « YYYY-MM-DD » (UTC) — borne maximale des sélecteurs. */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 // Formatage déterministe (locale + fuseau fixes).
 const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
   day: "2-digit",
@@ -475,6 +480,9 @@ function InstallmentsPanel({
   const [amount, setAmount] = React.useState("");
   const [method, setMethod] = React.useState<string>("CASH");
   const [reference, setReference] = React.useState("");
+  const [isOutOfSystem, setIsOutOfSystem] = React.useState(false);
+  /** Date effective du règlement (vide ⇒ aujourd'hui). */
+  const [paidAt, setPaidAt] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
 
@@ -547,6 +555,8 @@ function InstallmentsPanel({
         amount: parsedAmount,
         paymentMethod: method,
         reference: reference || null,
+        isOutOfSystem,
+        paidAt: paidAt || null,
       });
 
       if (!result.ok) {
@@ -557,6 +567,8 @@ function InstallmentsPanel({
       // Réinitialise le formulaire puis imprime immédiatement le reçu.
       setAmount("");
       setReference("");
+      setPaidAt("");
+      setIsOutOfSystem(false);
       router.refresh();
       printReceipt(result.payment);
     } finally {
@@ -625,6 +637,39 @@ function InstallmentsPanel({
               onChange={(event) => setReference(event.target.value)}
               maxLength={100}
             />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="installment-paid-at" className="text-xs">
+              Date du règlement
+            </Label>
+            <Input
+              id="installment-paid-at"
+              type="date"
+              value={paidAt}
+              max={todayIso()}
+              onChange={(event) => setPaidAt(event.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Règlement hors système / antérieur */}
+        <div className="flex items-start gap-3 rounded-lg border border-dashed p-3">
+          <input
+            type="checkbox"
+            id="installment-out-of-system"
+            checked={isOutOfSystem}
+            onChange={(event) => setIsOutOfSystem(event.target.checked)}
+            className="mt-0.5 size-4 rounded border-gray-300 text-primary focus:ring-primary"
+          />
+          <div className="grid gap-1">
+            <Label htmlFor="installment-out-of-system" className="font-medium">
+              Paiement hors système / Antérieur
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Règlement encaissé hors système ou saisi après coup : il met à jour
+              le solde débiteur du dossier (reste à payer), sans impacter le fond
+              de caisse physique du jour.
+            </p>
           </div>
         </div>
 

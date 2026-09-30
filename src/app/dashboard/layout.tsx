@@ -109,7 +109,10 @@ export default async function DashboardLayout({
           trialDaysLeft={license?.trialDaysLeft ?? null}
           restricted={license?.restrictionReason !== null}
         />
-        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <header
+          data-print-hide="true"
+          className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+        >
           <SidebarTrigger className="-ml-1" />
           <Separator
             orientation="vertical"

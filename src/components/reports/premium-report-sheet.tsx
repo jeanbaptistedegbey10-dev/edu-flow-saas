@@ -11,6 +11,8 @@ import type {
   PremiumTravelSummary,
 } from "@/lib/premium-report";
 import { formatOrganizationAddress, formatScore, formatScoreOnScale } from "@/lib/premium-report";
+import { computeAttendanceMetrics } from "@/lib/report-attendance";
+import { ReportAttendanceBlock } from "@/components/reports/report-attendance-block";
 
 /**
  * Feuille A4 « bulletin / rapport » partagee entre la modale d'apercu
@@ -30,55 +32,150 @@ import { formatOrganizationAddress, formatScore, formatScoreOnScale } from "@/li
  * zone visible. Parfait pour `window.print()` sans iframe.
  */
 
+/**
+ * CSS d'impression SCOPÉ au bulletin (`body.report-printing`), injecté à la
+ * demande (hook `usePremiumReportPrintCss`) : aucune fuite sur l'écran.
+ *
+ * Ordre des règles :
+ * 1. `@page A4` + marges : le document imprimé a la taille d'une feuille.
+ * 2. LE CHROME HORS BULLETIN EST SORTI DU FLUX (`display: none !important`) :
+ *    barre latérale, en-tête du tableau de bord, bandeau de licence, boutons
+ *    de la modale. Sans cela, l'aperçu navigateur rogne la feuille (contenu
+ *    affiché « en haut à gauche », colonnes et en-tête absents).
+ * 3. LES CONTENEURS PORTEURS SONT NEUTRALISÉS (`position: static`, largeur
+ *    100 %, marges nulles, `overflow: visible`) : la zone du bulletin sort du
+ *    flux flottant de la modale Radix et occupe tout le document.
+ * 4. `#print-area` est visible ET ancré sur la page (largeur 100 %, marge 0,
+ *    débordement visible, hauteur libre) : logo, en-tête établissement, toutes
+ *    les colonnes du tableau et les blocs de bas de page (assiduité,
+ *    appréciation, signatures) tiennent sur une page A4 propre.
+ *
+ * AUCUNE hauteur fixe ni `overflow: hidden` n'est imposée : ces deux règles
+ * étaient la cause du contenu tronqué (le bulletin dépassant la feuille, la
+ * partie basse était purement et simplement coupée).
+ */
 export const PREMIUM_REPORT_PRINT_CSS = [
   "@page { size: A4 portrait; margin: 8mm 10mm; }",
   "@media print {",
-  "  html, body {",
-  "    height: 100%;",
+  // 1. Racine du document : plus aucune contrainte de hauteur / debordement.
+  //    Selecteur `html body.report-printing` (et non `body.…`) : il l'emporte
+  //    sur les regles `!important` injectees par le verrou de defilement de
+  //    la modale Radix (`body { overflow: hidden; padding-right: … }`), qui
+  //    rognaient le document imprime.
+  "  html body.report-printing,",
+  "  html body,",
+  "  html {",
+  "    height: auto !important;",
+  "    min-height: 0 !important;",
   "    margin: 0 !important;",
   "    padding: 0 !important;",
-  "    overflow: hidden !important;",
+  "    background: #ffffff !important;",
+  "    overflow: visible !important;",
   "  }",
   "  body.report-printing { background: #ffffff !important; }",
-  "  body.report-printing * { visibility: hidden !important; }",
-  "  body.report-printing [data-slot='dialog-overlay'] {",
-  "    display: none !important;",
+  // 2. TOUT invisible sauf #print-area (repris plus bas) ; animations et
+  //    transitions neutralisees pour ne pas perturber la mise en page.
+  "  body.report-printing * {",
+  "    visibility: hidden !important;",
+  "    animation: none !important;",
+  "    transition: none !important;",
   "  }",
-  "  body.report-printing [data-slot='dialog-content'] {",
-  "    position: static !important; inset: auto !important; transform: none !important;",
-  "    overflow: visible !important; max-width: none !important; max-height: none !important;",
-  "    margin: 0 !important; padding: 0 !important; border: none !important;",
-  "    border-radius: 0 !important; box-shadow: none !important; background: transparent !important;",
+  // 3. Chrome applicatif HORS bulletin : sorti du flux (display: none).
+  //    Selecteurs targets : ils n'apparaissent jamais dans #print-area
+  //    (le `header` de l'etablissement du bulletin n'est donc pas touche).
+  "  body.report-printing [data-slot='sidebar-wrapper'],",
+  "  body.report-printing [data-slot='sidebar'],",
+  "  body.report-printing [data-slot='sidebar-inset'],",
+  "  body.report-printing [data-slot='sidebar-trigger'],",
+  "  body.report-printing [data-slot='sidebar-rail'],",
+  "  body.report-printing [data-slot='dialog-overlay'],",
+  "  body.report-printing [data-slot='dialog-header'],",
+  "  body.report-printing [data-slot='dialog-footer'],",
+  "  body.report-printing [data-slot='dialog-close'],",
+  "  body.report-printing [data-slot='dialog-trigger'],",
+  "  body.report-printing [data-print-hide],",
+  "  body.report-printing nav,",
+  "  body.report-printing aside,",
+  "  body.report-printing button,",
+  "  body.report-printing input,",
+  "  body.report-printing textarea,",
+  "  body.report-printing select { display: none !important; }",
+  // 4. Conteneurs porteurs de la modale : remis dans le flux normal, pleine
+  //    largeur, sans contrainte de dimensions ni de decoupe.
+  "  body.report-printing [data-slot='dialog-content'],",
+  "  body.report-printing [data-print-shell] {",
+  "    position: static !important;",
+  "    inset: auto !important;",
+  "    transform: none !important;",
+  "    display: block !important;",
+  "    width: 100% !important;",
+  "    max-width: none !important;",
+  "    height: auto !important;",
+  "    min-height: 0 !important;",
+  "    max-height: none !important;",
+  "    overflow: visible !important;",
+  "    margin: 0 !important;",
+  "    padding: 0 !important;",
+  "    gap: 0 !important;",
+  "    border: none !important;",
+  "    border-radius: 0 !important;",
+  "    box-shadow: none !important;",
+  "    background: transparent !important;",
   "  }",
+  // 5. Zone du bulletin : seule zone visible, ancree sur toute la page.
   "  body.report-printing #print-area,",
   "  body.report-printing #print-area * { visibility: visible !important; }",
   "  body.report-printing #print-area {",
-  "    position: static !important; width: 100% !important; margin: 0 auto !important;",
-  "    max-width: 190mm !important;",
-  "    height: 275mm !important; max-height: 275mm !important;",
-  "    box-sizing: border-box !important;",
-  "    display: flex !important; flex-direction: column !important;",
-  "    justify-content: space-between !important;",
-  "    overflow: hidden !important;",
+  "    position: static !important;",
+  "    display: block !important;",
+  "    width: 100% !important;",
+  "    max-width: none !important;",
+  "    height: auto !important;",
+  "    min-height: 0 !important;",
+  "    max-height: none !important;",
+  "    margin: 0 !important;",
+  "    padding: 0 !important;",
+  "    overflow: visible !important;",
+  "    border: none !important;",
+  "    border-radius: 0 !important;",
+  "    box-shadow: none !important;",
+  "    background: #ffffff !important;",
+  "  }",
+  // 6. Couleurs / fonds (logo, en-tete indigo, badges de statut) conserves.
+  "  body.report-printing #print-area * {",
   "    -webkit-print-color-adjust: exact !important;",
   "    print-color-adjust: exact !important;",
-  "    page-break-after: avoid !important;",
-  "    break-after: avoid !important;",
+  "  }",
+  // 7. Tableaux : toutes les colonnes visibles, en-tete repete si le tableau
+  //    deborde, lignes jamais coupees en deux.
+  "  body.report-printing #print-area table {",
+  "    width: 100% !important;",
+  "    max-width: none !important;",
+  "    border-collapse: collapse !important;",
+  "    overflow: visible !important;",
+  "  }",
+  "  body.report-printing #print-area thead {",
+  "    display: table-header-group !important;",
+  "  }",
+  "  body.report-printing #print-area tfoot {",
+  "    display: table-row-group !important;",
+  "  }",
+  "  body.report-printing #print-area tr,",
+  "  body.report-printing #print-area td,",
+  "  body.report-printing #print-area th {",
+  "    overflow: visible !important;",
+  "    break-inside: avoid !important;",
   "    page-break-inside: avoid !important;",
   "  }",
-  "  /* Distribution verticale : les sections du rapport s'etalent sur la",
-  "     hauteur utile de la feuille et le pied de page reste ancre en bas. */",
-  "  body.report-printing #print-area .report-body {",
-  "    display: flex !important; flex-direction: column !important;",
-  "    justify-content: space-between !important;",
-  "    flex: 1 0 auto !important;",
-  "  }",
-  "  /* Protection contre le saucissonnage des sections a cheval sur",
-  "     deux pages. */",
+  // 8. Protection contre le saucissonnage des sections a cheval sur deux
+  //    pages (en-tete, cartouche, tableau, assiduite, appreciation,
+  //    signatures, pied de page).
   "  body.report-printing #print-area .print-section,",
   "  body.report-printing #print-area .avoid-break {",
   "    break-inside: avoid !important;",
   "    page-break-inside: avoid !important;",
+  "    break-after: avoid !important;",
+  "    page-break-after: avoid !important;",
   "  }",
   "}",
 ].join("\n");
@@ -96,17 +193,48 @@ export function usePremiumReportPrintCss(): void {
   }, []);
 }
 
-/** Pose la classe `body.report-printing` (scoped) puis lance `window.print()`. */
+/**
+ * Pose la classe `body.report-printing` (scoped) puis lance `window.print()`.
+ *
+ * La classe n'est retirée qu'une fois l'APERÇU d'impression réellement
+ * terminé (`afterprint` ou sortie du media `print`) : la retirer trop tôt
+ * (minuterie courte) faisait perdre le style d'impression au moment où le
+ * navigateur compose la page, d'où les bulletins tronqués à l'écran.
+ */
 export function triggerPremiumReportPrint(): void {
-  document.body.classList.add("report-printing");
-  const cleanup = (): void => {
-    document.body.classList.remove("report-printing");
+  const body = document.body;
+  body.classList.add("report-printing");
+
+  const printMedia =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("print")
+      : null;
+  let cleaned = false;
+  let timer: number | null = null;
+
+  function handleMediaChange(event: MediaQueryListEvent): void {
+    if (!event.matches) cleanup();
+  }
+
+  function cleanup(): void {
+    if (cleaned) return;
+    cleaned = true;
+    body.classList.remove("report-printing");
     window.removeEventListener("afterprint", cleanup);
-  };
+    printMedia?.removeEventListener("change", handleMediaChange);
+    if (timer !== null) window.clearTimeout(timer);
+  }
+
   window.addEventListener("afterprint", cleanup);
+  printMedia?.addEventListener("change", handleMediaChange);
+
+  // Filet de sécurité : si le navigateur n'émet aucun événement (certains
+  // navigateurs annulent l'impression sans `afterprint`), on retire la classe
+  // au bout de 60 s pour ne pas laisser la page figée en mode impression.
+  timer = window.setTimeout(cleanup, 60_000);
+
   window.setTimeout(() => {
     window.print();
-    window.setTimeout(cleanup, 1000);
   }, 60);
 }
 // --------------------------------------
@@ -415,68 +543,46 @@ function ReportGradesTable({
 // Resume d'assiduite
 // --------------------------------------
 
-function AttendanceCounter({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: string;
-}): React.ReactElement {
-  return (
-    <div
-      className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg border px-2 py-1.5 ${tone}`}
-    >
-      <span className="text-sm font-extrabold tabular-nums">{value}</span>
-      <span className="text-[9.5px] font-semibold text-slate-500 uppercase tracking-wide">
-        {label}
-      </span>
-    </div>
-  );
-}
-
 function ReportAttendanceSummary({
   attendance,
+  className,
 }: {
   attendance: PremiumAttendanceSummary;
+  /** Classe analysée (légende du bloc). */
+  className?: string | null;
 }): React.ReactElement {
-  return (
-    <div className="avoid-break print-section mt-3">
-      <h3 className="mb-1.5 text-xs font-extrabold tracking-widest text-indigo-800 uppercase">
-        Résumé d&apos;assiduité
-      </h3>
-      <div className="flex items-center gap-3 rounded-lg border border-slate-200 p-2.5">
-        <div className="flex flex-col items-center rounded-lg bg-indigo-950 px-2.5 py-1.5 text-white">
-          <span className="text-sm font-extrabold tabular-nums">
-            {attendance.total}
-          </span>
-          <span className="text-[9.5px] font-semibold uppercase tracking-wide opacity-90">
-            Total
-          </span>
-        </div>
-        <AttendanceCounter
-          label="Présences"
-          value={attendance.present}
-          tone="border-emerald-200 bg-emerald-50 text-emerald-700"
-        />
-        <AttendanceCounter
-          label="Retards"
-          value={attendance.late}
-          tone="border-amber-200 bg-amber-50 text-amber-700"
-        />
-        <AttendanceCounter
-          label="Absences"
-          value={attendance.absent}
-          tone="border-red-200 bg-red-50 text-red-700"
-        />
-        <AttendanceCounter
-          label="Excusées"
-          value={attendance.excused}
-          tone="border-sky-200 bg-sky-50 text-sky-700"
-        />
+  // Les compteurs bruts sont convertis en métriques (séances présentes /
+  // total, taux de présence en %, absences) par le helper partagé.
+  const metrics = computeAttendanceMetrics({
+    total: attendance.total,
+    present: attendance.present,
+    late: attendance.late,
+    absent: attendance.absent,
+    excused: attendance.excused,
+  });
+
+  if (metrics.totalSessions === 0) {
+    return (
+      <div className="avoid-break print-section mt-3">
+        <h3 className="mb-1.5 text-xs font-extrabold tracking-widest text-indigo-800 uppercase">
+          Assiduité / Présences
+        </h3>
+        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-[11px] text-slate-400">
+          Aucune séance émargée pour cette période.
+        </p>
       </div>
-    </div>
+    );
+  }
+
+  return (
+    <ReportAttendanceBlock
+      metrics={metrics}
+      caption={
+        className
+          ? `Suivi des émargements — classe ${className}.`
+          : "Suivi des émargements de la période."
+      }
+    />
   );
 }
 
@@ -739,8 +845,13 @@ export function PremiumReportSheet({
         />
         <ReportStudentCard data={data} studentName={studentName} />
         <ReportGradesTable data={data} />
+        {/* Assiduité / Présences : bloc positionné AU-DESSUS de la zone
+            d'appréciation, lisible ET visible à l'impression. */}
         {data.attendance !== null ? (
-          <ReportAttendanceSummary attendance={data.attendance} />
+          <ReportAttendanceSummary
+            attendance={data.attendance}
+            className={data.className}
+          />
         ) : null}
         {/* Sections financières + procédure de voyage : RAPPORT GLOBAL
             (admin / staff) uniquement. Le bulletin académique de

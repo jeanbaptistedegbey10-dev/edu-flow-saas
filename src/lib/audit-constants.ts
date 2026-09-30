@@ -19,6 +19,8 @@ export const AUDIT_ACTIONS = {
   PAYMENT_UPDATED: "PAYMENT_UPDATED",
   PAYMENT_DELETED: "PAYMENT_DELETED",
   PAYMENT_VOIDED: "PAYMENT_VOIDED",
+  /** Vente comptoir enregistrée au POS (traçabilité de l'auteur). */
+  SALE_CREATED: "SALE_CREATED",
   CASH_OPENED: "CASH_OPENED",
   CASH_CLOSED: "CASH_CLOSED",
   CERTIFICATE_ISSUED: "CERTIFICATE_ISSUED",
@@ -27,6 +29,13 @@ export const AUDIT_ACTIONS = {
   DEMO_SEEDED: "DEMO_SEEDED",
   SETTINGS_UPDATED: "SETTINGS_UPDATED",
   CLASS_CLOSED: "CLASS_CLOSED",
+  CLASS_STARTED: "CLASS_STARTED",
+  CLASS_ARCHIVED: "CLASS_ARCHIVED",
+  /** Désarchivage / réactivation d'une classe (action inverse). */
+  CLASS_UNARCHIVED: "CLASS_UNARCHIVED",
+  CLASS_REOPENED: "CLASS_REOPENED",
+  SESSION_STARTED: "SESSION_STARTED",
+  SESSION_ENDED: "SESSION_ENDED",
   ROLE_CREATED: "ROLE_CREATED",
   ROLE_UPDATED: "ROLE_UPDATED",
   ROLE_DELETED: "ROLE_DELETED",
@@ -41,6 +50,8 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
 export const AUDIT_ENTITIES = {
   STUDENT: "Student",
   PAYMENT: "Payment",
+  /** Vente comptoir POS (traçabilité de l'auteur de la transaction). */
+  SALE: "Sale",
   CASH_REGISTER_SESSION: "CashRegisterSession",
   CERTIFICATE: "Certificate",
   ORGANIZATION: "Organization",

@@ -76,7 +76,7 @@ const DOUBLE_QUOTE = String.fromCharCode(34); // guillemet double
 const SINGLE_QUOTE = String.fromCharCode(39); // apostrophe
 
 /** Échappe les caractères sensibles du HTML dans les valeurs dynamiques. */
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replace(new RegExp(AMPERSAND, "g"), `${AMPERSAND}amp;`)
     .replace(new RegExp(LESS_THAN, "g"), `${AMPERSAND}lt;`)
@@ -333,7 +333,7 @@ const BASE_STYLES = `
  * quelle que soit la hauteur du logo ou le nombre de lignes de contact.
  * Un filet plein (2px) clôt l'en-tête avant le corps du document.
  */
-function buildOrganizationHeader(
+export function buildOrganizationHeader(
   organization: OrganizationProfileDTO,
   docKind: string,
   docNumber: string
@@ -411,7 +411,7 @@ function buildOrganizationHeader(
  * discret (petits caractères, gris neutre) mais parfaitement lisible une
  * fois imprimé ou exporté en PDF A4.
  */
-function buildLegalFooter(organization: OrganizationProfileDTO): string {
+export function buildLegalFooter(organization: OrganizationProfileDTO): string {
   const legalLine = [
     organization.rccm ? `N° RCCM : ${escapeHtml(organization.rccm)}` : null,
     organization.ifu

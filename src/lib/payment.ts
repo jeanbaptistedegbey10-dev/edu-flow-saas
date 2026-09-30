@@ -711,16 +711,22 @@ export async function initiateFedapayCheckout(
     );
   }
 
-  // Réponse tantôt enveloppée (`v1`), tantôt plate — l'OpenAPI FedaPay
+  // Réponse tantôt enveloppée (`v1` ou `v1/transaction` — les webhooks FedaPay
+  // utilisent ce préfixe d'entité, certaines versions de l'API le renvoient
+  // aussi sur les réponses de création), tantôt plate — l'OpenAPI FedaPay
   // documente POST /transactions → 201 avec l'objet transaction directement
-  // (`{ id, reference, … }`). Les trois formes sont donc acceptées.
+  // (`{ id, reference, … }`). Les quatre formes sont donc acceptées.
   const created = (await createResponse.json()) as {
     id?: number;
     transaction?: { id?: number };
     v1?: { transaction?: { id?: number } };
+    "v1/transaction"?: { id?: number };
   };
   const transactionId =
-    created.v1?.transaction?.id ?? created.transaction?.id ?? created.id;
+    created["v1/transaction"]?.id ??
+    created.v1?.transaction?.id ??
+    created.transaction?.id ??
+    created.id;
 
   if (typeof transactionId !== "number") {
     throw new Error(
@@ -747,14 +753,22 @@ export async function initiateFedapayCheckout(
   }
 
   // Contrat FedaPay : `{ token, url }` (cf. docs « Get the payment link for
-  // a transaction ») — on tolère aussi une enveloppe `v1` éventuelle.
+  // a transaction ») — on tolère aussi les enveloppes `v1` et `v1/token`
+  // (même préfixe d'entité que les réponses de création / webhooks).
   const tokenData = (await tokenResponse.json()) as {
     token?: string;
     url?: string;
     v1?: { token?: string; url?: string };
+    "v1/token"?: { token?: string; url?: string };
   };
-  const token = tokenData.token ?? tokenData.v1?.token;
-  const checkoutUrl = tokenData.url ?? tokenData.v1?.url;
+  const token =
+    tokenData["v1/token"]?.token ??
+    tokenData.v1?.token ??
+    tokenData.token;
+  const checkoutUrl =
+    tokenData["v1/token"]?.url ??
+    tokenData.v1?.url ??
+    tokenData.url;
 
   if (!token) {
     throw new Error("Fedapay : token de paiement manquant dans la réponse.");

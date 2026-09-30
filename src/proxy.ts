@@ -259,6 +259,32 @@ async function handleProxy(request: NextRequest) {
   // Contrôle d'accès par rôle sur /dashboard
   if (pathname.startsWith(DASHBOARD_PATH)) {
 
+    // ---------------------------------------------------------------
+    // Vue de classe UNIFIÉE
+    // ---------------------------------------------------------------
+    // L'ancienne fiche de classe détaillée n'existe plus : tout accès à
+    // `/dashboard/classes/<id>` est redirigé vers la page unique
+    // « Présences & Cahier de texte », qui porte la classe via
+    // `?classId=…`.
+    //
+    // La redirection est effectuée ICI, dans le proxy, et non dans la page :
+    // le layout du tableau de bord commençant à diffuser le document avant que
+    // la page ne soit résolue, un `redirect()` côté page se traduisait par un
+    // `<meta http-equiv="refresh">` (retour 200 + délai d'une seconde) au lieu
+    // d'une vraie redirection HTTP. Depuis le proxy, on obtient un vrai 307,
+    // sans rendu inutile du layout.
+    //
+    // La route `/dashboard/classes/<id>/close` (écran de clôture) reste
+    // ATTEIGNABLE : seule la fiche de classe est redirigée.
+    const unifiedClassMatch = /^\/dashboard\/classes\/([^/]+)$/.exec(pathname);
+
+    if (unifiedClassMatch) {
+      const target = new URL("/dashboard/attendance", request.url);
+      target.searchParams.set("classId", unifiedClassMatch[1]);
+
+      return NextResponse.redirect(target);
+    }
+
     // AUCUN accès au tableau de bord pour les étudiants :
     // ils ne disposent d'aucun compte dans cette application.
     if (role === "STUDENT") {

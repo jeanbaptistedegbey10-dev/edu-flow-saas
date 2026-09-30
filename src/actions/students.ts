@@ -7,7 +7,8 @@ import { after } from "next/server";
 
 import { sendWelcomeEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
+import { getCurrentOrganizationId, getCurrentSessionActor, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
+import { getCurrentAcademicYear } from "@/lib/class-status";
 import { assertCanMutate } from "@/lib/license-check";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
 import { logAuditEvent } from "@/lib/actions/audit";
@@ -508,9 +509,33 @@ export type StudentPaymentDTO = {
    * (historique / reçu) mais son montant n'alimente plus la caisse.
    */
   isVoided: boolean;
+  /**
+   * Règlement « hors système » / antérieur : met à jour le solde débiteur de
+   * l'étudiant mais n'alimente PAS la session de caisse physique du jour.
+   */
+  isOutOfSystem: boolean;
   reference: string | null;
   description: string | null;
   paidAt: Date;
+};
+
+/**
+ * Transaction de caisse (achats en comptoir) rattachée à la fiche d'un
+ * étudiant : livres, services annexes, frais divers…
+ * Alimente le relevé financier 360° (historique complet des mouvements
+ * monétaires de l'élève, scolarité comprise).
+ */
+export type StudentTransactionDTO = {
+  id: string;
+  /** Nature de la transaction (TUITION / BOOK / SERVICE / OTHER). */
+  type: string;
+  /** Libellé détaillé de l'achat. */
+  description: string;
+  /** Montant en FCFA (charge pour l'élève, toujours positif). */
+  amount: number;
+  /** Moyen de paiement saisi en caisse (Cash, Mobile Money, Card…). */
+  paymentMode: string;
+  createdAt: Date;
 };
 
 export type StudentDetailDTO = {
@@ -562,7 +587,12 @@ export type StudentDetailDTO = {
   parentPhone1: string | null;
   /** Numéro de téléphone secondaire du parent / tuteur (optionnel). */
   parentPhone2: string | null;
-  payments: StudentPaymentDTO[];
+    payments: StudentPaymentDTO[];
+  /**
+   * Transactions de caisse (achats en comptoir) rattachées à l'étudiant :
+   * livres, services annexes, frais divers. Alimente le relevé 360°.
+   */
+  studentTransactions: StudentTransactionDTO[];
 };
 
 /**
@@ -617,7 +647,7 @@ export async function getStudentDetail(
       throw new Error("Étudiant introuvable dans votre organisation.");
     }
 
-    const [paidAggregate, payments] = await Promise.all([
+    const [paidAggregate, payments, studentTransactions] = await Promise.all([
       // Montant encaissé : uniquement les règlements confirmés (COMPLETED) et
       // actifs (non suspendus — `isVoided` exclut les écritures d'un étudiant
       // repassé au statut Prospect).
@@ -635,9 +665,24 @@ export async function getStudentDetail(
           paymentMethod: true,
           status: true,
           isVoided: true,
+          isOutOfSystem: true,
           reference: true,
           description: true,
           paidAt: true,
+        },
+      }),
+      // Transactions de caisse (achats comptoir) rattachées à l'étudiant :
+      // livres, services annexes, frais divers — alimentent le relevé 360°.
+      prisma.studentTransaction.findMany({
+        where: { studentId, organizationId },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          type: true,
+          description: true,
+          amount: true,
+          paymentMode: true,
+          createdAt: true,
         },
       }),
     ]);
@@ -684,6 +729,7 @@ export async function getStudentDetail(
       paidAmount,
       remainingAmount,
       payments,
+      studentTransactions,
     };
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -693,6 +739,160 @@ export async function getStudentDetail(
     throw new Error(
       "Impossible de charger la fiche de l'étudiant pour le moment."
     );
+  }
+}
+
+// --------------------------------------
+// Réinscription — « Inscrire dans une nouvelle classe »
+// --------------------------------------
+
+/** Résultat de la réinscription d'un étudiant. */
+export type ReEnrollmentResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string };
+
+/**
+ * Réinscrit un étudiant dans une nouvelle classe (bouton « Inscrire dans une
+ * nouvelle classe » de la fiche étudiant).
+ *
+ * Comportement garanti :
+ * - l'inscription (`ClassEnrollment`) ACTIVE courante de l'élève passe au
+ *   statut `PROMOTED_MANUALLY` — équivalent sémantique du « COMPLETED »
+ *   demandé, l'enum métier ne comportant pas de valeur COMPLETED — et son
+ *   historique est PRÉSERVÉ (jamais écrasé ni supprimé) ;
+ * - une nouvelle `ClassEnrollment` ACTIVE est créée pour la classe cible,
+ *   horodatée sur l'année académique courante ;
+ * - l'inscription au cours porteur (`Enrollment`) est créée si absente ;
+ * - `currentClassId` de l'étudiant pointe vers la nouvelle classe.
+ *
+ * Les décisions de passage « officielles » (PASSED / FAILED) restent du
+ * ressort de la clôture de classe (`class-closure.ts`) : cette action couvre
+ * le cas d'une réinscription administrative hors clôture.
+ */
+export async function reEnrollStudentAction(input: {
+  studentId: string;
+  newClassId: string;
+}): Promise<ReEnrollmentResult> {
+  await assertCanMutate();
+
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    if (!input.studentId || !input.newClassId) {
+      return {
+        ok: false,
+        message: "Étudiant ou classe cible manquant.",
+      };
+    }
+
+    const [student, targetClass] = await Promise.all([
+      prisma.student.findFirst({
+        where: { id: input.studentId, organizationId },
+        select: { id: true, firstName: true, lastName: true, currentClassId: true },
+      }),
+      prisma.class.findFirst({
+        where: { id: input.newClassId, organizationId },
+        select: { id: true, name: true, courseId: true },
+      }),
+    ]);
+
+    if (!student) {
+      return { ok: false, message: "Étudiant introuvable dans votre organisation." };
+    }
+
+    if (!targetClass) {
+      return { ok: false, message: "Classe cible introuvable dans votre organisation." };
+    }
+
+    if (student.currentClassId === targetClass.id) {
+      return {
+        ok: false,
+        message: "L'étudiant est déjà inscrit dans cette classe.",
+      };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // 1) Clôture des inscriptions ACTIVE : historique conservé, jamais
+      //    écrasé (les lignes passées restent en base avec leur statut).
+      await tx.classEnrollment.updateMany({
+        where: {
+          studentId: student.id,
+          organizationId,
+          status: "ACTIVE",
+        },
+        data: { status: "PROMOTED_MANUALLY" },
+      });
+
+      // 2) Nouvelle inscription ACTIVE dans la classe cible (upsert : si le
+      //    dossier pédagogique existe déjà, il est simplement réactivé).
+      await tx.classEnrollment.upsert({
+        where: {
+          studentId_classId: {
+            studentId: student.id,
+            classId: targetClass.id,
+          },
+        },
+        create: {
+          organizationId,
+          studentId: student.id,
+          classId: targetClass.id,
+          status: "ACTIVE",
+          academicYear: getCurrentAcademicYear(),
+        },
+        update: {
+          status: "ACTIVE",
+          finalDecisionNote: null,
+          enrolledAt: new Date(),
+        },
+      });
+
+      // 3) Inscription au cours porteur de la classe (idempotent).
+      await tx.enrollment.upsert({
+        where: {
+          studentId_courseId: {
+            studentId: student.id,
+            courseId: targetClass.courseId,
+          },
+        },
+        create: { studentId: student.id, courseId: targetClass.courseId },
+        update: {},
+      });
+
+      // 4) La classe courante de l'élève devient la classe cible.
+      await tx.student.update({
+        where: { id: student.id },
+        data: { currentClassId: targetClass.id },
+      });
+    });
+
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.STUDENT_UPDATED,
+      entity: AUDIT_ENTITIES.STUDENT,
+      entityId: student.id,
+      details: {
+        action: "RE_ENROLLMENT",
+        newClassId: targetClass.id,
+        newClassName: targetClass.name,
+      },
+    });
+
+    revalidatePath("/dashboard/students");
+    revalidatePath(`/dashboard/students/${student.id}`);
+    revalidatePath("/dashboard/classes");
+
+    return {
+      ok: true,
+      message: `${student.firstName} ${student.lastName} a été inscrit dans la classe « ${targetClass.name} ». L'inscription précédente reste dans son historique.`,
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[reEnrollStudentAction] Échec de réinscription :", error);
+
+    return {
+      ok: false,
+      message: "Une erreur est survenue lors de la réinscription de l'étudiant.",
+    };
   }
 }
 
@@ -999,6 +1199,9 @@ export async function createStudentAction(
   }
 
   const organizationId = await getCurrentOrganizationId();
+  // Auteur des écritures financières générées par la création (frais
+  // d'inscription, montants hérités) : ID + nom de l'utilisateur connecté.
+  const actor = await getCurrentSessionActor();
 
   // Contrôle d'unicité de l'email — le champ n'a pas de contrainte @unique
   // au niveau du schéma (il est optionnel), mais l'application exige que deux
@@ -1177,6 +1380,8 @@ export async function createStudentAction(
             data: {
               organizationId,
               studentId: student.id,
+              createdById: actor.id,
+              createdByName: actor.name,
               amount: financials.legacyPaidAmount,
               paymentMethod: "CASH",
               status: "COMPLETED",
@@ -1193,6 +1398,7 @@ export async function createStudentAction(
               organizationId,
               studentId: student.id,
               classId: targetClass.id,
+              academicYear: getCurrentAcademicYear(),
             },
           });
 
@@ -1214,6 +1420,8 @@ export async function createStudentAction(
             data: {
               organizationId,
               studentId: student.id,
+              createdById: actor.id,
+              createdByName: actor.name,
               amount: registrationFee,
               paymentMethod: "CASH",
               status: "COMPLETED",
@@ -1389,6 +1597,8 @@ export async function updateStudentAction(
   }
 
   const organizationId = await getCurrentOrganizationId();
+  // Auteur des écritures financières générées par la mise à jour.
+  const actor = await getCurrentSessionActor();
 
   try {
     // Isolation multi-tenant : l'étudiant doit appartenir à l'organisation active.
@@ -1557,6 +1767,7 @@ export async function updateStudentAction(
             organizationId,
             studentId,
             classId: targetClass.id,
+            academicYear: getCurrentAcademicYear(),
           },
           update: {},
         });
@@ -1586,6 +1797,8 @@ export async function updateStudentAction(
           data: {
             organizationId,
             studentId,
+            createdById: actor.id,
+            createdByName: actor.name,
             amount: registrationFee,
             paymentMethod: "CASH",
             status: "COMPLETED",

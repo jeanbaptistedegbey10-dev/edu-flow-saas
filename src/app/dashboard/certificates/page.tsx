@@ -1,10 +1,13 @@
 import { connection } from "next/server";
 
-import { getCertificates } from "@/lib/actions/certificates";
-import { getStudents } from "@/actions/students";
+import { getClasses } from "@/actions/classes";
 import { getCourses } from "@/actions/courses";
+import { getStudents } from "@/actions/students";
+import {
+  getCertificateEnrollmentMap,
+  getCertificates,
+} from "@/lib/actions/certificates";
 import { CertificatesView } from "@/components/certificates/certificates-view";
-import { getCurrentOrganizationProfile } from "@/actions/payments";
 
 export const metadata = {
   title: "Certificats | EduFlow",
@@ -14,11 +17,14 @@ export const metadata = {
 export default async function CertificatesPage() {
   await connection();
 
-  const [certificates, students, courses] = await Promise.all([
-    getCertificates(),
-    getStudents(),
-    getCourses(),
-  ]);
+  const [certificates, students, courses, classes, enrollmentLinks] =
+    await Promise.all([
+      getCertificates(),
+      getStudents(),
+      getCourses(),
+      getClasses(),
+      getCertificateEnrollmentMap(),
+    ]);
 
   return (
     <div className="space-y-6">
@@ -29,7 +35,13 @@ export default async function CertificatesPage() {
         </p>
       </div>
 
-      <CertificatesView certificates={certificates} students={students} />
+      <CertificatesView
+        certificates={certificates}
+        students={students}
+        courses={courses}
+        classes={classes}
+        enrollmentLinks={enrollmentLinks}
+      />
     </div>
   );
 }

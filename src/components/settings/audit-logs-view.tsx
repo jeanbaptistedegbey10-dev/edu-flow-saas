@@ -36,67 +36,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  getAuditActionBadgeClass,
+  getAuditActionLabel,
+  getAuditEntityLabel,
+  formatAuditDetails,
+  maskInternalId,
+  summarizeAuditDetails,
+} from "@/lib/audit-labels";
 import { exportToCsv, type CsvColumn } from "@/lib/export";
 import { cn } from "@/lib/utils";
 
-/** Catégories d'actions pour le badge de criticité. */
-type ActionCategory = "creation" | "modification" | "deletion" | "other";
+// La catégorisation des actions ET leurs libellés français sont centralisés
+// dans `@/lib/audit-labels` (source de vérité partagée avec l'export CSV et
+// la sanitisation) : ce composant ne redéfinit plus aucun dictionnaire local.
 
-function getActionCategory(action: string): ActionCategory {
-  if (action.includes("CREATED") || action.includes("ISSUED") || action.includes("SEEDED")) return "creation";
-  if (action.includes("UPDATED") || action.includes("OPENED") || action.includes("RECEIVED")) return "modification";
-  if (action.includes("DELETED") || action.includes("REVOKED") || action.includes("CLOSED") || action.includes("RESET") || action.includes("VOIDED")) return "deletion";
-  return "other";
-}
-
-function getActionBadgeClass(action: string): string {
-  const category = getActionCategory(action);
-  const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
-  switch (category) {
-    case "creation":
-      return `${base} border border-emerald-200/60 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400`;
-    case "modification":
-      return `${base} border border-sky-200/60 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-400`;
-    case "deletion":
-      return `${base} border border-red-200/60 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400`;
-    default:
-      return `${base} border border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400`;
-  }
-}
-
-function getActionLabel(action: string): string {
-  const labels: Record<string, string> = {
-    STUDENT_CREATED: "Étudiant créé",
-    STUDENT_UPDATED: "Étudiant modifié",
-    STUDENT_DELETED: "Étudiant supprimé",
-    STUDENTS_IMPORT: "Import CSV",
-    PAYMENT_RECEIVED: "Paiement reçu",
-    PAYMENT_UPDATED: "Paiement modifié",
-    PAYMENT_DELETED: "Paiement supprimé",
-    PAYMENT_VOIDED: "Paiement annulé",
-    CASH_OPENED: "Caisse ouverte",
-    CASH_CLOSED: "Caisse clôturée",
-    CERTIFICATE_ISSUED: "Certificat émis",
-    CERTIFICATE_REVOKED: "Certificat révoqué",
-    DEMO_RESET: "Démo réinitialisée",
-    DEMO_SEEDED: "Démo seedée",
-    SETTINGS_UPDATED: "Paramètres modifiés",
-    ROLE_CREATED: "Rôle créé",
-    ROLE_UPDATED: "Rôle modifié",
-    ROLE_DELETED: "Rôle supprimé",
-    USER_CREATED: "Utilisateur créé",
-    USER_UPDATED: "Utilisateur modifié",
-    USER_DELETED: "Utilisateur supprimé",
-  };
-  return labels[action] ?? action;
-}
-
-const AUDIT_CSV_COLUMNS: readonly CsvColumn<AuditLogWithUser & { actionLabel: string }>[] = [
+const AUDIT_CSV_COLUMNS: readonly CsvColumn<
+  AuditLogWithUser & { actionLabel: string; entityLabel: string; detailsSummary: string }
+>[] = [
   { header: "Date", value: (row) => new Date(row.createdAt).toLocaleString("fr-FR") },
   { header: "Utilisateur", value: (row) => `${row.user.firstName} ${row.user.lastName}` },
   { header: "Action", value: (row) => row.actionLabel },
-  { header: "Entité", value: (row) => row.entity },
+  { header: "Entité", value: (row) => row.entityLabel },
   { header: "ID Entité", value: (row) => row.entityId ?? "" },
+  { header: "Détails", value: (row) => row.detailsSummary },
   { header: "Rôle", value: (row) => row.user.role },
 ];
 
@@ -109,28 +72,41 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 });
 
 /**
- * Cellule « Détails » : aperçu JSON tronqué + modale « Voir détails ».
+ * Cellule « Détails » : résumé textuel en français + modale « Voir détails ».
  *
- * La troncature CSS (`max-w-[12rem] truncate`) empêche la colonne de
- * s'étirer indéfiniment (les données JSON sont volumineuses) et garantit
- * que le reste du tableau — dont les boutons d'action à droite — reste
- * visible sans débordement horizontal de la page.
+ * AUCUNE chaîne JSON brute n'est affichée dans le tableau (l'ancien rendu
+ * exposait `{"className":"…"}`). Le contenu est désormais formaté par
+ * `formatAuditDetails` / `summarizeAuditDetails` (`@/lib/audit-labels`), qui :
+ *  - traduisent les CLÉS en libellés métier (« Classe », « Montant », …) ;
+ *  - formatent les valeurs (montants en FCFA, booléens, statuts énumérés) ;
+ *  - masquent les données sensibles et les identifiants techniques internes.
+ *
+ * La troncature CSS (`max-w-[16rem] truncate`) empêche la colonne de
+ * s'étirer indéfiniment et garantit que le reste du tableau reste visible sans
+ * débordement horizontal de la page.
  */
-function AuditLogDetailsCell({ details }: { details: unknown }) {
-  if (details === null || details === undefined) {
+function AuditLogDetailsCell({
+  action,
+  details,
+}: {
+  action: string;
+  details: unknown;
+}) {
+  const entries = formatAuditDetails(details, action);
+
+  if (entries.length === 0) {
     return <span className="text-xs text-muted-foreground">—</span>;
   }
 
-  const compact = JSON.stringify(details);
-  const pretty = JSON.stringify(details, null, 2);
+  const summary = summarizeAuditDetails(details, action, 2);
 
   return (
     <div className="flex items-center justify-end gap-2">
       <span
-        className="max-w-[12rem] truncate text-xs text-muted-foreground"
-        title={compact}
+        className="max-w-[16rem] truncate text-xs text-muted-foreground"
+        title={summary}
       >
-        {compact}
+        {summary}
       </span>
       <Dialog>
         <DialogTrigger asChild>
@@ -140,11 +116,21 @@ function AuditLogDetailsCell({ details }: { details: unknown }) {
         </DialogTrigger>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Détails de l&apos;entrée d&apos;audit</DialogTitle>
+            <DialogTitle>Détails de l&apos;opération</DialogTitle>
           </DialogHeader>
-          <pre className="max-h-[60vh] overflow-auto rounded-md border bg-muted/30 p-3 text-xs whitespace-pre-wrap break-words">
-            {pretty}
-          </pre>
+          <dl className="max-h-[60vh] space-y-2 overflow-auto pr-1 text-sm">
+            {entries.map((entry) => (
+              <div
+                key={entry.key}
+                className="flex items-start justify-between gap-4 border-b pb-2 last:border-b-0"
+              >
+                <dt className="text-muted-foreground">{entry.label}</dt>
+                <dd className="text-right font-medium break-words">
+                  {entry.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
         </DialogContent>
       </Dialog>
     </div>
@@ -167,6 +153,45 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
   const [actions, setActions] = React.useState<string[]>([]);
   const [entities, setEntities] = React.useState<string[]>([]);
   const [users, setUsers] = React.useState<{ id: string; firstName: string; lastName: string }[]>([]);
+
+  /**
+   * Applique un nouveau filtre ET revient à la page 1.
+   *
+   * La remise à zéro est faite ICI, dans le gestionnaire d'événement, et non
+   * dans un `useEffect` de synchronisation : la règle
+   * `react-hooks/set-state-in-effect` interdit un `setState` synchrone dans un
+   * effet (renders en cascade inutiles). Le comportement est identique — un
+   * filtre modifié affiche toujours la première page de résultats.
+   */
+  const applyFilter = React.useCallback(
+    (setter: React.Dispatch<React.SetStateAction<string>>) =>
+      (value: string) => {
+        setter(value);
+        setPage(1);
+      },
+    []
+  );
+
+  const handleActionFilterChange = React.useMemo(
+    () => applyFilter(setActionFilter),
+    [applyFilter]
+  );
+  const handleEntityFilterChange = React.useMemo(
+    () => applyFilter(setEntityFilter),
+    [applyFilter]
+  );
+  const handleUserFilterChange = React.useMemo(
+    () => applyFilter(setUserFilter),
+    [applyFilter]
+  );
+  const handleStartDateChange = React.useMemo(
+    () => applyFilter(setStartDate),
+    [applyFilter]
+  );
+  const handleEndDateChange = React.useMemo(
+    () => applyFilter(setEndDate),
+    [applyFilter]
+  );
 
   const pageSize = 25;
 
@@ -222,12 +247,13 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
     return () => window.clearTimeout(timer);
   }, [loadLogs]);
 
-  React.useEffect(() => {
-    setPage(1);
-  }, [actionFilter, entityFilter, userFilter, startDate, endDate]);
-
   function handleExport() {
-    const exportData = logs.map((log) => ({ ...log, actionLabel: getActionLabel(log.action) }));
+    const exportData = logs.map((log) => ({
+      ...log,
+      actionLabel: getAuditActionLabel(log.action),
+      entityLabel: getAuditEntityLabel(log.entity),
+      detailsSummary: summarizeAuditDetails(log.details, log.action, 3),
+    }));
     exportToCsv(`audit-log-${new Date().toISOString().split("T")[0]}`, exportData, AUDIT_CSV_COLUMNS);
   }
 
@@ -239,7 +265,7 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
           <span className="text-sm font-medium">Filtres</span>
         </div>
 
-        <Select value={actionFilter} onValueChange={setActionFilter}>
+        <Select value={actionFilter} onValueChange={handleActionFilterChange}>
           <SelectTrigger className="h-9 w-44">
             <SelectValue placeholder="Type d'action" />
           </SelectTrigger>
@@ -247,13 +273,13 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
             <SelectItem value="all">Toutes les actions</SelectItem>
             {actions.map((action) => (
               <SelectItem key={action} value={action}>
-                {getActionLabel(action)}
+                {getAuditActionLabel(action)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        <Select value={entityFilter} onValueChange={setEntityFilter}>
+        <Select value={entityFilter} onValueChange={handleEntityFilterChange}>
           <SelectTrigger className="h-9 w-40">
             <SelectValue placeholder="Entité" />
           </SelectTrigger>
@@ -261,13 +287,13 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
             <SelectItem value="all">Toutes les entités</SelectItem>
             {entities.map((entity) => (
               <SelectItem key={entity} value={entity}>
-                {entity}
+                {getAuditEntityLabel(entity)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        <Select value={userFilter} onValueChange={setUserFilter}>
+        <Select value={userFilter} onValueChange={handleUserFilterChange}>
           <SelectTrigger className="h-9 w-40">
             <SelectValue placeholder="Utilisateur" />
           </SelectTrigger>
@@ -283,9 +309,9 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
 
         <div className="flex items-center gap-1">
           <CalendarIcon className="size-4 text-muted-foreground" />
-          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-9 w-36" />
+          <Input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)} className="h-9 w-36" />
           <span className="text-xs text-muted-foreground">→</span>
-          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-9 w-36" />
+          <Input type="date" value={endDate} onChange={(e) => handleEndDateChange(e.target.value)} className="h-9 w-36" />
         </div>
 
         <Button variant="outline" size="sm" onClick={handleExport} disabled={logs.length === 0}>
@@ -316,7 +342,7 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
             ) : logs.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                  Aucune entrée d'audit trouvée.
+                  Aucune entrée d&apos;audit trouvée.
                 </TableCell>
               </TableRow>
             ) : (
@@ -330,18 +356,23 @@ export function AuditLogsView({ organizationId }: { organizationId: string }) {
                     <div className="text-xs text-muted-foreground">{log.user.email}</div>
                   </TableCell>
                   <TableCell>
-                    <span className={cn(getActionBadgeClass(log.action))}>
-                      {getActionLabel(log.action)}
+                    <span className={cn(getAuditActionBadgeClass(log.action))}>
+                      {getAuditActionLabel(log.action)}
                     </span>
                   </TableCell>
                   <TableCell className="text-sm">
-                    <span className="font-mono text-xs">{log.entity}</span>
+                    <span className="text-xs">{getAuditEntityLabel(log.entity)}</span>
                     {log.entityId && (
-                      <span className="ml-1 text-xs text-muted-foreground">({log.entityId.slice(0, 8)}…)</span>
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        ({maskInternalId(log.entityId)})
+                      </span>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    <AuditLogDetailsCell details={log.details} />
+                    <AuditLogDetailsCell
+                      action={log.action}
+                      details={log.details}
+                    />
                   </TableCell>
                 </TableRow>
               ))

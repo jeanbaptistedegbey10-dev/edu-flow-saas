@@ -16,6 +16,10 @@ import {
   formatScore,
   formatScoreOnScale,
 } from "@/lib/premium-report";
+import {
+  buildAttendanceSectionHtml,
+  computeAttendanceMetrics,
+} from "@/lib/report-attendance";
 
 const AMP = String.fromCharCode(38);
 const LT = String.fromCharCode(60);
@@ -115,12 +119,12 @@ const STYLES = [
   ".att { margin-top: 12px; }",
   ".att > p, .fin > p { margin: 0 0 6px; font-size: 10px; font-weight: 800;",
   " text-transform: uppercase; letter-spacing: 0.1em; color: #3730a3; }",
-  ".att .row { display: flex; gap: 8px; align-items: stretch; }",
-  ".att .cell { flex: 1; padding: 8px 0; border: 1px solid #e5e7eb;",
-  " border-radius: 8px; text-align: center; }",
-  ".att .cell b { display: block; font-size: 14px; font-weight: 800; }",
-  ".att .cell small { display: block; font-size: 8.5px; text-transform: uppercase;",
-  " letter-spacing: 0.06em; color: #6b7280; }",
+  ".att .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }",
+  ".att .kpi { padding: 6px 8px; border-radius: 8px; text-align: center;",
+  " border: 1px solid rgba(15, 23, 42, 0.08); }",
+  ".att .kpi strong { display: block; font-size: 13px; font-weight: 800; }",
+  ".att .kpi span { display: block; margin-top: 2px; font-size: 9.5px;",
+  " font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }",
   ".fin { margin-top: 10px; padding: 10px 12px; border: 1px solid #e5e7eb;",
   " border-radius: 8px; background: #fafafa; }",
   ".fin .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 14px; }",
@@ -255,18 +259,20 @@ export function buildPremiumReportDocument(
             .join("")
     }</tbody></table>`;
 
+  // Assiduité / Présences : bloc commun (mêmes métriques que le rendu React)
+  // positionné au-dessus de la zone d'appréciation.
   const attendanceHtml =
     data.attendance === null
       ? ""
-      : [
-          '<section class="att"><p>Résumé d\u2019assiduité</p><div class="row">',
-          `<div class="cell"><b>${data.attendance.total}</b><small>Total</small></div>`,
-          `<div class="cell"><b>${data.attendance.present}</b><small>Présences</small></div>`,
-          `<div class="cell"><b>${data.attendance.late}</b><small>Retards</small></div>`,
-          `<div class="cell"><b>${data.attendance.absent}</b><small>Absences</small></div>`,
-          `<div class="cell"><b>${data.attendance.excused}</b><small>Excusées</small></div>`,
-          "</div></section>",
-        ].join("\n");
+      : buildAttendanceSectionHtml(
+          computeAttendanceMetrics({
+            total: data.attendance.total,
+            present: data.attendance.present,
+            late: data.attendance.late,
+            absent: data.attendance.absent,
+            excused: data.attendance.excused,
+          })
+        );
 
   // Récapitulatif financier + procédure de voyage : RAPPORT GLOBAL
   // (admin / staff) uniquement — le bulletin académique est sans données

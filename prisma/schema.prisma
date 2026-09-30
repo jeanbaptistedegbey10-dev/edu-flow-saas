@@ -97,6 +97,19 @@ enum SaleStatus {
   REFUNDED
 }
 
+/// Type de transaction rattachée à un étudiant dans son relevé financier
+/// global (compte tenuu de la scolarité et des achats en caisse) :
+/// - TUITION  : règlement des frais de scolarité (table `Payment`) ;
+/// - BOOK     : achat d'un livre / manuel au comptoir (vente POS) ;
+/// - SERVICE  : prestation de service (photocopie, traduction assermentée…)
+/// - OTHER    : toute autre opération rattachée à l'élève.
+enum TransactionType {
+  TUITION
+  BOOK
+  SERVICE
+  OTHER
+}
+
 enum DocumentType {
   PASSPORT
   IDENTITY
@@ -118,6 +131,12 @@ enum RegistrationFeePolicy {
 /// Une classe clôturée (fin d'année / de session) devient `COMPLETED` — son
 /// historique (inscriptions, notes, décisions de passage) reste consultable.
 enum ClassStatus {
+  /// Classe programmée (non démarrée) — planification en attente de début.
+  PLANIFIED
+  /// Classe démarrée (cycle de vie explicite) — sessions en cours.
+  IN_PROGRESS
+  /// Alias historique « en cours » (classes créées avant le cycle de vie
+  /// explicite) : traité comme IN_PROGRESS par l'interface.
   ACTIVE
   COMPLETED
   ARCHIVED
@@ -309,6 +328,8 @@ model Organization {
   classes          Class[]
   classEnrollments ClassEnrollment[]
   payments         Payment[]
+  studentTransactions StudentTransaction[]
+
   travelProcedures TravelProcedure[]
   expenses         Expense[]
   payrolls         Payroll[]
@@ -331,6 +352,8 @@ model Organization {
   certificates     Certificate[]
   leadNotes        LeadNote[]
   auditLogs        AuditLog[]
+  /// Appréciations personnalisées des bulletins (examen / récapitulatif).
+  bulletinAppreciations BulletinAppreciation[]
 
 }
 
@@ -367,6 +390,7 @@ model User {
   createdTasks    Task[]            @relation("TaskCreator")
   managedTravels  TravelProcedure[] @relation("TravelAdvisor")
   createdSales    Sale[]            @relation("SaleCreator")
+  recordedPayments Payment[]        @relation("PaymentCreator")
   courseLogs      CourseLog[]       @relation("TeacherCourseLogs")
   sentReferrals   Referral[]        @relation("ReferrerUser")
   receivedReferrals Referral[]      @relation("ReferredUser")
@@ -441,6 +465,8 @@ model Student {
   classEnrollments ClassEnrollment[]
   currentClass     Class?            @relation("StudentCurrentClass", fields: [currentClassId], references: [id], onDelete: SetNull)
   payments         Payment[]
+  studentTransactions StudentTransaction[]
+
   travelProcedures TravelProcedure[]
   tasks            Task[]
   attendances      Attendance[]
@@ -451,6 +477,8 @@ model Student {
   paymentSchedules PaymentSchedule[]
   certificates     Certificate[]
   leadNotes        LeadNote[]
+  /// Appréciations personnalisées des bulletins (examen / récapitulatif).
+  bulletinAppreciations BulletinAppreciation[]
 }
 
 model Course {
@@ -492,12 +520,13 @@ model Class {
   /// Frais de scolarité configurés pour la classe (FCFA). Lorsqu'il est
   /// absent, le prix du cours porteur est utilisé comme montant par défaut.
   tuitionFee     Float?
+  /// Statut pédagogique de la classe — cycle de vie explicite :
+  /// PLANIFIED (programmée, non démarrée) → IN_PROGRESS (sessions en cours,
+  /// alias historique ACTIVE) → COMPLETED (clôturée) ou ARCHIVED.
+  status         ClassStatus @default(PLANIFIED)
   /// Seuil de validation (passMark) de la classe — note minimale sur 100 requise
   /// pour valider un module. Surcharge le barème par défaut des évaluations.
   passMark       Float        @default(60)
-  /// Statut pédagogique de la classe : ACTIVE (en cours), COMPLETED (session
-  /// clôturée) ou ARCHIVED (classe inutilisée).
-  status         ClassStatus @default(ACTIVE)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -549,6 +578,10 @@ model ClassEnrollment {
   organizationId    String
   studentId         String
   classId           String
+  /// Année académique de l'inscription (ex : « 2025-2026 »). Conservée
+  /// historiquement : une réinscription crée une nouvelle ligne avec une
+  /// nouvelle année, l'historique des années précédentes reste intact.
+  academicYear      String
   /// Statut de fin de session : ACTIVE tant que la classe n'est pas clôturée,
   /// puis PASSED / PROMOTED_MANUALLY / FAILED / DROPPED selon la décision.
   status            ClassEnrollmentStatus @default(ACTIVE)
@@ -601,6 +634,12 @@ model ClassSession {
   sessionDate    DateTime
   startTime      DateTime
   endTime        DateTime
+  /// Clôture explicite de la séance du jour via « Terminer la séance ».
+  /// Tant que `false`, la séance est « en cours » (émargement modifiable).
+  /// Passé à `true`, le bloc fiche classe repasse en état « Séance terminée ».
+  isCompleted    Boolean   @default(false)
+  /// Horodatage de clôture (renseigné lors du passage à `isCompleted: true`).
+  endedAt        DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -734,6 +773,39 @@ model Grade {
   @@index([studentId, status])
 }
 
+/// Appréciation PERSONNALISÉE d'un bulletin, rédigée par l'enseignant ou
+/// l'administration (texte libre), affichée sur le bulletin ET à l'impression.
+///
+/// Le texte automatique généré par `defaultAppreciationForValidation`
+/// (« 3 modules validés sur 4… ») reste la valeur par défaut : cette ligne
+/// n'existe QUE lorsqu'un texte personnalisé a été enregistré. Un texte
+/// personnalisé vide supprime la ligne et restaure l'automatique.
+///
+/// `scope` identifie le bulletin concerné sans créer deux tables :
+/// - `exam:<evaluationId>`  → bulletin d'un examen (période / session précise) ;
+/// - `recap:<classId>`      → bulletin récapitulatif de la classe
+///   (`recap:global` si l'étudiant n'a pas de classe active).
+///
+/// Les deux colonnes de la clé unique sont non nulles : l'unicité est donc
+/// réellement garantie en base (contrairement à une colonne nullable).
+model BulletinAppreciation {
+  id             String   @id @default(cuid())
+  organizationId String
+  studentId      String
+  /// Portée du bulletin : « exam:<evaluationId> » ou « recap:<classId> ».
+  scope          String
+  /// Texte rédigé par l'enseignant (sauts de ligne conservés à l'impression).
+  text           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, studentId, scope])
+  @@index([studentId])
+}
+
 // --------------------------------------
 // Travel Workflows (Procédures dynamiques)
 // --------------------------------------
@@ -812,6 +884,14 @@ model Payment {
   organizationId    String
   studentId         String?
   travelProcedureId String?
+  /// Auteur du règlement : identifiant de l'utilisateur connecté au moment de
+  /// la saisie. NULLABLE pour préserver les règlements antérieurs (seed, imports,
+  /// écritures automatiques) qui n'ont pas d'auteur identifiable.
+  createdById       String?
+  /// Nom complet de l'auteur, figé au moment de la saisie (métadonnées de
+  /// traçabilité de la transaction — reste lisible même si l'utilisateur est
+  /// ensuite renommé ou supprimé).
+  createdByName     String?
   amount            Float
   currency          String        @default("XOF")
   paymentMethod     PaymentMethod
@@ -822,6 +902,10 @@ model Payment {
   /// tous les totaux de trésorerie / cash-flow. Restauré (`isVoided = false`)
   /// lors d'une réinscription (« Prospect ➔ Inscrit »).
   isVoided          Boolean       @default(false)
+  /// Règlement saisi « hors système » (historique / rattrapage comptable) :
+  /// met à jour le solde débiteur de l'étudiant ou du dossier de voyage mais
+  /// n'alimente PAS la session de caisse physique du jour.
+  isOutOfSystem     Boolean       @default(false)
   reference         String?       @unique
   description       String?
   paidAt            DateTime      @default(now())
@@ -830,6 +914,9 @@ model Payment {
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   student         Student?         @relation(fields: [studentId], references: [id], onDelete: SetNull)
   travelProcedure TravelProcedure? @relation(fields: [travelProcedureId], references: [id], onDelete: SetNull)
+  createdBy       User?            @relation("PaymentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdById])
 }
 
 // --------------------------------------
@@ -1084,15 +1171,23 @@ model Sale {
   studentId         String?
   travelProcedureId String?
   createdById       String
+  /// Nom complet du caissier, figé au moment de l'encaissement (métadonnées de
+  /// traçabilité de la transaction — reste lisible même si l'utilisateur est
+  /// ensuite renommé ou supprimé).
+  createdByName     String?
   totalAmount       Float
   discount          Float          @default(0)
-  netAmount         Float
-  paymentMethod     PaymentMethod?
-  status            SaleStatus     @default(COMPLETED)
   /// Coordonnées optionnelles d'un client de passage (vente anonyme) :
   /// imprimées sur la facturette sous « Client de passage : Nom - Téléphone ».
   guestName         String?
   guestPhone        String?
+  /// Vente encaissée « hors système » (historique / rattrapage comptable) :
+  /// conservée pour les statistiques et le solde débiteur mais exclue de la
+  /// session de caisse physique du jour.
+  isOutOfSystem     Boolean        @default(false)
+  netAmount         Float
+  paymentMethod     PaymentMethod?
+  status            SaleStatus     @default(COMPLETED)
   createdAt         DateTime       @default(now())
 
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -1112,6 +1207,35 @@ model SaleItem {
 
   sale           Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
   productService ProductService @relation(fields: [productServiceId], references: [id], onDelete: Restrict)
+}
+
+// --------------------------------------
+// Transactions de caisse rattachées à un étudiant (Relevé 360°)
+// --------------------------------------
+//
+// Mémorise automatiquement chaque achat comptoir (livre, service, frais
+// annexe…) au nom d'un étudiant afin d'alimenter son relevé financier global
+// (scolarité + caisse), synchronisé depuis `Sale` via `createSaleAction`.
+model StudentTransaction {
+  id             String          @id @default(cuid())
+  organizationId String
+  studentId      String
+  /// Nature de la transaction (voir `TransactionType`).
+  type           TransactionType
+  /// Libellé détaillé (ex: « Achat Livre de Mathématiques B2 »).
+  description    String
+  /// Montant en FCFA (positif = charge pour l'élève).
+  amount         Float
+  /// Moyen de paiement tel que saisi en caisse (Cash, Mobile Money, Card…).
+  paymentMode    String
+  createdAt      DateTime        @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student     Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentId])
+  @@index([studentId, createdAt])
 }
 
 // --------------------------------------

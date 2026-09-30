@@ -1,10 +1,8 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  BookOpenIcon,
   CalendarCheckIcon,
   CheckCircle2Icon,
   ChevronLeftIcon,
@@ -45,10 +43,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { FullClassExportDialog } from "@/components/attendance/full-class-export-dialog";
+import { ClassClosureButton } from "@/components/classes/class-closure-button";
 import {
   ATTENDANCE_QUICK_STATUSES,
   getAttendanceStatusLabel,
 } from "@/lib/attendance-status";
+import { canCloseClass, filterSelectableClasses } from "@/lib/class-status";
 import { cn } from "@/lib/utils";
 
 import { buildAttendanceSheetDocument } from "@/lib/attendance-sheet";
@@ -140,24 +141,37 @@ const STATUS_BUTTON_CLASSES: Record<AttendanceStatus, string> = {
 
 export function ClassAttendanceView({
   classes,
+  canManageLifecycle = false,
 }: {
   classes: TeacherClassDTO[];
+  /** Actes de gestion (« Terminer la classe ») : administrateurs uniquement. */
+  canManageLifecycle?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // Sélecteur de classe : seules les classes ACTIVES sont proposées
+  // (« En cours » ou « Planifiée »). Les classes clôturées ou archivées sont
+  // EXCLUES : elles ne doivent plus recevoir d'émargement ni de saisie de
+  // cahier de texte.
+  const selectableClasses = React.useMemo(
+    () => filterSelectableClasses(classes),
+    [classes]
+  );
+
   // Présélection de la classe depuis `/dashboard/attendance?classId=...`
-  // (bouton « Marquer les présences » des cartes de classes).
+  // (lien direct vers une classe depuis la liste des classes ou le menu).
   const [selectedClassId, setSelectedClassId] = React.useState<string>(() => {
     const fromQuery = searchParams.get("classId");
-    return fromQuery && classes.some((klass) => klass.id === fromQuery)
+    return fromQuery &&
+      selectableClasses.some((klass) => klass.id === fromQuery)
       ? fromQuery
-      : (classes[0]?.id ?? "");
+      : (selectableClasses[0]?.id ?? "");
   });
   const [selectedDate, setSelectedDate] = React.useState<string>(todayIso());
   const [students, setStudents] = React.useState<EnrolledStudentDTO[]>([]);
   const [entries, setEntries] = React.useState<Record<string, AttendanceEntry>>({});
-  const [session, setSession] = React.useState<ClassSessionWithAttendanceDTO | null>(null);
+  const [, setSession] = React.useState<ClassSessionWithAttendanceDTO | null>(null);
   const [history, setHistory] = React.useState<ClassSessionHistoryEntryDTO[]>([]);
   const [loadingRoster, setLoadingRoster] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -170,8 +184,23 @@ export function ClassAttendanceView({
   } | null>(null);
   const [feedback, setFeedback] = React.useState<{ kind: "success" | "error"; message: string } | null>(null);
 
-  const hasClasses = classes.length > 0;
-  const selectedClass = classes.find((klass) => klass.id === selectedClassId);
+  // Cahier de texte EDITABLE en direct (module deverrouille) : la saisie est
+  // persistee dans la `ClassSession` du jour ET synchronisee dans le
+  // `CourseLog` du cours porteur a l'enregistrement de la seance.
+  const [sessionTitle, setSessionTitle] = React.useState("");
+  const [sessionChapter, setSessionChapter] = React.useState("");
+  const [sessionSummary, setSessionSummary] = React.useState("");
+
+  /** Cahier de texte OBLIGATOIRE : titre + chapitre + resume renseignes. */
+  const isLogbookComplete =
+    sessionTitle.trim().length > 0 &&
+    sessionChapter.trim().length > 0 &&
+    sessionSummary.trim().length > 0;
+
+  const hasClasses = selectableClasses.length > 0;
+  const selectedClass = selectableClasses.find(
+    (klass) => klass.id === selectedClassId
+  );
 
   const dateRibbon = React.useMemo(() => {
     const dates: string[] = [];
@@ -182,8 +211,8 @@ export function ClassAttendanceView({
   /**
    * Charge toutes les données de la page de présences en une seule requête
    * (roster + séance du jour + historique + cahier `CourseLog` exact).
-   * Le cahier est strictement en lecture seule : il affiche `chapterTitle`
-   * + `content`/`homework` issus de la fiche cours, sans saisie manuelle.
+   * Le cahier est éditable en direct : pré-rempli depuis la séance
+   * persistée ou le `CourseLog`, puis modifiable avant enregistrement.
    */
   const loadPageData = React.useCallback(
     async (classId: string, date: string) => {
@@ -195,10 +224,24 @@ export function ClassAttendanceView({
         setStudents(data.roster);
         setHistory(data.history);
         setSession(data.session);
-        // Bind direct du `CourseLog` ([courseId, date]) dans le bloc cahier
-        // affiché à gauche de la feuille de présence. `null` ⇒ blocs vides.
+        // Bind du `CourseLog` ([courseId, date]) : sert de pré-remplissage
+        // du cahier éditable quand la séance du jour n'existe pas encore.
         const readonlyLog = data.courseLog ?? data.courseLogFallback ?? null;
         setCourseLog(readonlyLog);
+        // Cahier éditable : la séance persistée fait foi, sinon le `CourseLog`.
+        setSessionTitle(
+          data.session?.subjectName ?? readonlyLog?.chapterTitle ?? ""
+        );
+        setSessionChapter(
+          data.session?.chapter ?? readonlyLog?.chapterTitle ?? ""
+        );
+        setSessionSummary(
+          data.session?.summary ??
+            [readonlyLog?.content, readonlyLog?.homework]
+              .filter((part) => part && part.trim().length > 0)
+              .join("\n\n") ??
+            ""
+        );
         if (data.session) {
           // Séance existante : recharge uniquement les présences déjà
           // enregistrées. Le texte du chapitre reste celui du `CourseLog`
@@ -218,7 +261,9 @@ export function ClassAttendanceView({
         setLoadingRoster(false);
       }
     },
-    [classes]
+    // Le callback ne dépend que de ses paramètres et de setters stables :
+    // aucune dépendance externe n'est referencée dans son corps.
+    []
   );
 
   // Synchronise la sélection quand l'URL change (navigation vers
@@ -226,13 +271,13 @@ export function ClassAttendanceView({
   // Le changement d'état est différé pour respecter `react-hooks/set-state-in-effect`.
   React.useEffect(() => {
     const fromQuery = searchParams.get("classId");
-    if (fromQuery && classes.some((klass) => klass.id === fromQuery)) {
+    if (fromQuery && selectableClasses.some((klass) => klass.id === fromQuery)) {
       const timer = window.setTimeout(() => {
         setSelectedClassId(fromQuery);
       }, 0);
       return () => window.clearTimeout(timer);
     }
-  }, [searchParams, classes]);
+  }, [searchParams, selectableClasses]);
 
   // Recharge (roster + séance + historique) à chaque changement de classe ou de date :
   // la séance existante auto-remplit et verrouille les champs, sinon mode nouvelle séance.
@@ -276,16 +321,14 @@ export function ClassAttendanceView({
     if (!selectedClassId || saving) return;
     setSaving(true);
     setFeedback(null);
-    // Sauvegarde de la feuille de présence uniquement : s'appuie sur le
-    // `CourseLog` parent sans créer ni remplacer le texte du chapitre.
+    // Sauvegarde unifiée : présences + cahier de texte éditable (la saisie
+    // est persistée dans la séance ET synchronisée dans le `CourseLog`).
     const payload: SaveClassSessionPayload = {
       classId: selectedClassId,
       date: selectedDate,
-      title: courseLog?.chapterTitle ?? "",
-      chapter: courseLog?.chapterTitle ?? "",
-      summary: [courseLog?.content, courseLog?.homework]
-        .filter((part) => part && part.trim().length > 0)
-        .join("\n\n"),
+      title: sessionTitle.trim() || sessionChapter.trim(),
+      chapter: sessionChapter.trim(),
+      summary: sessionSummary.trim(),
       attendances: students.map((student) => ({
         studentId: student.studentId,
         status: entries[student.studentId]?.status ?? "PRESENT",
@@ -297,10 +340,11 @@ export function ClassAttendanceView({
       if (result.ok) {
         setFeedback({ kind: "success", message: "Séance enregistrée avec succès !" });
         // 1) Synchronisation immédiate avec la séance PERSISTÉE renvoyée par
-        //    le serveur (aucun état local transitoire). Le cahier reste en
-        //    lecture seule (issu du `CourseLog` parent) : on ne réécrit que
-        //    les présences.
+        //    le serveur (aucun état local transitoire) : présences + cahier.
         setSession(result.session);
+        setSessionTitle(result.session.subjectName);
+        setSessionChapter(result.session.chapter);
+        setSessionSummary(result.session.summary ?? sessionSummary);
         const persistedEntries: Record<string, AttendanceEntry> = {};
         for (const student of students) {
           const saved = result.session.attendances.find(
@@ -374,18 +418,23 @@ export function ClassAttendanceView({
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed p-12 text-center">
         <UsersRoundIcon className="size-12 text-muted-foreground/50" />
-        <h3 className="text-lg font-semibold">Aucune classe assignée</h3>
+        <h3 className="text-lg font-semibold">Aucune classe active</h3>
+        <p className="max-w-md text-sm text-muted-foreground">
+          Le sélecteur n&apos;affiche que les classes en cours ou planifiées.
+          Les classes clôturées et archivées ne sont plus proposées ici —
+          consultez la liste des classes pour retrouver leur historique.
+        </p>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Sélecteur de classe */}
+      {/* Sélecteur de classe — classes ACTIVES uniquement */}
       <div className="flex flex-wrap items-center gap-3">
         <Label className="text-sm font-medium">Classe :</Label>
         <div className="flex flex-wrap gap-2">
-          {classes.map((klass) => (
+          {selectableClasses.map((klass) => (
             <Button
               key={klass.id}
               variant="pill"
@@ -402,6 +451,15 @@ export function ClassAttendanceView({
             <span className="text-xs text-muted-foreground">
               {selectedClass.courseTitle}
             </span>
+            {/* « Terminer la classe » : déplacé dans l'en-tête de la page
+                unifiée. Réservé aux rôles administratifs, et refusé si les
+                prérequis de clôture ne sont pas réunis. */}
+            {canManageLifecycle && canCloseClass(selectedClass.status) ? (
+              <ClassClosureButton
+                classId={selectedClass.id}
+                className={selectedClass.name}
+              />
+            ) : null}
             <Button
               variant="outline"
               size="sm"
@@ -411,13 +469,10 @@ export function ClassAttendanceView({
               <PrinterIcon data-icon="inline-start" />
               Imprimer / Exporter la feuille de présence
             </Button>
-            <Link
-              href={`/dashboard/courses/${selectedClass.courseId}`}
-              className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <BookOpenIcon className="size-3" />
-              Cahier de texte
-            </Link>
+            <FullClassExportDialog
+              classId={selectedClass.id}
+              className={selectedClass.name}
+            />
           </div>
         )}
       </div>
@@ -527,65 +582,67 @@ export function ClassAttendanceView({
         </div>
       </div>
 
-      {/* Formulaire de la séance : cahier strictement en lecture seule */}
+      {/* Formulaire de la séance : cahier de texte éditable + obligatoire */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Bloc Cahier de Texte (lecture seule — saisi dans « Mes cours ») */}
+        {/* Bloc Cahier de Texte (éditable en direct — saisie obligatoire) */}
         <div className="rounded-xl border bg-card p-4 lg:col-span-1">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ClipboardListIcon className="size-4 text-primary" />
               <h3 className="text-sm font-semibold">Cahier de texte</h3>
             </div>
-            <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <BookOpenIcon className="size-3" />
-              Lecture seule
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-200/60 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+              Obligatoire
             </span>
           </div>
           <div className="flex flex-col gap-3">
             <p className="rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-              Saisie exclusive dans la fiche du cours (« Mes cours »). Aucune
-              modification possible depuis cet écran.
+              Saisissez la séance en direct : le titre, le chapitre et le
+              résumé sont obligatoires pour enregistrer l&apos;émargement.
             </p>
             <div>
               <Label htmlFor="session-title" className="text-xs text-muted-foreground">
-                Titre de la séance / Chapitre
+                Titre de la séance *
               </Label>
               <Input
                 id="session-title"
-                value={courseLog?.chapterTitle ?? ""}
-                readOnly
-                disabled
-                placeholder="Aucun contenu saisi dans la fiche cours pour cette date."
-                className="mt-1 bg-muted/60"
-                aria-label="Titre de la séance en lecture seule"
+                value={sessionTitle}
+                onChange={(e) => setSessionTitle(e.target.value)}
+                placeholder="Ex. : Séance 12 — dialogue au passé"
+                required
+                aria-required="true"
+                className="mt-1"
+                aria-label="Titre de la séance"
               />
             </div>
             <div>
               <Label htmlFor="session-chapter" className="text-xs text-muted-foreground">
-                Chapitre
+                Chapitre / Thème du jour *
               </Label>
               <Input
                 id="session-chapter"
-                value={courseLog?.chapterTitle ?? ""}
-                readOnly
-                disabled
-                placeholder="Aucun chapitre saisi dans la fiche cours."
-                className="mt-1 bg-muted/60"
-                aria-label="Chapitre en lecture seule"
+                value={sessionChapter}
+                onChange={(e) => setSessionChapter(e.target.value)}
+                placeholder="Leçon 4 — verbes de modalité"
+                required
+                aria-required="true"
+                className="mt-1"
+                aria-label="Chapitre / Thème du jour"
               />
             </div>
             <div>
               <Label htmlFor="session-summary" className="text-xs text-muted-foreground">
-                Résumé / Contenu
+                Résumé — Contenu / Devoirs *
               </Label>
               <Textarea
                 id="session-summary"
-                value={[courseLog?.content, courseLog?.homework].filter((part) => part && part.trim().length > 0).join("\n\n")}
-                readOnly
-                disabled
-                placeholder="Aucun résumé saisi dans la fiche cours pour cette date."
-                className="mt-1 min-h-[120px] bg-muted/60"
-                aria-label="Résumé du cours en lecture seule"
+                value={sessionSummary}
+                onChange={(e) => setSessionSummary(e.target.value)}
+                placeholder="Contenu vu en séance + devoirs à faire…"
+                required
+                aria-required="true"
+                className="mt-1 min-h-[120px]"
+                aria-label="Résumé de la séance / devoirs"
               />
             </div>
             {courseLog?.homework ? (
@@ -680,7 +737,7 @@ export function ClassAttendanceView({
         </div>
       </div>
 
-      {/* Bouton de sauvegarde : feuille de présence uniquement */}
+      {/* Bouton de sauvegarde : séance + émargement + cahier (obligatoire) */}
       <div className="flex items-center justify-between rounded-xl border bg-card p-4">
         {feedback ? (
           <p
@@ -696,16 +753,16 @@ export function ClassAttendanceView({
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Cahier de texte en lecture seule — seule la feuille de présence est
-            enregistrée ici.
+            Cahier de texte obligatoire : renseignez le titre, le chapitre et
+            le résumé pour enregistrer la séance.
           </p>
         )}
         <Button
           onClick={handleSave}
-          disabled={saving || loadingRoster || students.length === 0}
+          disabled={saving || loadingRoster || students.length === 0 || !isLogbookComplete}
           className={cn(
             "transition-all",
-            students.length > 0
+            students.length > 0 && isLogbookComplete
               ? "bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white"
               : "bg-muted opacity-60 cursor-not-allowed"
           )}
@@ -715,7 +772,7 @@ export function ClassAttendanceView({
           ) : (
             <SaveIcon data-icon="inline-start" />
           )}
-          {saving ? "Enregistrement..." : "Enregistrer les présences"}
+          {saving ? "Enregistrement..." : "Enregistrer la séance et l'émargement"}
         </Button>
       </div>
 

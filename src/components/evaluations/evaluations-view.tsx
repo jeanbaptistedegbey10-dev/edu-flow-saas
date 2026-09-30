@@ -6,6 +6,7 @@ import {
   FilePenIcon,
   LayersIcon,
   Loader2Icon,
+  LockIcon,
   NotebookPenIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -62,7 +63,7 @@ export function EvaluationsView({
   classes: TeacherClassDTO[];
 }) {
   const [selectedClassId, setSelectedClassId] = React.useState<string>(
-    classes[0]?.id ?? ""
+    classes.filter((klass) => klass.status !== "ARCHIVED")[0]?.id ?? ""
   );
   const [evaluations, setEvaluations] = React.useState<EvaluationDTO[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -78,6 +79,26 @@ export function EvaluationsView({
 
   const hasClasses = classes.length > 0;
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
+
+  /**
+   * Les classes ARCHIVED sont masquées du sélecteur : une classe archivée est
+   * figée — aucune nouvelle session d'évaluation ne peut y être créée et ses
+   * évaluations existantes sont en lecture seule.
+   */
+  const selectableClasses = React.useMemo(
+    () => classes.filter((klass) => klass.status !== "ARCHIVED"),
+    [classes]
+  );
+
+  /** Aucune classe active (toutes archivées) : seules les consultations. */
+  const hasArchivedOnlyClasses = hasClasses && selectableClasses.length === 0;
+
+  /**
+   * Classe archivée : la liste des sessions passe en lecture seule. La
+   * sélection peut dater d'avant l'archivage (page ouverte dans un autre
+   * onglet) : la garde reste donc active côté serveur (`saveGradesAction`).
+   */
+  const isClassArchived = selectedClass?.status === "ARCHIVED";
 
   // Charge les sessions d'évaluation de la classe sélectionnée.
   React.useEffect(() => {
@@ -125,7 +146,9 @@ export function EvaluationsView({
     }
   };
 
-  if (!hasClasses) {
+  // Aucune classe exploitable : soit aucune classe assignée, soit uniquement
+  // des classes archivées (masquées du sélecteur, évaluations en lecture seule).
+  if (selectableClasses.length === 0) {
     return (
       <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
         <div>
@@ -133,18 +156,27 @@ export function EvaluationsView({
             Évaluations & Examens
           </h2>
           <p className="text-sm text-muted-foreground">
-            Aucune classe ne vous est actuellement assignée.
+            {hasArchivedOnlyClasses
+              ? "Toutes vos classes sont archivées : leurs évaluations existantes restent consultables en lecture seule (fiche de l’étudiant)."
+              : "Aucune classe ne vous est actuellement assignée."}
           </p>
         </div>
 
         <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-16 text-center">
           <div className="flex size-12 items-center justify-center rounded-full bg-muted">
-            <LayersIcon className="size-6 text-muted-foreground" />
+            {hasArchivedOnlyClasses ? (
+              <LockIcon className="size-6 text-muted-foreground" />
+            ) : (
+              <LayersIcon className="size-6 text-muted-foreground" />
+            )}
           </div>
-          <p className="font-medium">Aucune classe assignée</p>
+          <p className="font-medium">
+            {hasArchivedOnlyClasses ? "Aucune classe active" : "Aucune classe assignée"}
+          </p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            Contactez l’administration de votre centre pour qu’une
-            classe vous soit attribuée.
+            {hasArchivedOnlyClasses
+              ? "Les classes archivées sont masquées du sélecteur : la saisie des notes est désactivée pour leurs sessions d’évaluation."
+              : "Contactez l’administration de votre centre pour qu’une classe vous soit attribuée."}
           </p>
         </div>
       </div>
@@ -166,7 +198,7 @@ export function EvaluationsView({
         </div>
 
         <CreateEvaluationDialog
-          classes={classes}
+          classes={selectableClasses}
           defaultClassId={selectedClassId}
           onCreated={() => setReloadKey((key) => key + 1)}
         />
@@ -195,7 +227,7 @@ export function EvaluationsView({
                   <SelectValue placeholder="Sélectionner une classe" />
                 </SelectTrigger>
                 <SelectContent>
-                  {classes.map((klass) => (
+                  {selectableClasses.map((klass) => (
                     <SelectItem key={klass.id} value={klass.id}>
                       {klass.name} · {klass.schedule} ({klass.courseCode})
                     </SelectItem>
@@ -299,18 +331,35 @@ export function EvaluationsView({
                               onClick={() =>
                                 setActiveEvaluationId(evaluation.id)
                               }
+                              title={
+                                evaluation.classStatus === "ARCHIVED" ||
+                                isClassArchived
+                                  ? "Classe archivée — consultation en lecture seule"
+                                  : "Saisir les notes"
+                              }
                             >
-                              <FilePenIcon data-icon="inline-start" />
-                              Saisir les notes
+                              {evaluation.classStatus === "ARCHIVED" ||
+                              isClassArchived ? (
+                                <LockIcon data-icon="inline-start" />
+                              ) : (
+                                <FilePenIcon data-icon="inline-start" />
+                              )}
+                              {evaluation.classStatus === "ARCHIVED" ||
+                              isClassArchived
+                                ? "Consulter"
+                                : "Saisir les notes"}
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`Supprimer ${evaluation.title}`}
-                              onClick={() => setPendingDelete(evaluation)}
-                            >
-                              <Trash2Icon className="size-4 text-muted-foreground" />
-                            </Button>
+                            {evaluation.classStatus !== "ARCHIVED" &&
+                            !isClassArchived ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Supprimer ${evaluation.title}`}
+                                onClick={() => setPendingDelete(evaluation)}
+                              >
+                                <Trash2Icon className="size-4 text-muted-foreground" />
+                              </Button>
+                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>

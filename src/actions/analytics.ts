@@ -217,12 +217,14 @@ export async function getDashboardStatsAction(): Promise<DashboardAnalyticsDTO> 
       recentPaymentsRows,
     ] = await Promise.all([
       // Encaissements scolaires du mois : paiements COMPLETED actifs (non
-      // suspendus) non rattachés à un dossier voyage.
+      // suspendus) non rattachés à un dossier voyage. Les règlements
+      // « hors système » n'alimentent jamais le tiroir-caisse : exclus.
       prisma.payment.aggregate({
         where: {
           organizationId,
           status: "COMPLETED",
           isVoided: false,
+          isOutOfSystem: false,
           paidAt: { gte: monthStart, lt: monthEnd },
           travelProcedureId: null,
         },
@@ -230,23 +232,26 @@ export async function getDashboardStatsAction(): Promise<DashboardAnalyticsDTO> 
       }),
 
       // Encaissements voyages du mois : paiements COMPLETED actifs (non
-      // suspendus) liés à un dossier.
+      // suspendus) liés à un dossier (hors système exclus).
       prisma.payment.aggregate({
         where: {
           organizationId,
           status: "COMPLETED",
           isVoided: false,
+          isOutOfSystem: false,
           paidAt: { gte: monthStart, lt: monthEnd },
           travelProcedureId: { not: null },
         },
         _sum: { amount: true },
       }),
 
-      // Ventes POS du mois : ventes COMPLETED, montant net encaissé.
+      // Ventes POS du mois : ventes COMPLETED, montant net encaissé
+      // (hors système exclues du tiroir-caisse).
       prisma.sale.aggregate({
         where: {
           organizationId,
           status: "COMPLETED",
+          isOutOfSystem: false,
           createdAt: { gte: monthStart, lt: monthEnd },
         },
         _sum: { netAmount: true },
@@ -1029,21 +1034,24 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         where: { id: organizationId },
         select: { initialCashBalance: true },
       }),
-      // Encaissements du mois (paiements confirmés actifs).
+      // Encaissements du mois (paiements confirmés actifs, hors « hors système »
+      // qui n'alimentent jamais le tiroir-caisse physique).
       prisma.payment.aggregate({
         where: {
           organizationId,
           status: "COMPLETED",
           isVoided: false,
+          isOutOfSystem: false,
           paidAt: { gte: monthStart, lt: nextMonth },
         },
         _sum: { amount: true },
       }),
-      // Encaissements POS du mois (ventes comptoir nettes).
+      // Encaissements POS du mois (ventes comptoir nettes, hors système exclues).
       prisma.sale.aggregate({
         where: {
           organizationId,
           status: "COMPLETED",
+          isOutOfSystem: false,
           createdAt: { gte: monthStart, lt: nextMonth },
         },
         _sum: { netAmount: true },
@@ -1056,13 +1064,13 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         },
         _sum: { amount: true },
       }),
-      // Encaissements totaux (tous temps, paiements actifs).
+      // Encaissements totaux (tous temps, paiements actifs, hors système exclus).
       prisma.payment.aggregate({
-        where: { organizationId, status: "COMPLETED", isVoided: false },
+        where: { organizationId, status: "COMPLETED", isVoided: false, isOutOfSystem: false },
         _sum: { amount: true },
       }),
       prisma.sale.aggregate({
-        where: { organizationId, status: "COMPLETED" },
+        where: { organizationId, status: "COMPLETED", isOutOfSystem: false },
         _sum: { netAmount: true },
       }),
       // Dépenses totales (tous temps).
@@ -1070,21 +1078,25 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         where: { organizationId },
         _sum: { amount: true },
       }),
-      // Paiements confirmés ACTIFS de la fenêtre (série mensuelle du graphique).
+      // Paiements confirmés ACTIFS de la fenêtre (série mensuelle du graphique,
+      // hors système exclus du tiroir-caisse).
       prisma.payment.findMany({
         where: {
           organizationId,
           status: "COMPLETED",
           isVoided: false,
+          isOutOfSystem: false,
           paidAt: { gte: windowStart },
         },
         select: { amount: true, paidAt: true },
       }),
-      // Ventes POS terminées de la fenêtre (série mensuelle du graphique).
+      // Ventes POS terminées de la fenêtre (série mensuelle du graphique,
+      // hors système exclues).
       prisma.sale.findMany({
         where: {
           organizationId,
           status: "COMPLETED",
+          isOutOfSystem: false,
           createdAt: { gte: windowStart },
         },
         select: { netAmount: true, createdAt: true },
@@ -1094,10 +1106,10 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         where: { organizationId, expenseDate: { gte: windowStart } },
         select: { amount: true, expenseDate: true },
       }),
-      // Répartition des recettes (tous temps, paiements actifs) : voyage si
-      // dossier lié.
+      // Répartition des recettes (tous temps, paiements actifs hors système) :
+      // voyage si dossier lié.
       prisma.payment.findMany({
-        where: { organizationId, status: "COMPLETED", isVoided: false },
+        where: { organizationId, status: "COMPLETED", isVoided: false, isOutOfSystem: false },
         select: { amount: true, travelProcedureId: true },
       }),
       // Répartition des dépenses par catégorie (tous temps).
@@ -1106,8 +1118,16 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
         select: { amount: true, category: true },
       }),
       // Les 20 derniers paiements ACTIFS (journal unifié de caisse).
+      // Les règlements « hors système » / antérieurs sont exclus : ils
+      // n'alimentent pas le tiroir-caisse physique du jour (imputés
+      // uniquement sur la fiche financière de l'étudiant).
       prisma.payment.findMany({
-        where: { organizationId, status: "COMPLETED", isVoided: false },
+        where: {
+          organizationId,
+          status: "COMPLETED",
+          isVoided: false,
+          isOutOfSystem: false,
+        },
         orderBy: { paidAt: "desc" },
         take: 20,
         select: {
@@ -1127,9 +1147,10 @@ export async function getCashFlowAction(): Promise<CashFlowDTO> {
           },
         },
       }),
-      // Les 20 dernières ventes POS (journal unifié de caisse).
+      // Les 20 dernières ventes POS (journal unifié de caisse) — les ventes
+      // « hors système » / antérieures sont exclues du tiroir-caisse.
       prisma.sale.findMany({
-        where: { organizationId, status: "COMPLETED" },
+        where: { organizationId, status: "COMPLETED", isOutOfSystem: false },
         orderBy: { createdAt: "desc" },
         take: 20,
         select: {

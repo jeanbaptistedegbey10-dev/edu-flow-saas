@@ -9,10 +9,12 @@
  *   - clé `pk_sandbox_*` → hôte Sandbox officiel https://sandbox-api.fedapay.com
  *     (régression : l'ancien hôte « api-sandbox.fedapay.com » n'existe pas) ;
  *   - clés non préfixées → hôte selon le drapeau `sandbox` ;
- *   - réponse de création plate `{ id }` OU enveloppée `{ v1: { transaction } }`
- *     acceptées pour extraire l'identifiant de transaction ;
+ *   - réponse de création plate `{ id }`, enveloppée `{ v1: { transaction } }`
+ *     OU enveloppée `{ "v1/transaction": { id } }` acceptées pour extraire
+ *     l'identifiant de transaction ;
  *   - token → URL de guichet transmise au client (champ `url` de FedaPay, ou
- *     reconstruite checkout.fedapay.com/<token>) ;
+ *     reconstruite checkout.fedapay.com/<token> ; enveloppes `v1` et
+ *     `v1/token` acceptées) ;
  *   - échec HTTP 401 → cause PRÉCISE (statut + corps FedaPay) au lieu du
  *     message générique « Impossible de joindre la passerelle ».
  */
@@ -208,7 +210,40 @@ async function main(): Promise<void> {
   }
 
   // ------------------------------------------------------------------
-  // 4. Échec HTTP 401 → cause PRÉCISE (statut + corps FedaPay).
+  // 4. Enveloppe `v1/transaction` (réponse de création) + `v1/token`
+  //    (génération du token) — formes renvoyées par certaines versions
+  //    de l'API FedaPay (même préfixe d'entité que les webhooks).
+  // ------------------------------------------------------------------
+  {
+    const { calls, fetchImpl } = makeFetchStub((url) =>
+      url.endsWith("/token")
+        ? { status: 200, body: { "v1/token": { token: "tok_smoke_3", url: "https://checkout.fedapay.com/tok_smoke_3" } } }
+        : {
+            status: 201,
+            body: { v: "v1", "v1/transaction": { id: 8888 } },
+          }
+    );
+
+    const checkoutUrl = await initiateFedapayCheckout(
+      INPUT,
+      "EDU-4-SMOKE",
+      fedapayConfig("pk_live_smoke", "sk_live_smoke", false),
+      PRICING,
+      fetchImpl
+    );
+
+    assert(
+      calls[1]?.url === "https://api.fedapay.com/v1/transactions/8888/token",
+      "id extrait de la réponse enveloppée { \"v1/transaction\": { id } }"
+    );
+    assert(
+      checkoutUrl === "https://checkout.fedapay.com/tok_smoke_3",
+      "token extrait de l'enveloppe { \"v1/token\": { token, url } } (url renvoyée)"
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // 5. Échec HTTP 401 → cause PRÉCISE (statut + corps FedaPay).
   // ------------------------------------------------------------------
   {
     const { fetchImpl } = makeFetchStub(() => ({

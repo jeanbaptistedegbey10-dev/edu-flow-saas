@@ -266,8 +266,14 @@ function SalesHistoryPanel({
     void loadPage(targetPage);
   };
 
+  // Chargement initial différé (macrotâche) : évite une mise à jour d'état
+  // synchrone pendant l'effet (règle react-hooks/set-state-in-effect).
   React.useEffect(() => {
-    void loadPage(1);
+    const timer = setTimeout(() => {
+      void loadPage(1);
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, [loadPage]);
 
   /** Recharge les données complètes d'une vente puis ouvre la facturette. */
@@ -304,6 +310,8 @@ function SalesHistoryPanel({
           <h3 className="text-sm font-semibold">Historique des ventes</h3>
           <p className="text-xs text-muted-foreground">
             Toutes les ventes comptoir, de la plus récente à la plus ancienne.
+            Les ventes « hors système » restent visibles ici mais n’alimentent
+            jamais le tiroir-caisse du jour.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -436,7 +444,17 @@ function SalesHistoryPanel({
                 sales.map((sale) => (
                   <TableRow key={sale.id}>
                     <TableCell className="font-mono text-xs font-medium tracking-wide">
-                      {sale.reference}
+                      <span className="flex items-center gap-2">
+                        {sale.reference}
+                        {sale.isOutOfSystem ? (
+                          <span
+                            className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
+                            title="Paiement encaissé hors système : imputé sur la fiche de l’étudiant, exclu du tiroir-caisse du jour."
+                          >
+                            Hors système
+                          </span>
+                        ) : null}
+                      </span>
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground tabular-nums">
                       {dateTimeFormatter.format(sale.createdAt)}
@@ -575,6 +593,13 @@ export function PosView({
   // imprimées sur la facturette sous « Client de passage : Nom - Téléphone ».
   const [guestName, setGuestName] = React.useState("");
   const [guestPhone, setGuestPhone] = React.useState("");
+  /**
+   * Vente « hors système » / antérieure : met à jour le solde débiteur du
+   * client mais n'alimente PAS le fond de caisse physique du jour.
+   */
+  const [isOutOfSystem, setIsOutOfSystem] = React.useState(false);
+  /** Date effective de l'encaissement (une date passée est admise). */
+  const [paidAt, setPaidAt] = React.useState("");
   const [isCheckingOut, setIsCheckingOut] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [lastSale, setLastSale] = React.useState<SaleReceiptData | null>(null);
@@ -632,6 +657,13 @@ export function PosView({
   );
   const total = subtotal - discount;
 
+  /**
+   * Le panier et l'encaissement sont accessibles en DIRECT : aucune session
+   * de caisse n'est requise (le relevé de fond de caisse est facultatif et ne
+   * conditionne plus l'encaissement).
+   */
+  const canCheckout = cart.length > 0 && !isCheckingOut;
+
   /** Ajoute un article au panier (ou incrémente sa quantité). */
   const addToCart = (product: ProductServiceDTO) => {
     setError(null);
@@ -681,12 +713,16 @@ export function PosView({
     setPaymentMethod("CASH");
     setGuestName("");
     setGuestPhone("");
+    setIsOutOfSystem(false);
+    setPaidAt("");
   };
 
   /** Encaisse la vente puis ouvre la facturette. */
   const handleCheckout = async () => {
     if (cart.length === 0) return;
 
+    // Aucune session de caisse n'est nécessaire : le panier et l'encaissement
+    // sont opérationnels en permanence pour les rôles autorisés.
     setError(null);
     setIsCheckingOut(true);
 
@@ -713,6 +749,8 @@ export function PosView({
         paymentMethod,
         guestName: clientKind === "WALK_IN" ? guestName : null,
         guestPhone: clientKind === "WALK_IN" ? guestPhone : null,
+        isOutOfSystem,
+        paidAt: paidAt || null,
       });
 
       if (!result.ok) {
@@ -1144,6 +1182,39 @@ export function PosView({
             </div>
           </div>
 
+          {/* Règlement hors système / antérieur : impacte le solde débiteur du
+              client (vente rattachée) sans alimenter la caisse physique du jour. */}
+          <div className="flex items-start gap-3 rounded-lg border p-3">
+            <input
+              type="checkbox"
+              id="pos-out-of-system"
+              checked={isOutOfSystem}
+              onChange={(event) => setIsOutOfSystem(event.target.checked)}
+              className="mt-0.5 size-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            <div className="grid flex-1 gap-1">
+              <Label htmlFor="pos-out-of-system" className="font-medium">
+                Paiement hors système / Antérieur
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Vente encaissée hors système ou saisie après coup : elle met à
+                jour le solde débiteur du client, sans impacter le fond de caisse
+                physique du jour.
+              </p>
+              <div className="mt-1 grid gap-1">
+                <Label htmlFor="pos-out-of-system-date" className="text-[11px]">
+                  Date de l&apos;encaissement (facultatif — date passée admise)
+                </Label>
+                <Input
+                  id="pos-out-of-system-date"
+                  type="date"
+                  value={paidAt}
+                  onChange={(event) => setPaidAt(event.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Totaux */}
           <dl className="space-y-1 rounded-lg bg-muted/40 p-3 text-sm">
             <div className="flex items-center justify-between">
@@ -1178,8 +1249,9 @@ export function PosView({
           <Button
             type="button"
             size="lg"
-            disabled={cart.length === 0 || isCheckingOut}
+            disabled={!canCheckout}
             onClick={handleCheckout}
+            title="Encaisser la vente et imprimer la facturette"
           >
             {isCheckingOut ? (
               <Loader2Icon data-icon="inline-start" className="animate-spin" />

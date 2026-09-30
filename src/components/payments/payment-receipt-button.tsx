@@ -48,6 +48,7 @@ export function PaymentReceiptButton({
       status: payment.status as PaymentStatus,
       isVoided: payment.isVoided,
       reference: payment.reference,
+      isOutOfSystem: payment.isOutOfSystem,
       description: payment.description,
       paidAt: payment.paidAt,
       createdAt: payment.paidAt,

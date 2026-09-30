@@ -1,0 +1,6 @@
+
+> centre-formation-saas@0.1.0 typecheck
+> node scripts/typecheck.mjs
+
+
+D:\PROJETS\centre-formation-saas>

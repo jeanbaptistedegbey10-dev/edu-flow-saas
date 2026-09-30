@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   BookOpenIcon,
   ClockIcon,
+  LayersIcon,
   SearchIcon,
   UsersRoundIcon,
 } from "lucide-react";
@@ -103,14 +104,15 @@ function CourseCard({
         </div>
       </div>
 
-      {/* Actions rapides */}
+      {/* Action principale : accéder aux classes concernées (cohortes)
+          rattachées à ce cours — vue Classes pré-filtrée par courseId. */}
       <div className="flex flex-col gap-2 border-t border-border p-3">
         <Link
-          href={`/dashboard/courses/${course.id}`}
+          href={`/dashboard/classes?courseId=${course.id}`}
           className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
-          <BookOpenIcon className="size-4" />
-          Accéder au cours
+          <LayersIcon className="size-4" />
+          Accéder aux classes concernées
         </Link>
       </div>
     </div>

@@ -5,7 +5,6 @@ import {
   BanknoteIcon,
   CheckCircle2Icon,
   Loader2Icon,
-  LockIcon,
   WalletIcon,
   XCircleIcon,
 } from "lucide-react";
@@ -42,6 +41,14 @@ function formatAmount(value: number): string {
   return `${amountFormatter.format(value)} FCFA`;
 }
 
+/**
+ * Bandeau de relevé de caisse — INFORMATIF, jamais bloquant.
+ *
+ * L'ouverture de la caisse est un relevé de fond de caisse facultatif :
+ * l'encaissement au POS fonctionne désormais en permanence, avec ou sans
+ * session ouverte. Le bandeau propose simplement de saisir un fond de caisse
+ * pour la clôture de fin de journée, et affiche l'état de la session en cours.
+ */
 export function CashSessionBanner({
   session,
   onSessionChange,
@@ -55,9 +62,11 @@ export function CashSessionBanner({
 
   const handleOpen = async () => {
     setError(null);
-    const amount = Number(openAmount);
-    if (isNaN(amount) || amount < 0) {
-      setError("Veuillez saisir un montant valide.");
+    // Un fond de caisse nul (0 FCFA) est autorisé : la caisse peut démarrer
+    // vide. Un champ laissé vide vaut également 0.
+    const amount = openAmount.trim() === "" ? 0 : Number(openAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setError("Veuillez saisir un montant valide (0 FCFA minimum).");
       return;
     }
     setIsOpening(true);
@@ -90,12 +99,17 @@ export function CashSessionBanner({
   }
 
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-500/20 dark:bg-amber-500/10">
+    <div className="rounded-lg border border-slate-200 bg-muted/40 px-4 py-3 text-sm dark:border-slate-800">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <LockIcon className="size-4 text-amber-600 dark:text-amber-400" />
-          <span className="font-medium text-amber-700 dark:text-amber-300">
-            Veuillez ouvrir la caisse pour encaisser
+          <WalletIcon className="size-4 text-muted-foreground" />
+          <span className="font-medium text-foreground">
+            Encaissement libre
+          </span>
+          <span className="text-muted-foreground">
+            — vous pouvez vendre et encaisser sans ouvrir la caisse. Ouvrez une
+            session si vous souhaitez suivre un fond de caisse et le clôturer en
+            fin de journée.
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -105,14 +119,14 @@ export function CashSessionBanner({
               type="number"
               min={0}
               step={500}
-              placeholder="Fond de caisse (FCFA)"
+              placeholder="Fond de caisse (0 FCFA accepté)"
               value={openAmount}
               onChange={(e) => setOpenAmount(e.target.value)}
-              className="h-8 w-48 pl-8"
+              className="h-8 w-56 pl-8"
               disabled={isOpening}
             />
           </div>
-          <Button size="sm" onClick={handleOpen} disabled={isOpening || !openAmount}>
+          <Button size="sm" onClick={handleOpen} disabled={isOpening}>
             {isOpening ? (
               <Loader2Icon className="size-3.5 animate-spin" />
             ) : (
@@ -146,13 +160,20 @@ function CloseCashSessionDialog({ onClosed }: { onClosed: () => void }) {
     else setError(result.message);
   };
 
+  // Réinitialisation du formulaire + chargement du résumé différés
+  // (macrotâche) : évite les mises à jour d'état synchrones dans l'effet
+  // (règle react-hooks/set-state-in-effect).
   React.useEffect(() => {
-    if (open) {
-      fetchSummary();
+    if (!open) return;
+
+    const timer = setTimeout(() => {
+      void fetchSummary();
       setCountedAmount("");
       setNotes("");
       setError(null);
-    }
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, [open]);
 
   const handleClose = async () => {

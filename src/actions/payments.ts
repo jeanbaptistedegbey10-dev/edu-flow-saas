@@ -1,16 +1,16 @@
 "use server";
 
-import {
-  Prisma,
-  type PaymentMethod,
-  type PaymentStatus,
-} from "@prisma/client";
+import { Prisma, type PaymentMethod, type PaymentStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 
 import { sendPaymentConfirmationEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
-import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
+import {
+  getCurrentOrganizationId,
+  getCurrentSessionActor,
+  isNextRedirectError,
+} from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
 import { logAuditEvent } from "@/lib/actions/audit";
@@ -31,6 +31,12 @@ export type PaymentDTO = {
    * des totaux de trésorerie.
    */
   isVoided: boolean;
+  /**
+   * Règlement saisi « hors système » / à date antérieure : met à jour le
+   * solde débiteur de l'étudiant mais n'alimente PAS la session de caisse
+   * physique du jour (ni les totaux d'encaissement de la caisse).
+   */
+  isOutOfSystem: boolean;
   reference: string | null;
   description: string | null;
   paidAt: Date;
@@ -85,7 +91,8 @@ export type PaymentFormField =
   | "paymentMethod"
   | "status"
   | "reference"
-  | "description";
+  | "description"
+  | "paidAt";
 
 export type PaymentFormState = {
   status: "idle" | "success" | "error";
@@ -95,8 +102,7 @@ export type PaymentFormState = {
 
 /** Résultat des mutations rapides (suppression) côté client. */
 export type PaymentMutationResult =
-  | { ok: true }
-  | { ok: false; message: string };
+  { ok: true } | { ok: false; message: string };
 
 // --------------------------------------
 // Constantes & helpers internes
@@ -131,6 +137,10 @@ type ParsedPaymentInput =
         status: PaymentStatus;
         reference: string | null;
         description: string | null;
+        /** Règlement hors système / antérieur (case à cocher du formulaire). */
+        isOutOfSystem: boolean;
+        /** Date effective du règlement : saisie ou instant courant. */
+        paidAt: Date;
       };
     }
   | { ok: false; fieldErrors: Partial<Record<PaymentFormField, string>> };
@@ -142,6 +152,12 @@ function parsePaymentForm(formData: FormData): ParsedPaymentInput {
   const status = String(formData.get("status") ?? "").trim();
   const reference = String(formData.get("reference") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
+  // Case « Paiement hors système / Antérieur » : présente dans FormData
+  // uniquement lorsqu'elle est cochée.
+  const isOutOfSystem = formData.get("isOutOfSystem") === "on";
+  // Date effective du règlement (« YYYY-MM-DD ») — optionnelle ; une date
+  // passée est admise pour un règlement hors système / antérieur.
+  const rawPaidAt = String(formData.get("paidAt") ?? "").trim();
 
   const fieldErrors: Partial<Record<PaymentFormField, string>> = {};
 
@@ -177,6 +193,20 @@ function parsePaymentForm(formData: FormData): ParsedPaymentInput {
       "La description ne doit pas dépasser 255 caractères.";
   }
 
+  // Date effective : midi UTC canonique (même règle que les dossiers de
+  // voyage) pour éviter tout décalage de jour lié aux fuseaux horaires.
+  let paidAt = new Date();
+  if (rawPaidAt) {
+    const parsedPaidAt = /^\d{4}-\d{2}-\d{2}$/.test(rawPaidAt)
+      ? new Date(`${rawPaidAt}T12:00:00.000Z`)
+      : new Date(NaN);
+    if (Number.isNaN(parsedPaidAt.getTime())) {
+      fieldErrors.paidAt = "La date du règlement est invalide.";
+    } else {
+      paidAt = parsedPaidAt;
+    }
+  }
+
   if (Object.keys(fieldErrors).length > 0) {
     return { ok: false, fieldErrors };
   }
@@ -190,6 +220,8 @@ function parsePaymentForm(formData: FormData): ParsedPaymentInput {
       status: status as PaymentStatus,
       reference: reference || null,
       description: description || null,
+      isOutOfSystem,
+      paidAt,
     },
   };
 }
@@ -219,6 +251,7 @@ export async function getPayments(): Promise<PaymentDTO[]> {
         paymentMethod: true,
         status: true,
         isVoided: true,
+        isOutOfSystem: true,
         reference: true,
         description: true,
         paidAt: true,
@@ -235,7 +268,7 @@ export async function getPayments(): Promise<PaymentDTO[]> {
     });
 
     return rows.flatMap((row) =>
-      row.student ? [{ ...row, student: row.student }] : []
+      row.student ? [{ ...row, student: row.student }] : [],
     );
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -362,7 +395,7 @@ export async function getCurrentOrganizationProfile(): Promise<OrganizationProfi
 
     if (!organization) {
       throw new Error(
-        "Organisation introuvable : votre session pointe vers une organisation qui n'existe plus."
+        "Organisation introuvable : votre session pointe vers une organisation qui n'existe plus.",
       );
     }
 
@@ -370,13 +403,10 @@ export async function getCurrentOrganizationProfile(): Promise<OrganizationProfi
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
 
-    console.error(
-      "[getCurrentOrganizationProfile] Échec de lecture :",
-      error
-    );
+    console.error("[getCurrentOrganizationProfile] Échec de lecture :", error);
 
     throw new Error(
-      "Impossible de charger le profil de l'organisation pour le moment."
+      "Impossible de charger le profil de l'organisation pour le moment.",
     );
   }
 }
@@ -388,7 +418,7 @@ export async function getCurrentOrganizationProfile(): Promise<OrganizationProfi
  */
 export async function createPaymentAction(
   _prevState: PaymentFormState,
-  formData: FormData
+  formData: FormData,
 ): Promise<PaymentFormState> {
   await assertCanMutate();
   const parsed = parsePaymentForm(formData);
@@ -404,6 +434,10 @@ export async function createPaymentAction(
   const organizationId = await getCurrentOrganizationId();
 
   try {
+    // Auteur du règlement : l'ID et le NOM de l'utilisateur connecté sont
+    // figés dans les métadonnées de la transaction (traçabilité).
+    const actor = await getCurrentSessionActor();
+
     // Vérifie que l'étudiant appartient bien à l'organisation active (isolation multi-tenant).
     // Les coordonnées sont récupérées pour l'envoi du reçu par e-mail.
     const student = await prisma.student.findFirst({
@@ -419,32 +453,42 @@ export async function createPaymentAction(
       };
     }
 
-    const paidAt = new Date();
+    // La date effective provient du formulaire (defaut : instant courant).
+    const paidAt = parsed.data.paidAt;
 
     const payment = await prisma.payment.create({
       data: {
         organizationId,
         studentId: parsed.data.studentId,
+        createdById: actor.id,
+        createdByName: actor.name,
         amount: parsed.data.amount,
         paymentMethod: parsed.data.paymentMethod,
         status: parsed.data.status,
         reference: parsed.data.reference,
         description: parsed.data.description,
+        isOutOfSystem: parsed.data.isOutOfSystem,
         paidAt,
       },
     });
 
     revalidatePath("/dashboard/payments");
 
-    // Journal d'audit : enregistrement de paiement
+    // Journal d'audit : enregistrement de paiement (auteur = utilisateur connecté)
     await logAuditEvent({
       action: AUDIT_ACTIONS.PAYMENT_RECEIVED,
       entity: AUDIT_ENTITIES.PAYMENT,
       entityId: payment.id,
       details: {
+        createdByUserId: actor.id,
+        createdByUserName: actor.name,
+        createdByUserRole: actor.role,
+        studentId: student.id,
+        studentName: `${student.firstName} ${student.lastName}`,
         amount: payment.amount,
         method: payment.paymentMethod,
         status: payment.status,
+        isOutOfSystem: payment.isOutOfSystem,
       },
     });
 
@@ -462,7 +506,7 @@ export async function createPaymentAction(
         // bloquer ni retarder la création du paiement.
         if (recipientEmail.trim().toLowerCase().endsWith("@example.com")) {
           console.info(
-            `[payments] Adresse de test « ${recipientEmail} » : envoi du reçu ignoré.`
+            `[payments] Adresse de test « ${recipientEmail} » : envoi du reçu ignoré.`,
           );
           return;
         }
@@ -502,8 +546,7 @@ export async function createPaymentAction(
 
     return {
       status: "error",
-      message:
-        "Une erreur est survenue lors de l'enregistrement du paiement.",
+      message: "Une erreur est survenue lors de l'enregistrement du paiement.",
     };
   }
 }
@@ -515,7 +558,7 @@ export async function createPaymentAction(
  */
 export async function updatePaymentAction(
   _prevState: PaymentFormState,
-  formData: FormData
+  formData: FormData,
 ): Promise<PaymentFormState> {
   await assertCanMutate();
   const paymentId = String(formData.get("id") ?? "").trim();
@@ -576,6 +619,8 @@ export async function updatePaymentAction(
         status: parsed.data.status,
         reference: parsed.data.reference,
         description: parsed.data.description,
+        isOutOfSystem: parsed.data.isOutOfSystem,
+        paidAt: parsed.data.paidAt,
       },
     });
 
@@ -602,8 +647,7 @@ export async function updatePaymentAction(
 
     return {
       status: "error",
-      message:
-        "Une erreur est survenue lors de la mise à jour du paiement.",
+      message: "Une erreur est survenue lors de la mise à jour du paiement.",
     };
   }
 }
@@ -612,7 +656,7 @@ export async function updatePaymentAction(
  * Supprime un règlement de l'organisation active.
  */
 export async function deletePaymentAction(
-  paymentId: string
+  paymentId: string,
 ): Promise<PaymentMutationResult> {
   await assertCanMutate();
   if (!paymentId) {
@@ -655,8 +699,7 @@ export async function deletePaymentAction(
 
     return {
       ok: false,
-      message:
-        "Une erreur est survenue lors de la suppression du paiement.",
+      message: "Une erreur est survenue lors de la suppression du paiement.",
     };
   }
 }

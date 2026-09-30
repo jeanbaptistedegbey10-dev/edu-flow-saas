@@ -5,7 +5,7 @@ import {
   ArrowRightIcon,
   CheckCircle2Icon,
   ClockIcon,
-  SmartphoneIcon,
+  FileTextIcon,
   TrendingUpIcon,
   UserXIcon,
 } from "lucide-react";
@@ -15,16 +15,18 @@ import type { TeacherClassDTO } from "@/actions/attendance";
 import { ClassAttendanceView } from "@/components/attendance/class-attendance-view";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 const numberFormatter = new Intl.NumberFormat("fr-FR");
 
 export function AttendanceOverview({
   classes,
   stats,
+  canManageLifecycle = false,
 }: {
   classes: TeacherClassDTO[];
   stats: AttendanceOverviewStatsDTO;
+  /** Actes de gestion (« Terminer la classe ») : administrateurs uniquement. */
+  canManageLifecycle?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -113,17 +115,18 @@ export function AttendanceOverview({
         </div>
       )}
 
-      {/* Lien vers la feuille d'appel mobile */}
+      {/* Lien vers la feuille récapitulative complète (toute la durée de la classe) */}
       <div className="flex items-center justify-between rounded-xl border bg-card p-4">
         <div>
-          <h3 className="text-sm font-semibold">Feuille d&apos;appel rapide</h3>
+          <h3 className="text-sm font-semibold">Feuille récapitulative complète</h3>
           <p className="text-xs text-muted-foreground">
-            Interface mobile-friendly pour saisir les présences en classe.
+            Toutes les séances de la classe, de la première à la dernière :
+            présences et cahier de texte réunis, imprimables en PDF.
           </p>
         </div>
         <Button asChild size="sm">
-          <Link href="/dashboard/attendance/sheet">
-            <SmartphoneIcon data-icon="inline-start" />
+          <Link href="/dashboard/attendance/full-sheet">
+            <FileTextIcon data-icon="inline-start" />
             Ouvrir la feuille
             <ArrowRightIcon data-icon="inline-end" />
           </Link>
@@ -139,7 +142,10 @@ export function AttendanceOverview({
           </div>
         }
       >
-        <ClassAttendanceView classes={classes} />
+        <ClassAttendanceView
+          classes={classes}
+          canManageLifecycle={canManageLifecycle}
+        />
       </Suspense>
     </div>
   );

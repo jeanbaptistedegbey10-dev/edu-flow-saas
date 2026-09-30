@@ -33,3 +33,19 @@ export function getRoleLabel(role: Role): string {
 export function getRoleBadgeClass(role: Role): string {
   return ROLE_BADGE_CLASSES[role];
 }
+
+/**
+ * Actes de gestion du cycle de vie d'une classe (« Démarrer la classe »,
+ * « Terminer la classe », archivage) : réservés exclusivement aux rôles
+ * administratifs. Un enseignant (TEACHER) consulte et émarge, mais ne peut
+ * ni démarrer ni clôturer une classe.
+ *
+ * NB : l'application n'a pas de rôle « ADMINISTRATOR » à proprement parler —
+ * l'administrateur système correspond à `SUPER_ADMIN` (cohérent avec les
+ * garde-fous serveur de `startClassAction` / `closeClassAction`).
+ */
+export function canManageClassLifecycle(
+  role: Role | string | null | undefined
+): boolean {
+  return role === "ADMIN" || role === "SUPER_ADMIN";
+}

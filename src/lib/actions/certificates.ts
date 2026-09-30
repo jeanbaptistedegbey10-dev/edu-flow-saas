@@ -12,6 +12,12 @@ import {
 import { assertCanMutate } from "@/lib/license-check";
 import { logAuditEvent } from "@/lib/actions/audit";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
+import {
+  getAcademicYear,
+  resolveCertificateClassContext,
+  type CertificateClassContext,
+  type CertificateEnrollmentContext,
+} from "@/lib/certificate-context";
 
 // --------------------------------------
 // Types publics
@@ -21,6 +27,8 @@ export type CertificateDTO = {
   id: string;
   studentId: string;
   studentName: string;
+  /** Numéro matricule de l'étudiant (ex : STU-2026-001). */
+  studentCode: string;
   courseId: string | null;
   courseTitle: string | null;
   level: string;
@@ -28,6 +36,21 @@ export type CertificateDTO = {
   issueDate: Date;
   verificationCode: string;
   revoked: boolean;
+  /** Année académique de la date d'émission (convention septembre → août). */
+  academicYear: string;
+  /**
+   * Classe d'origine du certificat, déduite de l'historique des inscriptions
+   * (`ClassEnrollment`) — voir `resolveCertificateClassContext`. `null` si
+   * aucun rattachement n'est possible.
+   */
+  classContext: CertificateClassContext | null;
+};
+
+/** Lien plat étudiant ↔ classe (historique des affectations de l'organisation). */
+export type CertificateEnrollmentLinkDTO = {
+  studentId: string;
+  classId: string;
+  enrolledAt: Date;
 };
 
 export type CertificateVerificationData = {
@@ -87,7 +110,12 @@ export async function generateCertificate(
     // Vérifie que l'étudiant appartient à l'organisation
     const student = await prisma.student.findFirst({
       where: { id: studentId, organizationId },
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        studentCode: true,
+      },
     });
 
     if (!student) {
@@ -147,6 +175,7 @@ export async function generateCertificate(
       id: certificate.id,
       studentId: certificate.studentId,
       studentName: `${student.firstName} ${student.lastName}`,
+      studentCode: student.studentCode,
       courseId: certificate.courseId,
       courseTitle: null,
       level: certificate.level,
@@ -154,6 +183,10 @@ export async function generateCertificate(
       issueDate: certificate.issueDate,
       verificationCode: certificate.verificationCode,
       revoked: certificate.revoked,
+      academicYear: getAcademicYear(certificate.issueDate),
+      // Le rattachement à la classe d'origine est résolu au rechargement de la
+      // liste (`getCertificates`) — suffisant pour le retour immédiat d'action.
+      classContext: null,
     };
 
     revalidatePath("/dashboard/certificates");
@@ -239,53 +272,133 @@ export async function getCertificateVerificationData(
 }
 
 /**
- * Récupère tous les certificats de l'organisation.
+ * Récupère tous les certificats de l'organisation, enrichis du numéro
+ * matricule, de l'année académique d'émission et de la classe d'origine
+ * (déduite de l'historique des inscriptions — voir `certificate-context.ts`).
  */
 export async function getCertificates(): Promise<CertificateDTO[]> {
   try {
     const organizationId = await getCurrentOrganizationId();
 
-    const certificates = await prisma.certificate.findMany({
-      where: { organizationId },
-      orderBy: { issueDate: "desc" },
-      select: {
-        id: true,
-        studentId: true,
-        level: true,
-        score: true,
-        issueDate: true,
-        verificationCode: true,
-        revoked: true,
-        courseId: true,
-        student: {
-          select: {
-            firstName: true,
-            lastName: true,
+    // Historique des affectations étudiant ↔ classe : indispensable pour
+    // rattacher chaque certificat à sa classe d'origine, y compris après une
+    // promotion vers une nouvelle cohorte. Tri par `enrolledAt` croissant —
+    // chaque liste d'historique est construite déjà triée.
+    const [certificates, enrollments] = await Promise.all([
+      prisma.certificate.findMany({
+        where: { organizationId },
+        orderBy: { issueDate: "desc" },
+        select: {
+          id: true,
+          studentId: true,
+          level: true,
+          score: true,
+          issueDate: true,
+          verificationCode: true,
+          revoked: true,
+          courseId: true,
+          student: {
+            select: {
+              firstName: true,
+              lastName: true,
+              studentCode: true,
+              currentClass: {
+                select: { id: true, name: true, status: true, courseId: true },
+              },
+            },
+          },
+          course: {
+            select: {
+              title: true,
+            },
           },
         },
-        course: {
-          select: {
-            title: true,
+      }),
+      prisma.classEnrollment.findMany({
+        where: { organizationId },
+        orderBy: { enrolledAt: "asc" },
+        select: {
+          studentId: true,
+          enrolledAt: true,
+          class: {
+            select: { id: true, name: true, status: true, courseId: true },
           },
         },
-      },
-    });
+      }),
+    ]);
 
-    return certificates.map((cert) => ({
-      id: cert.id,
-      studentId: cert.studentId,
-      studentName: `${cert.student.firstName} ${cert.student.lastName}`,
-      courseId: cert.courseId,
-      courseTitle: cert.course?.title ?? null,
-      level: cert.level,
-      score: cert.score,
-      issueDate: cert.issueDate,
-      verificationCode: cert.verificationCode,
-      revoked: cert.revoked,
-    }));
+    const enrollmentsByStudent = new Map<string, CertificateEnrollmentContext[]>();
+    for (const enrollment of enrollments) {
+      const context: CertificateEnrollmentContext = {
+        classId: enrollment.class.id,
+        className: enrollment.class.name,
+        classStatus: enrollment.class.status,
+        courseId: enrollment.class.courseId,
+        enrolledAt: enrollment.enrolledAt,
+      };
+      const history = enrollmentsByStudent.get(enrollment.studentId);
+      if (history) {
+        history.push(context);
+      } else {
+        enrollmentsByStudent.set(enrollment.studentId, [context]);
+      }
+    }
+
+    return certificates.map((cert) => {
+      const currentClass = cert.student.currentClass;
+
+      return {
+        id: cert.id,
+        studentId: cert.studentId,
+        studentName: `${cert.student.firstName} ${cert.student.lastName}`,
+        studentCode: cert.student.studentCode,
+        courseId: cert.courseId,
+        courseTitle: cert.course?.title ?? null,
+        level: cert.level,
+        score: cert.score,
+        issueDate: cert.issueDate,
+        verificationCode: cert.verificationCode,
+        revoked: cert.revoked,
+        academicYear: getAcademicYear(cert.issueDate),
+        classContext: resolveCertificateClassContext({
+          issueDate: cert.issueDate,
+          courseId: cert.courseId,
+          enrollments: enrollmentsByStudent.get(cert.studentId) ?? [],
+          currentClass: currentClass
+            ? {
+                id: currentClass.id,
+                name: currentClass.name,
+                status: currentClass.status,
+                courseId: currentClass.courseId,
+              }
+            : null,
+        }),
+      };
+    });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
     console.error("[getCertificates] Échec :", error);
+    return [];
+  }
+}
+
+/**
+ * Historique plat des affectations étudiant ↔ classe de l'organisation.
+ * Alimente la sélection d'un étudiant éligible lors de la génération manuelle
+ * d'un certificat (étudiants inscrits dans une classe terminée).
+ */
+export async function getCertificateEnrollmentMap(): Promise<CertificateEnrollmentLinkDTO[]> {
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    return await prisma.classEnrollment.findMany({
+      where: { organizationId },
+      orderBy: { enrolledAt: "asc" },
+      select: { studentId: true, classId: true, enrolledAt: true },
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    console.error("[getCertificateEnrollmentMap] Échec :", error);
     return [];
   }
 }
@@ -338,3 +451,61 @@ export async function revokeCertificate(
     };
   }
 }
+/**
+ * Récupère un certificat par son ID avec tous ses détails.
+ * Nécessite d'être connecté et de faire partie de l'organisation.
+ */
+export async function getCertificateById(
+  certificateId: string
+): Promise<CertificateDTO | null> {
+  try {
+    const organizationId = await getCurrentOrganizationId();
+
+    const certificate = await prisma.certificate.findFirst({
+      where: { id: certificateId, organizationId },
+      include: {
+        student: {
+          select: {
+            firstName: true,
+            lastName: true,
+            studentCode: true,
+          },
+        },
+        course: {
+          select: {
+            title: true,
+          },
+        },
+        organization: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
+
+    if (!certificate) {
+      return null;
+    }
+
+    return {
+      id: certificate.id,
+      studentId: certificate.studentId,
+      studentName: `${certificate.student.firstName} ${certificate.student.lastName}`,
+      studentCode: certificate.student.studentCode,
+      courseId: certificate.courseId,
+      courseTitle: certificate.course?.title ?? null,
+      level: certificate.level,
+      score: certificate.score,
+      issueDate: certificate.issueDate,
+      verificationCode: certificate.verificationCode,
+      revoked: certificate.revoked,
+      academicYear: getAcademicYear(certificate.issueDate),
+      classContext: null,
+    };
+  } catch (error) {
+    console.error("[getCertificateById] Échec :", error);
+    return null;
+  }
+}
+

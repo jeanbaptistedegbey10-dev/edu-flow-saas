@@ -179,16 +179,28 @@ function EditPaymentForm({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="edit-reference">Référence</Label>
+            <Label htmlFor="edit-paidAt">Date du règlement</Label>
             <Input
-              id="edit-reference"
-              name="reference"
-              defaultValue={payment.reference ?? ""}
-              maxLength={100}
-              aria-invalid={Boolean(fieldErrors.reference)}
+              id="edit-paidAt"
+              name="paidAt"
+              type="date"
+              defaultValue={payment.paidAt.toISOString().split("T")[0]}
+              aria-invalid={Boolean(fieldErrors.paidAt)}
             />
-            <FieldError message={fieldErrors.reference} />
+            <FieldError message={fieldErrors.paidAt} />
           </div>
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="edit-reference">Référence</Label>
+          <Input
+            id="edit-reference"
+            name="reference"
+            defaultValue={payment.reference ?? ""}
+            maxLength={100}
+            aria-invalid={Boolean(fieldErrors.reference)}
+          />
+          <FieldError message={fieldErrors.reference} />
         </div>
 
         <div className="grid gap-2">
@@ -201,6 +213,27 @@ function EditPaymentForm({
             aria-invalid={Boolean(fieldErrors.description)}
           />
           <FieldError message={fieldErrors.description} />
+        </div>
+
+        {/* Règlement hors système / antérieur */}
+        <div className="flex items-start gap-3 rounded-lg border p-3">
+          <input
+            type="checkbox"
+            id="edit-isOutOfSystem"
+            name="isOutOfSystem"
+            defaultChecked={payment.isOutOfSystem}
+            className="mt-0.5 size-4 rounded border-gray-300 text-primary focus:ring-primary"
+          />
+          <div className="grid gap-1">
+            <Label htmlFor="edit-isOutOfSystem" className="font-medium">
+              Paiement hors système / Antérieur
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Règlement saisi après coup ou encaissé hors système : il met à jour
+              le solde débiteur de l&apos;étudiant, sans impacter le fond de
+              caisse physique du jour.
+            </p>
+          </div>
         </div>
 
         <DialogFooter>

@@ -230,7 +230,9 @@ export function formatScoreOnScale(
 }
 
 /** Compte les modules valides / notes a partir des lignes du bulletin. */
-export function computeModuleValidation(rows: PremiumReportRow[]): {
+export function computeModuleValidation(
+  rows: ReadonlyArray<{ passed: boolean | null }>
+): {
   validatedModules: number;
   gradedModules: number;
 } {
@@ -264,6 +266,74 @@ export function defaultAppreciationForValidation(
   }
 
   return `${validatedModules} module${validatedModules > 1 ? "s" : ""} validé${validatedModules > 1 ? "s" : ""} sur ${gradedModules} évalué${gradedModules > 1 ? "s" : ""}. Les modules non validés doivent être repris : encouragez la persévérance.`;
+}
+
+// --------------------------------------
+// Appréciation personnalisée du bulletin
+// --------------------------------------
+
+/**
+ * Portée d'un bulletin : détermine à quel document l'appréciation
+ * personnalisée s'applique. Le préfixe permet à une SEULE table
+ * (`BulletinAppreciation`) de porter les deux documents :
+ * - `exam:<evaluationId>` → bulletin d'une session d'examen précise ;
+ * - `recap:<classId>`     → bulletin récapitulatif de la classe
+ *   (`recap:global` quand l'étudiant n'a pas de classe active).
+ */
+export const BULLETIN_SCOPE_EXAM = "exam";
+export const BULLETIN_SCOPE_RECAP = "recap";
+/** Portée « hors classe » du bulletin récapitulatif. */
+export const BULLETIN_RECAP_GLOBAL = "global";
+/** Longueur maximale d'une appréciation personnalisée (garde-fou serveur). */
+export const MAX_APPRECIATION_LENGTH = 1200;
+
+/** Portée du bulletin d'examen d'une session. */
+export function examAppreciationScope(evaluationId: string): string {
+  return `${BULLETIN_SCOPE_EXAM}:${evaluationId}`;
+}
+
+/** Portée du bulletin récapitulatif d'une classe (ou `recap:global`). */
+export function recapAppreciationScope(classId: string | null): string {
+  const clean =
+    classId !== null && classId.trim().length > 0
+      ? classId.trim()
+      : BULLETIN_RECAP_GLOBAL;
+  return `${BULLETIN_SCOPE_RECAP}:${clean}`;
+}
+
+/**
+ * Valide une portée reçue du client : format strict `exam:<id>` ou
+ * `recap:<id>` avec un identifiant type cuid/uuid. Empêche l'injection
+ * d'une portée arbitraire dans la base.
+ */
+export function isValidAppreciationScope(scope: string): boolean {
+  return /^(exam|recap):[A-Za-z0-9_-]{1,64}$/.test(scope);
+}
+
+/**
+ * Normalise un texte saisi par l'enseignant : fins de ligne CRLF unifiées,
+ * espaces de bordure retirés, longueur plafonnée. Retourne une chaîne VIDE
+ * si l'utilisateur a tout effacé (le serveur supprime alors la ligne et
+ * restaure l'appréciation automatique).
+ */
+export function normalizeAppreciationText(raw: string): string {
+  return raw
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim()
+    .slice(0, MAX_APPRECIATION_LENGTH);
+}
+
+/**
+ * Texte réellement affiché sur le bulletin : le texte personnalisé s'il
+ * existe, sinon l'appréciation automatique calculée à partir des résultats.
+ */
+export function resolveAppreciation(
+  automaticText: string,
+  customText: string | null | undefined
+): string {
+  const custom = customText?.trim() ?? "";
+  return custom.length > 0 ? custom : automaticText;
 }
 
 /**

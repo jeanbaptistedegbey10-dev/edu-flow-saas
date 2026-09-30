@@ -197,16 +197,31 @@ export function AddPaymentDialog({
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="reference">Référence</Label>
+                <Label htmlFor="paidAt">Date du règlement</Label>
                 <Input
-                  id="reference"
-                  name="reference"
-                  placeholder="Ex : TXN-MOMO-88231, n° de virement..."
-                  maxLength={100}
-                  aria-invalid={Boolean(fieldErrors.reference)}
+                  id="paidAt"
+                  name="paidAt"
+                  type="date"
+                  aria-invalid={Boolean(fieldErrors.paidAt)}
                 />
-                <FieldError message={fieldErrors.reference} />
+                <FieldError message={fieldErrors.paidAt} />
+                <p className="text-xs text-muted-foreground">
+                  Par défaut : aujourd'hui. Activez « Paiement hors système »
+                  pour saisir une date passée.
+                </p>
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="reference">Référence</Label>
+              <Input
+                id="reference"
+                name="reference"
+                placeholder="Ex : TXN-MOMO-88231, n° de virement..."
+                maxLength={100}
+                aria-invalid={Boolean(fieldErrors.reference)}
+              />
+              <FieldError message={fieldErrors.reference} />
             </div>
 
             <div className="grid gap-2">
@@ -219,6 +234,28 @@ export function AddPaymentDialog({
                 aria-invalid={Boolean(fieldErrors.description)}
               />
               <FieldError message={fieldErrors.description} />
+            </div>
+
+            {/* Paiement hors système / Antérieur */}
+            <div className="flex items-start gap-3 rounded-lg border p-3">
+              <div className="mt-0.5 flex h-5 min-w-[20px] items-center justify-center">
+                <input
+                  type="checkbox"
+                  id="isOutOfSystem"
+                  name="isOutOfSystem"
+                  className="size-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label htmlFor="isOutOfSystem" className="font-medium">
+                  Paiement hors système / Antérieur
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Saisie un règlement antérieur ou externe : met à jour le
+                  solde débiteur de l'étudiant sans impacter le fond de caisse
+                  physique du jour.
+                </p>
+              </div>
             </div>
 
             <DialogFooter>

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { getCurrentSessionUser } from "@/lib/session";
 import type { AuditAction, AuditEntity } from "@/lib/audit-constants";
+import { sanitizeAuditDetails } from "@/lib/audit-sanitize";
 
 // --------------------------------------
 // Types publics
@@ -32,10 +33,18 @@ export type AuditLogInput = {
  * Enregistre un événement dans le journal d'audit.
  * Résout automatiquement l'utilisateur connecté et son organisation.
  * En cas d'échec, l'erreur est journalisée mais ne bloque pas l'opération.
+ *
+ * SÉCURITÉ : le champ `details` est systématiquement passé par
+ * `sanitizeAuditDetails` AVANT écriture — aucun mot de passe, jeton
+ * d'authentification, clé d'API, donnée bancaire ou identifiant technique
+ * sensible ne peut donc être injecté dans le journal d'audit, même par un
+ * appelant qui transmettrait un payload complet. Si rien de exploitable ne
+ * subsiste après nettoyage, `details` est omis (pas d'objet vide en base).
  */
 export async function logAuditEvent(input: AuditLogInput): Promise<void> {
   try {
     const user = await getCurrentSessionUser();
+    const safeDetails = sanitizeAuditDetails(input.details);
 
     await prisma.auditLog.create({
       data: {
@@ -44,10 +53,9 @@ export async function logAuditEvent(input: AuditLogInput): Promise<void> {
         action: input.action,
         entity: input.entity,
         entityId: input.entityId ?? null,
-        details:
-          input.details != null
-            ? (input.details as unknown as Prisma.InputJsonValue)
-            : undefined,
+        ...(safeDetails
+          ? { details: safeDetails as unknown as Prisma.InputJsonValue }
+          : {}),
       },
     });
   } catch (error) {

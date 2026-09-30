@@ -188,3 +188,47 @@ export async function getCurrentSessionUser(): Promise<{
 
   return context;
 }
+
+/**
+ * Identité complète de l'auteur de l'opération en cours : identifiant, nom
+ * lisible et rôle.
+ *
+ * Utilisée pour la traçabilité des écritures financières (ventes POS,
+ * règlements) : l'ID et le NOM de l'utilisateur connecté sont persistés dans
+ * les métadonnées de la transaction ET dans le Journal d'Audit. Le nom est
+ * résolu depuis la base (et non depuis le JWT) afin de rester exact même si
+ * le nom de l'utilisateur a changé depuis l'émission du jeton.
+ */
+export type SessionActor = {
+  id: string;
+  /** Nom lisible « Prénom Nom » (repli : « Caisse » si introuvable). */
+  name: string;
+  role: string;
+  organizationId: string;
+};
+
+/**
+ * Résout l'identité de l'utilisateur connecté (id + nom + rôle).
+ *
+ * Même garde de session que `getCurrentSessionUser` : redirection vers
+ * `/login` si le contexte est introuvable.
+ */
+export async function getCurrentSessionActor(): Promise<SessionActor> {
+  const context = await getCurrentSessionUser();
+
+  const user = await prisma.user.findUnique({
+    where: { id: context.id },
+    select: { firstName: true, lastName: true },
+  });
+
+  const name = user
+    ? `${user.firstName} ${user.lastName}`.trim()
+    : "";
+
+  return {
+    id: context.id,
+    name: name || "Utilisateur inconnu",
+    role: context.role,
+    organizationId: context.organizationId,
+  };
+}

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
+import { getCurrentAcademicYear } from "@/lib/class-status";
 import { LEAD_STAGE_LABELS, LOST_REASON_LABELS } from "@/lib/crm-constants";
 import type { LeadStage, LostReason } from "@prisma/client";
 import {
@@ -212,6 +213,7 @@ export async function convertProspectToEnrolled(
           organizationId,
           studentId,
           classId,
+          academicYear: getCurrentAcademicYear(),
         },
       });
 

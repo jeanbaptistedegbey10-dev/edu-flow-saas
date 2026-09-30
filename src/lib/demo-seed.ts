@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { getCurrentAcademicYear } from "@/lib/class-status";
 
 // ---------------------------------------------------------------------------
 // Seeding des données de démonstration — couverture 100 % des modules
@@ -619,6 +620,7 @@ async function runDemoSeedTransaction(
         organizationId,
         studentId: student.id,
         classId: student.classId,
+        academicYear: getCurrentAcademicYear(),
       })),
     }),
     tx.enrollment.createMany({

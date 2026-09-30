@@ -1,16 +1,19 @@
 "use server";
 
-import type { PaymentMethod, SaleStatus } from "@prisma/client";
+import type { PaymentMethod, SaleStatus, TransactionType } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 import { formatSaleReference } from "@/lib/receipt";
 import {
   getCurrentOrganizationId,
+  getCurrentSessionActor,
   getCurrentSessionUser,
   isNextRedirectError,
 } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
+import { logAuditEvent } from "@/lib/actions/audit";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -70,6 +73,18 @@ export type CreateSaleInput = {
    */
   guestName?: string | null;
   guestPhone?: string | null;
+  /**
+   * Vente encaissée « hors système » / à date antérieure : met à jour le solde
+   * débiteur du client mais n'alimente PAS la session de caisse physique.
+   * Forcé à `true` dès qu'une date effective antérieure à aujourd'hui est
+   * fournie (une vente antérieure ne peut pas alimenter la caisse du jour).
+   */
+  isOutOfSystem?: boolean;
+  /**
+   * Date effective de l'encaissement (« YYYY-MM-DD » ou Date) — optionnelle.
+   * Une date passée est admise pour une vente hors système / antérieure.
+   */
+  paidAt?: string | Date | null;
 };
 
 export type SaleReceiptData = {
@@ -88,6 +103,8 @@ export type SaleReceiptData = {
   clientName: string;
   clientDetail: string | null;
   cashierName: string;
+  /** Vente « hors système » / antérieure (exclue de la caisse physique). */
+  isOutOfSystem: boolean;
   items: Array<{
     name: string;
     /** Libellé de la catégorie personnalisée (null = produit sans catégorie). */
@@ -137,6 +154,8 @@ export type SaleHistoryDTO = {
   status: SaleStatus;
   /** Nombre de lignes d'articles vendues. */
   itemCount: number;
+  /** Vente « hors système » / antérieure (exclue de la caisse physique). */
+  isOutOfSystem: boolean;
 };
 
 /** Page du tableau « Historique des ventes » (pagination serveur). */
@@ -167,6 +186,38 @@ function isPaymentMethod(value: string): value is PaymentMethodValue {
 }
 
 /**
+ * Normalise une date effective saisie (« YYYY-MM-DD ») ou déjà typée `Date`.
+ * L'heure est fixée à midi UTC — même convention que les règlements — afin
+ * d'éviter tout décalage de jour lié aux fuseaux horaires.
+ * Retourne `null` lorsque la valeur est absente ou invalide.
+ */
+function parseEffectiveDate(
+  value: string | Date | null | undefined
+): Date | null {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  const raw = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+
+  const parsed = new Date(`${raw}T12:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/** Vrai lorsque la date fournie ne tombe pas le jour calendaire courant (UTC). */
+function isNotToday(date: Date): boolean {
+  const today = new Date();
+  return (
+    date.getUTCFullYear() !== today.getUTCFullYear() ||
+    date.getUTCMonth() !== today.getUTCMonth() ||
+    date.getUTCDate() !== today.getUTCDate()
+  );
+}
+
+/**
  * Construit le détail client imprimé sur la facturette d'une vente anonyme :
  * - aucune coordonnée saisie  → null (le reçu affiche « Client de passage ») ;
  * - nom seul                  → le nom ;
@@ -185,8 +236,45 @@ function buildWalkInClientDetail(
 }
 
 // --------------------------------------
-// Lectures
+// Synchronisation Caisse → Étudiant (Relevé 360°)
 // --------------------------------------
+
+/**
+ * Nature d'une transaction de caisse rattachée à un étudiant, déduite des
+ * libellés des articles vendus au comptoir :
+ * - BOOK    : au moins un article identifié comme livre / manuel ;
+ * - SERVICE : au moins un article identifié comme prestation (photocopie,
+ *             traduction, impression, scan…) ;
+ * - OTHER   : aucune correspondance (produit ou service divers).
+ * Priorité : BOOK > SERVICE > OTHER.
+ */
+// (helpers internes : un fichier « use server » ne peut exporter que des
+// fonctions async — ces fonctions synchrones restent donc non exportées.)
+function classifyTransactionType(
+  productNames: string[]
+): TransactionType {
+
+  const haystack = productNames.join(" ").toLowerCase();
+  if (/(^|\s|>)(livre|book|manuel|manuels|manuel scolaire)/.test(haystack)) {
+    return "BOOK";
+  }
+    if (/(^|\s|>)(service|photocopie|photocopy|copie|copy|traduction|translation|impression|scan|repro|reprographie)/.test(haystack)) {
+    return "SERVICE";
+  }
+  return "OTHER";
+}
+
+/** Concatène les articles vendus pour le libellé de la transaction (ex:
+ * « 2× Manuel de Français + 1× Photocopie »). */
+function buildTransactionDescription(
+  items: Array<{ name: string; quantity: number }>
+): string {
+  return items
+    .map((item) => `${item.quantity}× ${item.name}`)
+    .join(", ");
+}
+
+
 
 /**
  * Récupère les catégories personnalisées du catalogue de l'organisation
@@ -320,6 +408,11 @@ export async function getPosClientOptions(): Promise<PosClientOption[]> {
  * Indicateurs de la caisse : recettes du jour, du mois, nombre de ventes
  * sur la période et taille du catalogue actif.
  * Accepte une plage de dates optionnelle pour filtrer les résultats.
+ *
+ * Les ventes « hors système » / antérieures (`isOutOfSystem`) sont exclues :
+ * elles mettent à jour le solde du client mais n'alimentent jamais la caisse
+ * physique — elles ne doivent donc pas gonfler « Encaissé aujourd'hui » ni
+ * « Encaissé ce mois ».
  */
 export async function getPosStats(dateRange?: DateRangeFilter): Promise<PosStatsDTO> {
   const organizationId = await getCurrentOrganizationId();
@@ -334,6 +427,8 @@ export async function getPosStats(dateRange?: DateRangeFilter): Promise<PosStats
     const periodWhere: Record<string, unknown> = {
       organizationId,
       status: "COMPLETED",
+      // Règlements hors système exclus du tiroir-caisse (aucune recette live).
+      isOutOfSystem: false,
     };
     if (dateRange) {
       periodWhere.createdAt = { gte: dateRange.startDate, lte: dateRange.endDate };
@@ -353,6 +448,7 @@ export async function getPosStats(dateRange?: DateRangeFilter): Promise<PosStats
         where: {
           organizationId,
           status: "COMPLETED",
+          isOutOfSystem: false,
           createdAt: { gte: monthStart, lt: monthEnd },
         },
         _sum: { netAmount: true },
@@ -364,6 +460,7 @@ export async function getPosStats(dateRange?: DateRangeFilter): Promise<PosStats
         where: {
           organizationId,
           status: "COMPLETED",
+          isOutOfSystem: false,
           createdAt: { gte: dayStart },
         },
       }),
@@ -462,6 +559,7 @@ export async function getSalesHistory(
           paymentMethod: true,
           status: true,
           createdAt: true,
+          isOutOfSystem: true,
           guestName: true,
           student: { select: { firstName: true, lastName: true } },
           travelProcedure: {
@@ -488,6 +586,7 @@ export async function getSalesHistory(
         paymentMethod: sale.paymentMethod,
         status: sale.status,
         itemCount: sale._count.items,
+        isOutOfSystem: sale.isOutOfSystem,
       })),
       page: safePage,
       pageSize: safePageSize,
@@ -539,6 +638,7 @@ export async function getSaleReceiptData(
         netAmount: true,
         paymentMethod: true,
         createdAt: true,
+        isOutOfSystem: true,
         guestName: true,
         guestPhone: true,
         student: { select: { firstName: true, lastName: true } },
@@ -579,6 +679,7 @@ export async function getSaleReceiptData(
         netAmount: sale.netAmount,
         paymentMethod: sale.paymentMethod,
         createdAt: sale.createdAt,
+        isOutOfSystem: sale.isOutOfSystem,
         clientName: resolveSaleClientName(sale),
         clientDetail: hasStudent
           ? "Étudiant inscrit"
@@ -970,18 +1071,34 @@ export async function createSaleAction(
       ? String(input.guestPhone ?? "").trim().slice(0, 30) || null
       : null;
 
+  // Date effective de l'encaissement + caractère « hors système ».
+  const requestedPaidAt = parseEffectiveDate(input.paidAt ?? null);
+  if (input.paidAt && !requestedPaidAt) {
+    return { ok: false, message: "La date de l'encaissement est invalide." };
+  }
+
+  // Une date antérieure au jour courant caractérise une vente « hors système » :
+  // elle ne peut pas alimenter la caisse physique du jour, le drapeau est donc
+  // forcé même si la case n'a pas été cochée côté interface.
+  const isOutOfSystem =
+    input.isOutOfSystem === true ||
+    (requestedPaidAt !== null && isNotToday(requestedPaidAt));
+  const effectiveDate = requestedPaidAt ?? new Date();
+
   try {
     const organizationId = await getCurrentOrganizationId();
-    const user = await getCurrentSessionUser();
 
-    // Nom du caissier pour la facturette.
-    const cashier = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { firstName: true, lastName: true },
-    });
-    const cashierName = cashier
-      ? `${cashier.firstName} ${cashier.lastName}`
-      : "Caisse";
+    // Auteur de la vente : l'ID et le NOM du caissier connecté sont figés
+    // dans les métadonnées de la transaction (traçabilité) ET reportés dans
+    // le Journal d'Audit. Le nom sert également à la facturette.
+    const actor = await getCurrentSessionActor();
+    const cashierName = actor.name;
+
+    // Aucune session de caisse n'est EXIGÉE pour encaisser : le panier et
+    // l'encaissement sont accessibles en direct (secrétaire, comptable,
+    // admin). L'ouverture de la caisse reste un relevé de fond de caisse
+    // facultatif, utile pour la clôture de fin de journée — elle ne
+    // conditionne plus l'encaissement.
 
     // Résout le client éventuel (étudiant inscrit ou candidat voyage).
     let studentId: string | null = null;
@@ -1022,6 +1139,18 @@ export async function createSaleAction(
         ? `${procedure.student.firstName} ${procedure.student.lastName}`
         : (procedure.candidateName ?? "Candidat externe");
     }
+
+    // Nom du client reporté dans le JOURNAL D'AUDIT. Pour un client comptoir
+    // (WALK_IN), la valeur EXACTE saisie par l'utilisateur est conservée
+    // (traçabilité de la vente au comptoir) au lieu du libellé générique
+    // « Client de passage » ; le repli sur ce libellé n'a lieu que si aucun
+    // nom n'a été saisi.
+    //
+    // `clientName` (valeur d'affichage de la facturette) reste inchangé :
+    // `buildSaleReceiptDocument` s'appuie dessus pour le rendu
+    // « Client de passage : <nom - téléphone> » (cf. `src/lib/receipt.ts`).
+    const auditClientName =
+      input.clientKind === "WALK_IN" && guestName ? guestName : clientName;
 
     // Charge les prix officiels du catalogue (source de vérité serveur).
     const productIds = [...new Set(items.map((item) => item.productServiceId))];
@@ -1066,12 +1195,20 @@ export async function createSaleAction(
           organizationId,
           studentId,
           travelProcedureId,
-          createdById: user.id,
+          // Traçabilité : ID + nom du caissier connecté sont persistés dans
+          // les métadonnées de la vente.
+          createdById: actor.id,
+          createdByName: cashierName,
           totalAmount,
           discount,
           netAmount,
           paymentMethod: input.paymentMethod as PaymentMethodValue,
           status: "COMPLETED",
+          isOutOfSystem,
+          // Date effective de l'encaissement : `createdAt` porte la date
+          // comptable de la vente (les ventes antérieures sont horodatées à
+          // leur date réelle et exclues de la caisse du jour).
+          createdAt: effectiveDate,
           guestName,
           guestPhone,
         },
@@ -1090,12 +1227,56 @@ export async function createSaleAction(
         }),
       });
 
+      // Synchronisation Caisse → Étudiant (Relevé 360°) : lorsqu'une vente est
+      // effectuée au nom d'un étudiant, mémoriser automatiquement l'achat dans
+      // son relevé financier global (modèle `StudentTransaction`). Une telle
+      // écriture est idempotent vis-à-vis de la vente : elle ne modifie en
+      // rien le ticket de caisse, elle alimente uniquement le compte élève.
+      if (studentId) {
+        const lineItems = items.map((item) => {
+          const product = productsById.get(item.productServiceId)!;
+          return { name: product.name, quantity: item.quantity };
+        });
+        await tx.studentTransaction.create({
+          data: {
+            organizationId,
+            studentId,
+            type: classifyTransactionType(lineItems.map((i) => i.name)),
+            description: buildTransactionDescription(lineItems),
+            amount: netAmount,
+            paymentMode: input.paymentMethod,
+          },
+        });
+      }
+
       return created;
     });
 
     revalidatePath("/dashboard/pos");
     revalidatePath("/dashboard/payments");
     revalidatePath("/dashboard");
+
+    // Journal d'audit : vente POS avec l'ID et le NOM du caissier connecté.
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.SALE_CREATED,
+      entity: AUDIT_ENTITIES.SALE,
+      entityId: sale.id,
+      details: {
+        createdByUserId: actor.id,
+        createdByUserName: cashierName,
+        createdByUserRole: actor.role,
+        totalAmount,
+        discount,
+        netAmount,
+        paymentMethod: input.paymentMethod,
+        isOutOfSystem,
+        clientKind: input.clientKind,
+        // Client comptoir (WALK_IN) : nom réellement saisi au comptoir.
+        clientName: auditClientName,
+        itemCount: items.length,
+        quantity: items.reduce((sum, item) => sum + item.quantity, 0),
+      },
+    });
 
     return {
       ok: true,
@@ -1106,6 +1287,7 @@ export async function createSaleAction(
         netAmount,
         paymentMethod: input.paymentMethod as PaymentMethodValue,
         createdAt: sale.createdAt,
+        isOutOfSystem,
         clientName,
         clientDetail:
           input.clientKind === "WALK_IN"

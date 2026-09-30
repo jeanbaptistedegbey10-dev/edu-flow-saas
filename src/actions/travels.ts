@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
   getCurrentOrganizationId,
+  getCurrentSessionActor,
   getCurrentSessionUser,
   isNextRedirectError,
 } from "@/lib/session";
@@ -89,6 +90,11 @@ export type TravelPaymentDTO = {
   paymentMethod: "CASH" | "BANK_TRANSFER" | "MOBILE_MONEY" | "CREDIT_CARD" | "CHECK";
   reference: string | null;
   description: string | null;
+  /**
+   * Tranche « hors système » / à date antérieure : met à jour le solde
+   * débiteur du dossier mais n'alimente PAS la session de caisse physique.
+   */
+  isOutOfSystem: boolean;
   paidAt: Date;
 };
 
@@ -196,6 +202,15 @@ function parseDateInput(raw: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
   const date = new Date(`${raw}T12:00:00.000Z`);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Vrai lorsque deux dates tombent le même jour calendaire (UTC). */
+function isSameUtcDay(left: Date, right: Date): boolean {
+  return (
+    left.getUTCFullYear() === right.getUTCFullYear() &&
+    left.getUTCMonth() === right.getUTCMonth() &&
+    left.getUTCDate() === right.getUTCDate()
+  );
 }
 
 /** Normalise un tableau Json Prisma en liste de chaînes non vides. */
@@ -663,6 +678,7 @@ export async function getTravelProcedureDetail(
           paymentMethod: true,
           reference: true,
           description: true,
+          isOutOfSystem: true,
           paidAt: true,
         },
       },
@@ -714,6 +730,7 @@ export async function getTravelProcedureDetail(
       paymentMethod: payment.paymentMethod,
       reference: payment.reference,
       description: payment.description,
+      isOutOfSystem: payment.isOutOfSystem,
       paidAt: payment.paidAt,
     })),
   };
@@ -1052,12 +1069,43 @@ type ParsedTravelInput =
     }
   | { ok: false; fieldErrors: Partial<Record<TravelFormField, string>> };
 
+/**
+ * Normalise la valeur du sélecteur « Modèle de procédure » d'un dossier voyage.
+ *
+ * BUG CORRIGÉ : le `<Select>` Radix renvoie sa VALEUR SENTINELLE (`"none"`)
+ * quand l'utilisateur choisit « Aucun modèle (suivi libre) ». Cette chaîne
+ * étant non vide, elle était ensuite traitée comme un véritable identifiant de
+ * `Workflow` : la recherche en base échouait et la création du dossier se
+ * soldait par l'erreur « Modèle introuvable. » alors que le suivi libre est
+ * parfaitement valide (`workflowId = null`).
+ *
+ * On normalise donc ici TOUTE valeur sentinelle en `null` (absence de modèle),
+ * et on ne conserve que les identifiants réellement exploitables.
+ */
+const NO_WORKFLOW_SENTINELS = new Set([
+  "none",
+  "__none__",
+  "null",
+  "undefined",
+  "false",
+]);
+
+function normalizeWorkflowId(raw: FormDataEntryValue | null): string | null {
+  const value = String(raw ?? "").trim();
+
+  if (value.length === 0 || NO_WORKFLOW_SENTINELS.has(value.toLowerCase())) {
+    return null;
+  }
+
+  return value;
+}
+
 function parseTravelForm(formData: FormData): ParsedTravelInput {
   const candidateTypeRaw = String(formData.get("candidateType") ?? "").trim();
   const studentId = String(formData.get("studentId") ?? "").trim();
   const candidateName = String(formData.get("candidateName") ?? "").trim();
   const candidatePhone = String(formData.get("candidatePhone") ?? "").trim();
-  const workflowId = String(formData.get("workflowId") ?? "").trim();
+  const workflowId = normalizeWorkflowId(formData.get("workflowId"));
   const destination = String(formData.get("destination") ?? "").trim();
   const targetProgram = String(formData.get("targetProgram") ?? "").trim();
   const rawTotalCost = String(formData.get("totalCost") ?? "").trim();
@@ -1143,7 +1191,8 @@ function parseTravelForm(formData: FormData): ParsedTravelInput {
       studentId: candidateType === "EXISTING_STUDENT" ? studentId : null,
       candidateName: candidateType === "EXTERNAL" ? candidateName : null,
       candidatePhone: candidateType === "EXTERNAL" ? candidatePhone || null : null,
-      workflowId: workflowId || null,
+      // Déjà normalisé par `normalizeWorkflowId` : `null` = suivi libre.
+      workflowId,
       destination,
       targetProgram: targetProgram || null,
       totalCost,
@@ -1645,6 +1694,16 @@ export async function addTravelInstallmentAction(
     paymentMethod: string;
     reference?: string | null;
     description?: string | null;
+    /**
+     * Règlement « hors système » / antérieur : met à jour le solde débiteur du
+     * dossier de voyage mais n'alimente PAS la caisse physique du jour.
+     */
+    isOutOfSystem?: boolean;
+    /**
+     * Date effective du règlement (« YYYY-MM-DD » ou Date). Une date passée est
+     * admise pour un règlement hors système / antérieur.
+     */
+    paidAt?: string | Date | null;
   }
 ): Promise<AddInstallmentResult> {
   await assertCanMutate();
@@ -1680,8 +1739,34 @@ export async function addTravelInstallmentAction(
     };
   }
 
+  // Date effective du règlement : accepte un `Date` déjà typé ou la chaîne
+  // « YYYY-MM-DD » d'un `<input type="date">` (date passée admise).
+  const requestedPaidAt =
+    input.paidAt instanceof Date
+      ? Number.isNaN(input.paidAt.getTime())
+        ? null
+        : input.paidAt
+      : typeof input.paidAt === "string" && input.paidAt.trim().length > 0
+        ? parseDateInput(input.paidAt.trim())
+        : null;
+
+  if (input.paidAt && !requestedPaidAt) {
+    return { ok: false, message: "La date du règlement est invalide." };
+  }
+
+  // Règlement « hors système » / antérieur : une date différente du jour
+  // courant est automatiquement traitée comme hors système (elle ne peut pas
+  // alimenter la caisse physique du jour).
+  const isOutOfSystem =
+    input.isOutOfSystem === true ||
+    (requestedPaidAt !== null &&
+      !isSameUtcDay(requestedPaidAt, new Date()));
+  const paidAt = requestedPaidAt ?? undefined;
+
   try {
     const organizationId = await getCurrentOrganizationId();
+    // Auteur de la tranche : ID + nom de l'utilisateur connecté (traçabilité).
+    const actor = await getCurrentSessionActor();
 
     const procedure = await prisma.travelProcedure.findFirst({
       where: { id: procedureId, organizationId },
@@ -1697,12 +1782,16 @@ export async function addTravelInstallmentAction(
         organizationId,
         studentId: procedure.studentId,
         travelProcedureId: procedure.id,
+        createdById: actor.id,
+        createdByName: actor.name,
         amount,
         paymentMethod: input.paymentMethod as PaymentMethodValue,
         status: "COMPLETED",
         reference,
         description:
           description ?? `Tranche — Procédure ${procedure.destination}`,
+        isOutOfSystem,
+        paidAt,
       },
       select: {
         id: true,
@@ -1711,6 +1800,7 @@ export async function addTravelInstallmentAction(
         paymentMethod: true,
         reference: true,
         description: true,
+        isOutOfSystem: true,
         paidAt: true,
       },
     });
@@ -1728,6 +1818,7 @@ export async function addTravelInstallmentAction(
         paymentMethod: created.paymentMethod,
         reference: created.reference,
         description: created.description,
+        isOutOfSystem: created.isOutOfSystem,
         paidAt: created.paidAt,
       },
     };

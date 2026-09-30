@@ -6,18 +6,11 @@ import {
   DownloadIcon,
   LinkIcon,
   Loader2Icon,
-  PrinterIcon,
   SearchIcon,
   UsersRoundIcon,
 } from "lucide-react";
 
 import type { ClassOptionDTO } from "@/actions/classes";
-import {
-  getPremiumReportForStudent,
-  type PremiumReportDTO,
-} from "@/actions/evaluations";
-import type { OrganizationProfileDTO } from "@/actions/payments";
-import { getCurrentOrganizationProfile } from "@/actions/payments";
 import type { StudentDTO } from "@/actions/students";
 import {
   deleteStudentAction,
@@ -26,7 +19,6 @@ import {
 import { AddStudentDialog } from "@/components/students/add-student-dialog";
 import { ImportStudentsDialog } from "@/components/students/import-students-dialog";
 import { EditStudentDialog } from "@/components/students/edit-student-dialog";
-import { ReportCardDialog } from "@/components/evaluations/report-card-dialog";
 import { ToastNotification } from "@/components/ui/toast";
 import {
   EntityActionsMenu,
@@ -112,48 +104,11 @@ export function StudentsView({
     null
   );
 
-  // État de la modale « Rapport / Bulletin » (aperçu premium).
-  const [reportData, setReportData] = React.useState<PremiumReportDTO | null>(
-    null
-  );
-  const [reportOrg, setReportOrg] =
-    React.useState<OrganizationProfileDTO | null>(null);
-  const [reportOpen, setReportOpen] = React.useState(false);
-  const [reportLoadingId, setReportLoadingId] = React.useState<string | null>(
-    null
-  );
-  const [reportError, setReportError] = React.useState<string | null>(null);
   // État du presse-papiers / lien parent.
   const [toast, setToast] = React.useState<string | null>(null);
   const [parentLinkPendingId, setParentLinkPendingId] = React.useState<
     string | null
   >(null);
-
-  /**
-   * Ouvre la modale d'aperçu du bulletin premium d'un étudiant. Les données
-   * sont récupérées au clic via les Server Actions (contrôle d'accès serveur).
-   */
-  const handleOpenReport = async (studentId: string) => {
-    setReportError(null);
-    setReportLoadingId(studentId);
-    try {
-      const [dto, org] = await Promise.all([
-        getPremiumReportForStudent(studentId),
-        getCurrentOrganizationProfile(),
-      ]);
-      setReportData({ ...dto, issuedAt: new Date(dto.issuedAt) });
-      setReportOrg(org);
-      setReportOpen(true);
-    } catch (error) {
-      setReportError(
-        error instanceof Error
-          ? error.message
-          : "Impossible de générer le bulletin pour le moment."
-      );
-    } finally {
-      setReportLoadingId(null);
-    }
-  };
 
   /**
    * Génère (ou réutilise) le token public de l'étudiant, copie l'URL
@@ -353,21 +308,6 @@ export function StudentsView({
                       >
                         <Button
                           type="button"
-                          variant="outline"
-                          size="icon-sm"
-                          onClick={() => void handleOpenReport(student.id)}
-                          disabled={reportLoadingId === student.id}
-                          title={`Voir / imprimer le bulletin de ${student.firstName} ${student.lastName}`}
-                        >
-                          {reportLoadingId === student.id ? (
-                            <Loader2Icon className="size-3.5 animate-spin" />
-                          ) : (
-                            <PrinterIcon className="size-3.5" />
-                          )}
-                          <span className="sr-only">Rapport / Bulletin</span>
-                        </Button>
-                        <Button
-                          type="button"
                           variant="ghost"
                           size="icon-sm"
                           onClick={() =>
@@ -435,47 +375,6 @@ export function StudentsView({
           if (!open) setEditingStudent(null);
         }}
       />
-
-      {/* Modale d'aperçu « Rapport / Bulletin » */}
-      {reportOrg && reportData ? (
-        <ReportCardDialog
-          data={reportData}
-          organization={reportOrg}
-          open={reportOpen}
-          onOpenChange={(open) => {
-            if (!open) setReportOpen(false);
-          }}
-        />
-      ) : (
-        <ReportCardDialog
-          data={null}
-          organization={{
-            name: "Centre de Formation Excellence",
-            address: null,
-            city: null,
-            phone: null,
-            email: null,
-            website: null,
-            logoUrl: null,
-            rccm: null,
-            ifu: null,
-          }}
-          open={reportOpen}
-          onOpenChange={(open) => {
-            if (!open) setReportOpen(false);
-          }}
-        />
-      )}
-
-      {/* Erreur de génération du bulletin (stockée au clic sur une ligne) */}
-      {reportError ? (
-        <p
-          role="alert"
-          className="fixed bottom-24 right-6 z-[70] max-w-sm rounded-lg border border-destructive bg-popover p-3 text-sm text-destructive shadow-lg ring-1 ring-destructive/30"
-        >
-          {reportError}
-        </p>
-      ) : null}
 
       {/* Toast de confirmation de copie du lien parent */}
       <ToastNotification

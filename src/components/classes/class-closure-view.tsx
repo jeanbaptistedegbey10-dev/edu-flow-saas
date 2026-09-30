@@ -19,10 +19,13 @@ import {
 
 import {
   closeClassAction,
+  getClassClosureReadiness,
   type ClosureDecision,
+  type ClosureMissingRequirement,
   type CloseClassDataDTO,
   type ClosureStudentDTO,
 } from "@/actions/class-closure";
+import { archiveClassAction } from "@/actions/classes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,6 +51,11 @@ import {
   MODULE_STATUS_BADGE_CLASSES,
   MODULE_STATUS_LABELS,
 } from "@/lib/module-status";
+import {
+  CLASS_STATUS_BADGE_CLASSES,
+  CLASS_STATUS_LABELS,
+  isClassOngoing,
+} from "@/lib/class-status";
 import type { ClassEnrollmentStatus } from "@prisma/client";
 import { cn } from "@/lib/utils";
 
@@ -58,22 +66,6 @@ const numberFormatter = new Intl.NumberFormat("fr-FR", {
 
 const BADGE_BASE_CLASSES =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
-
-/** Statuts visuels d'une classe. */
-const CLASS_STATUS_BADGES: Record<string, { label: string; classes: string }> = {
-  ACTIVE: {
-    label: "Active",
-    classes: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
-  },
-  COMPLETED: {
-    label: "Clôturée",
-    classes: "bg-slate-100 text-slate-700 dark:bg-slate-500/10 dark:text-slate-300",
-  },
-  ARCHIVED: {
-    label: "Archivée",
-    classes: "bg-muted text-muted-foreground",
-  },
-};
 
 /** Libellés + badges des décisions de clôture. */
 const DECISION_META: Record<
@@ -126,7 +118,7 @@ function ModuleBadge({ status }: { status: ClosureStudentDTO["modules"][number][
 
 export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
   const router = useRouter();
-  const isClosed = data.status !== "ACTIVE";
+  const isClosed = !isClassOngoing(data.status);
 
   // Décisions par étudiant (init : décision automatique proposée).
   const [decisions, setDecisions] = React.useState<Record<string, ClosureDecision>>(() =>
@@ -139,12 +131,24 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
   );
   const [mode, setMode] = React.useState<"automatic" | "manual">("automatic");
   const [targetClassId, setTargetClassId] = React.useState<string>("");
+  /**
+   * Nouvelle session du MÊME niveau (même cours porteur) destinée à accueillir
+   * les redoublants. Vide ⇒ les redoublants restent rattachés à la classe
+   * clôturée (historique) sans nouvelle inscription.
+   */
+  const [repeatTargetClassId, setRepeatTargetClassId] =
+    React.useState<string>("");
   const [globalNote, setGlobalNote] = React.useState("");
   const [chargeFee, setChargeFee] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const [archiving, setArchiving] = React.useState(false);
   const [toast, setToast] = React.useState<string | null>(null);
   const [expandedStudent, setExpandedStudent] = React.useState<string | null>(null);
+  /** Prérequis de clôture non satisfaits (alerte bloquante). */
+  const [missingRequirements, setMissingRequirements] =
+    React.useState<ClosureMissingRequirement[]>([]);
+  const [blockedOpen, setBlockedOpen] = React.useState(false);
 
   /** Active le mode manuel : les décisions deviennent modifiables. */
   const switchToManual = () => setMode("manual");
@@ -171,7 +175,6 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
   const droppedCount = data.students.filter(
     (student) => decisions[student.studentId] === "DROPPED"
   ).length;
-  const hasPromotions = promotedCount > 0;
 
   /** Bulk : passer / faire redoubler tous les etudiants (mode manuel). */
   const bulkDecision = (decision: ClosureDecision) => {
@@ -184,17 +187,44 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
   };
 
   /**
+   * Vérifie les prérequis de clôture AVANT toute exécution.
+   *
+   * Le serveur (`closeClassAction`) réapplique le même contrôle — cette
+   * vérification côté client sert à afficher une alerte claire AVANT de
+   * parcourir le formulaire, et à éviter une erreur opaque.
+   */
+  const assertReadiness = async (): Promise<boolean> => {
+    const readiness = await getClassClosureReadiness(data.id);
+
+    if (!readiness.ok) {
+      setToast(readiness.message);
+      return false;
+    }
+
+    if (!readiness.canClose) {
+      setMissingRequirements(readiness.missingRequirements);
+      setBlockedOpen(true);
+      return false;
+    }
+
+    return true;
+  };
+
+  /**
    * Exécute la clôture : marque les décisions, crée les dossiers de la classe
    * cible SANS frais par défaut, et clôture la classe (COMPLETED).
    */
   const handleClose = async () => {
-    if (!targetClassId || submitting) return;
+    if (submitting) return;
 
     setSubmitting(true);
     try {
+      if (!(await assertReadiness())) return;
+
       const result = await closeClassAction({
         classId: data.id,
-        targetClassId,
+        targetClassId: targetClassId || null,
+        repeatTargetClassId: repeatTargetClassId || null,
         chargeReRegistrationFee: chargeFee,
         globalDecisionNote: globalNote.trim() || undefined,
         decisions: data.students.map((student) => ({
@@ -205,9 +235,11 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
 
       if (result.ok) {
         setToast(
-          `Classe clôturée : ${result.promoted} promu(s)${result.billedCount > 0 ? `, ${result.billedCount} frais de réinscription facturé(s)` : " (aucun frais d'inscription généré)"}, ${result.retained} redoublant(s), ${result.dropped} abandon(s).`
+          `Classe clôturée : ${result.promoted} promu(s), ${result.retained} redoublant(s), ${result.dropped} abandon(s), ${result.certificatesGenerated} certificat(s) généré(s).`
         );
-        router.push(`/dashboard/classes/${data.id}`);
+        // Retour à la liste : la classe étant désormais clôturée, elle n'est
+        // plus proposée dans le sélecteur de la vue unifiée.
+        router.push("/dashboard/classes");
       } else {
         setToast(result.message);
       }
@@ -219,7 +251,59 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
     }
   };
 
-  const statusBadge = CLASS_STATUS_BADGES[data.status] ?? CLASS_STATUS_BADGES.ACTIVE;
+  /** Clôture + archivage direct : clôture puis passe en ARCHIVED. */
+  const handleCloseAndArchive = async () => {
+    if (submitting || archiving) return;
+    setArchiving(true);
+    try {
+      if (!(await assertReadiness())) return;
+
+      const result = await closeClassAction({
+        classId: data.id,
+        targetClassId: targetClassId || null,
+        repeatTargetClassId: repeatTargetClassId || null,
+        chargeReRegistrationFee: chargeFee,
+        globalDecisionNote: globalNote.trim() || undefined,
+        decisions: data.students.map((student) => ({
+          studentId: student.studentId,
+          decision: decisions[student.studentId] ?? student.autoDecision,
+        })),
+      });
+      if (!result.ok) {
+        setToast(result.message);
+        return;
+      }
+      const archived = await archiveClassAction(data.id);
+      if (archived.ok) {
+        setToast(
+          `Classe clôturée et archivée : ${result.promoted} promu(s), ${result.certificatesGenerated} certificat(s) généré(s).`
+        );
+        router.push("/dashboard/classes");
+      } else {
+        setToast(`Classe clôturée (${result.certificatesGenerated} certificat(s)), mais archivage impossible : ${archived.message ?? ""}`);
+        router.push("/dashboard/classes");
+      }
+    } catch {
+      setToast("Erreur réseau : impossible de clôturer et archiver la classe.");
+    } finally {
+      setArchiving(false);
+      setConfirmOpen(false);
+    }
+  };
+
+  const statusBadge = {
+    label: CLASS_STATUS_LABELS[data.status],
+    classes: CLASS_STATUS_BADGE_CLASSES[data.status],
+  };
+
+  /**
+   * Nouvelles sessions du même niveau éligibles au redoublement : classes en
+   * cours portant LE MÊME cours que la classe clôturée (ex : « A1 - Soir »
+   * pour une « A1 - Matin » clôturée).
+   */
+  const repeatTargetClasses = data.targetClasses.filter(
+    (target) => target.courseId === data.courseId
+  );
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
@@ -227,9 +311,9 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Link
-            href={`/dashboard/classes/${data.id}`}
+            href={`/dashboard/attendance?classId=${data.id}`}
             className="inline-flex items-center justify-center rounded-md border border-input bg-background p-2 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground"
-            aria-label="Retour à la fiche de la classe"
+            aria-label="Retour à la vue Présences & Cahier de texte"
           >
             <ArrowLeftIcon className="size-4" />
           </Link>
@@ -259,8 +343,8 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
             Les décisions de passage sont verrouillées. Consultez le parcours et
             l&apos;historique de chaque étudiant depuis sa fiche.
           </p>
-          <Link href={`/dashboard/classes/${data.id}`}>
-            <Button variant="outline">Retour à la fiche de la classe</Button>
+          <Link href="/dashboard/classes">
+            <Button variant="outline">Retour à la liste des classes</Button>
           </Link>
         </div>
       ) : (
@@ -286,17 +370,18 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label htmlFor="closure-target-class">
-                    Classe de destination (passage) *
+                    Classe de destination (passage) — optionnel
                   </Label>
                   {data.targetClasses.length === 0 ? (
-                    <p className="text-xs text-destructive">
-                      Aucune autre classe active n&apos;est disponible. Créez la
-                      classe supérieure avant de clôturer.
+                    <p className="text-xs text-muted-foreground">
+                      Aucune autre classe active n&apos;est disponible. Les
+                      étudiants admis seront simplement marqués « admis » sans
+                      être transférés (certificats générés quand même).
                     </p>
                   ) : (
                     <Select value={targetClassId} onValueChange={setTargetClassId}>
                       <SelectTrigger id="closure-target-class" className="w-full">
-                        <SelectValue placeholder="Sélectionner la classe supérieure" />
+                        <SelectValue placeholder="Aucune — marquer les admis sans transfert" />
                       </SelectTrigger>
                       <SelectContent>
                         {data.targetClasses.map((target) => (
@@ -306,6 +391,49 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
                         ))}
                       </SelectContent>
                     </Select>
+                  )}
+                </div>
+
+                {/* Redoublants : affectation à une nouvelle session du MÊME niveau */}
+                <div className="grid gap-1.5 sm:col-span-2">
+                  <Label htmlFor="closure-repeat-target-class">
+                    Nouvelle session pour les redoublants (même niveau)
+                  </Label>
+                  {repeatTargetClasses.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Aucune autre session de ce niveau n&apos;est ouverte. Les
+                      redoublants resteront rattachés à cette classe (historique) :
+                      créez puis démarrez une nouvelle session du même cours pour
+                      les y affecter automatiquement.
+                    </p>
+                  ) : (
+                    <>
+                      <Select
+                        value={repeatTargetClassId}
+                        onValueChange={setRepeatTargetClassId}
+                      >
+                        <SelectTrigger
+                          id="closure-repeat-target-class"
+                          className="w-full"
+                        >
+                          <SelectValue placeholder="Aucune réaffectation automatique" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {repeatTargetClasses.map((target) => (
+                            <SelectItem key={target.id} value={target.id}>
+                              {target.name} — {target.schedule}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {retainedCount > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          {repeatTargetClassId
+                            ? `${retainedCount} redoublant(s) seront inscrits dans la session sélectionnée.`
+                            : "Sélectionnez une session pour réinscrire automatiquement les redoublants."}
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -581,20 +709,35 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
                     ? ` · ${numberFormatter.format(data.defaultRegistrationFee * promotedCount)} FCFA de frais de réinscription facturés`
                     : " · aucun frais généré"}
                 </p>
+                <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
-                  disabled={
-                    !targetClassId || !hasStudents || hasPromotions === false
-                  }
+                  disabled={!hasStudents || submitting || archiving}
                   onClick={() => setConfirmOpen(true)}
                 >
                   <AlertTriangleIcon data-icon="inline-start" />
-                  Clôturer la classe
+                  Terminer la classe
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!hasStudents || submitting || archiving}
+                  onClick={() => void handleCloseAndArchive()}
+                >
+                  {archiving ? (
+                    <Loader2Icon data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    <LockIcon data-icon="inline-start" />
+                  )}
+                  {archiving ? "Archivage…" : "Clôturer et Archiver la classe"}
+                </Button>
+                </div>
               </div>
               {!targetClassId && hasStudents && (
-                <p className="text-xs text-destructive">
-                  Sélectionnez la classe de destination pour activer la clôture.
+                <p className="text-xs text-muted-foreground">
+                  Aucune classe de destination sélectionnée : les étudiants avec
+                  la décision « Passe au niveau supérieur » seront marqués
+                  admis/terminé sans transfert, et leur certificat sera généré.
                 </p>
               )}
             </div>
@@ -602,27 +745,77 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
         </>
       )}
 
+      {/* Garde-fou : prérequis de clôture non réunis — la liste des éléments
+          manquants est affichée explicitement avant toute confirmation. */}
+      <AlertDialog open={blockedOpen} onOpenChange={setBlockedOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangleIcon className="size-5 text-amber-600" />
+              Clôture impossible — prérequis manquants
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  La classe « {data.name} » ne peut pas être clôturée tant que
+                  les éléments suivants ne sont pas complétés :
+                </p>
+                <ul className="list-disc space-y-1.5 pl-5">
+                  {missingRequirements.map((requirement) => (
+                    <li key={requirement.key}>{requirement.label}</li>
+                  ))}
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>
+              <CheckCircle2Icon data-icon="inline-start" />
+              J&apos;ai compris
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Confirmation de la clôture (action irréversible) */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirmer la clôture ?</AlertDialogTitle>
+            <AlertDialogTitle>Confirmer la fin de la classe ?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
                 <p>
                   La classe « {data.name} » passera au statut{" "}
-                  <strong>Clôturée</strong> : les décisions deviennent
-                  définitives et verrouillées.
+                  <strong>Clôturée (COMPLETED)</strong> : les décisions deviennent
+                  définitives et verrouillées, les bulletins sont finalisés et les
+                  certificats des admis générés automatiquement.
                 </p>
                 <ul className="list-disc space-y-1 pl-5">
                   <li>
-                    {promotedCount} étudiant(s) transféré(s) vers la classe
-                    sélectionnée — <strong>aucun frais d&apos;inscription</strong>{" "}
-                    généré{chargeFee ? ", sauf frais de réinscription cochés" : ""}.
+                    {targetClassId ? (
+                      <>
+                        {promotedCount} étudiant(s) transféré(s) vers la classe
+                        sélectionnée — <strong>aucun frais d&apos;inscription</strong>{" "}
+                        généré{chargeFee ? ", sauf frais de réinscription cochés" : ""}.
+                      </>
+                    ) : (
+                      <>
+                        {promotedCount} étudiant(s) marqué(s) « admis » sans
+                        transfert vers une nouvelle classe —{" "}
+                        <strong>aucun frais d&apos;inscription</strong> généré
+                        {chargeFee ? ", sauf frais de réinscription cochés" : ""}.
+                      </>
+                    )}
+                    {promotedCount > 0 ? (
+                      <> {promotedCount} certificat(s) seront émis.</>
+                    ) : null}
                   </li>
                   <li>
                     {retainedCount} redoublant(s) — modules échoués marqués « À
-                    reprendre ».
+                    reprendre »
+                    {repeatTargetClassId
+                      ? " et réinscrits dans la nouvelle session du même niveau sélectionnée."
+                      : " (aucune nouvelle session sélectionnée : ils restent rattachés à cette classe)."}
                   </li>
                   <li>{droppedCount} abandon(s) enregistré(s).</li>
                 </ul>

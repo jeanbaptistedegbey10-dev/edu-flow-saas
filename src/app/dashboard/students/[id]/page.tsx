@@ -14,11 +14,13 @@ import {
 } from "lucide-react";
 
 import { getStudentAttendanceHistory } from "@/actions/attendance";
+import { getClasses, type ClassDTO } from "@/actions/classes";
 import {
   ensureStudentReportToken,
   getStudentDetail,
   type StudentDetailDTO,
 } from "@/actions/students";
+import { getStudentFinancialSummary } from "@/lib/student-finance";
 import { getStudentAcademicRecord, type StudentAcademicRecordDTO } from "@/actions/evaluations";
 import {
   getStudentJourney,
@@ -46,6 +48,8 @@ import {
 import { StudentAcademicTab } from "@/components/students/student-academic-tab";
 import { StudentAttendanceTab } from "@/components/students/student-attendance-tab";
 import { StudentJourneyTab } from "@/components/students/student-journey-tab";
+import { StudentTransactionsTab } from "@/components/students/student-transactions-tab";
+import { ReEnrollDialog } from "@/components/students/re-enroll-dialog";
 import { StudentReportButton } from "@/components/students/student-report-button";
 import { CopyParentLinkButton } from "@/components/students/copy-parent-link-button";
 import { getPaymentMethodLabel,
@@ -160,7 +164,7 @@ export default async function StudentDetailPage({
   // Garde explicite : ne jamais rendre sans fiche valide (relations incluses).
   if (!student || !organization) notFound();
 
-  const [academicRecord, documents, attendanceEntries, journey, reportTokenResult] =
+  const [academicRecord, documents, attendanceEntries, journey, reportTokenResult, classes] =
     await Promise.all([
       // Onglet « Évaluations & Notes » : repli = dossier vide (aucun crash).
       getStudentAcademicRecord(id).catch(
@@ -187,6 +191,9 @@ export default async function StudentDetailPage({
       // échec n'empêche pas l'affichage de la fiche, seuls les boutons
       // « Voir / Imprimer le rapport » / « Copier le lien parent » sont masqués.
       ensureStudentReportToken(id).catch(() => null),
+      // Réinscription : liste des classes disponibles (hors archivées) —
+      // repli = liste vide (le bouton propose alors « aucune classe »).
+      getClasses().catch((): ClassDTO[] => []),
     ]);
 
   const reportToken =
@@ -265,6 +272,18 @@ export default async function StudentDetailPage({
               {parentLink ? (
                 <CopyParentLinkButton url={parentLink} />
               ) : null}
+              <ReEnrollDialog
+                studentId={student.id}
+                studentName={`${student.firstName} ${student.lastName}`}
+                currentClassId={student.currentClassId}
+                classes={(Array.isArray(classes) ? classes : [])
+                  .filter((klass) => klass.status !== "ARCHIVED")
+                  .map((klass) => ({
+                    id: klass.id,
+                    name: klass.name,
+                    courseTitle: klass.courseTitle,
+                  }))}
+              />
             </div>
           </div>
         </div>
@@ -277,6 +296,7 @@ export default async function StudentDetailPage({
           <TabsTrigger value="attendance">Assiduité</TabsTrigger>
           <TabsTrigger value="academics">Évaluations & Notes</TabsTrigger>
           <TabsTrigger value="journey">Parcours & Historique</TabsTrigger>
+          <TabsTrigger value="financial-history">Historique Financier</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
 
@@ -493,7 +513,17 @@ export default async function StudentDetailPage({
           />
         </TabsContent>
 
-        {/* Onglet 5 : pièces jointes (liens externes / stockage externe) */}
+        {/* Onglet 5 : relevé financier global (360°) — scolarité + caisse,
+            avec impression du « Relevé Général de Compte Élève » (PDF A4) */}
+        <TabsContent value="financial-history" className="mt-2">
+          <StudentTransactionsTab
+            student={student}
+            summary={getStudentFinancialSummary(student)}
+            organization={organization}
+          />
+        </TabsContent>
+
+        {/* Onglet 6 : pièces jointes (liens externes / stockage externe) */}
         <TabsContent value="documents" className="mt-2">
           <DocumentsTab
             owner={{ studentId: student.id }}

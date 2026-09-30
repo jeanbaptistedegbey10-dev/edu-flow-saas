@@ -6,22 +6,23 @@ import {
   ArrowLeftIcon,
   FileTextIcon,
   Loader2Icon,
+  LockIcon,
   PrinterIcon,
   SaveIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 
 import {
+  getExamReportForStudent,
   getGradeSheet,
-  getPremiumReportForStudent,
   saveGradesAction,
+  type ExamReportDTO,
   type GradeSheetDTO,
-  type PremiumReportDTO,
 } from "@/actions/evaluations";
 import { getCurrentOrganizationProfile } from "@/actions/payments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ReportCardDialog } from "@/components/evaluations/report-card-dialog";
+import { ExamReportDialog } from "@/components/evaluations/exam-report-dialog";
 import type { PremiumReportOrganization } from "@/lib/premium-report";
 import {
   Table,
@@ -71,10 +72,19 @@ export function GradeSheet({
   const [reportLoadingId, setReportLoadingId] = React.useState<string | null>(
     null
   );
-  const [report, setReport] = React.useState<PremiumReportDTO | null>(null);
+  const [examReport, setExamReport] = React.useState<ExamReportDTO | null>(
+    null
+  );
   const [reportError, setReportError] = React.useState<string | null>(null);
   const [organization, setOrganization] =
     React.useState<PremiumReportOrganization | null>(null);
+
+  /**
+   * Classe archivée ⇒ grille en LECTURE SEULE : la saisie et la modification
+   * des notes sont neutralisées côté interface (le serveur refuse également
+   * tout enregistrement — `saveGradesAction`).
+   */
+  const isReadOnly = sheet?.evaluation.classStatus === "ARCHIVED";
 
   // Charge la grille complète (session + modules + étudiants + notes).
   React.useEffect(() => {
@@ -176,13 +186,17 @@ export function GradeSheet({
     return count;
   }, [statsByStudent]);
 
-  /** Ouvre la modale bulletin premium d'un étudiant (contrôle d'accès serveur). */
+  /**
+   * Ouvre la modale du BULLETIN D'EXAMEN d'un étudiant : document restreint
+   * à CETTE session d'évaluation uniquement (contrôle d'accès serveur).
+   */
   const handleOpenReport = async (studentId: string) => {
     setReportError(null);
     setReportLoadingId(studentId);
     try {
       const [dto, org] = await Promise.all([
-        getPremiumReportForStudent(
+        getExamReportForStudent(
+          evaluationId,
           studentId,
           periodLabel.trim() || undefined
         ),
@@ -191,7 +205,7 @@ export function GradeSheet({
           : getCurrentOrganizationProfile(),
       ]);
       if (!organization) setOrganization(org);
-      setReport({
+      setExamReport({
         ...dto,
         issuedAt: new Date(dto.issuedAt),
       });
@@ -200,7 +214,7 @@ export function GradeSheet({
       setReportError(
         error instanceof Error
           ? error.message
-          : "Impossible de générer le bulletin pour le moment."
+          : "Impossible de générer le bulletin de l'examen pour le moment."
       );
     } finally {
       setReportLoadingId(null);
@@ -212,6 +226,9 @@ export function GradeSheet({
     event.preventDefault();
 
     if (!sheet) return;
+
+    // Classe archivée : aucune écriture de note n'est autorisée (lecture seule).
+    if (isReadOnly) return;
 
     setSaving(true);
     setFeedback(null);
@@ -297,7 +314,7 @@ export function GradeSheet({
             placeholder="Période / Semestre (ex : S1 2025/2026)"
             maxLength={60}
             className="w-64"
-            aria-label="Période ou semestre du bulletin"
+            aria-label="Période ou semestre du bulletin d'examen"
           />
           <Button type="button" variant="outline" onClick={onBack}>
             <ArrowLeftIcon data-icon="inline-start" />
@@ -305,6 +322,18 @@ export function GradeSheet({
           </Button>
         </div>
       </div>
+
+      {isReadOnly ? (
+        <p
+          role="alert"
+          className="flex items-center gap-2 rounded-md border border-slate-300/70 bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300"
+        >
+          <LockIcon className="size-4 shrink-0" />
+          Classe archivée — lecture seule : la saisie et la modification des
+          notes sont désactivées. Les notes existantes restent consultables et
+          imprimables.
+        </p>
+      ) : null}
 
       {reportError ? (
         <p
@@ -357,15 +386,14 @@ export function GradeSheet({
                       </span>
                     </TableHead>
                   ))}
-                  <TableHead className="min-w-[130px] text-right">
-                    Bulletin
+                  <TableHead className="min-w-[150px] text-right">
+                    Bulletin de l&apos;examen
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sheet.students.map((student) => {
                   const draftsRow = drafts[student.studentId] ?? {};
-                  const stats = statsByStudent.get(student.studentId);
 
                   return (
                     <TableRow key={student.studentId}>
@@ -405,6 +433,14 @@ export function GradeSheet({
                                   event.target.value
                                 )
                               }
+                              disabled={isReadOnly}
+                              readOnly={isReadOnly}
+                              aria-readonly={isReadOnly}
+                              title={
+                                isReadOnly
+                                  ? "Classe archivée — notes en lecture seule"
+                                  : undefined
+                              }
                               aria-label={`Note de ${student.firstName} ${student.lastName} — ${moduleItem.name}`}
                               placeholder={`0–${numberFormatter.format(moduleItem.maxScore)}`}
                               aria-invalid={isBelowThreshold}
@@ -414,6 +450,8 @@ export function GradeSheet({
                                 // grisé, renforcée au survol et au focus
                                 // (changement de couleur de bordure/anneau).
                                 "w-24 border-2 border-dashed border-slate-400/80 bg-slate-50 text-center tabular-nums shadow-xs transition-colors hover:border-primary/70 hover:bg-primary/5 focus-visible:border-primary focus-visible:ring-4 focus-visible:ring-primary/25 dark:border-slate-600 dark:bg-input/25 dark:hover:border-primary/60 dark:focus-visible:border-primary",
+                                isReadOnly &&
+                                  "cursor-not-allowed border-solid border-slate-300 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-slate-100 focus-visible:ring-0 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-slate-700",
                                 isBelowThreshold &&
                                   "border-red-500 bg-red-50 text-red-600 hover:border-red-600 focus-visible:ring-red-500/40 dark:bg-red-500/10 dark:text-red-400"
                               )}
@@ -435,7 +473,7 @@ export function GradeSheet({
                           size="sm"
                           disabled={reportLoadingId === student.studentId}
                           onClick={() => handleOpenReport(student.studentId)}
-                          title={`Aperçu du bulletin de ${student.firstName} ${student.lastName}`}
+                          title={`Bulletin restreint à cet examen — ${student.firstName} ${student.lastName}`}
                         >
                           {reportLoadingId === student.studentId ? (
                             <Loader2Icon
@@ -445,7 +483,7 @@ export function GradeSheet({
                           ) : (
                             <PrinterIcon data-icon="inline-start" />
                           )}
-                          Bulletin
+                          Bulletin de l&apos;examen
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -472,34 +510,46 @@ export function GradeSheet({
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Laissez une cellule vide pour retirer une note. Les notes sous le
-              seuil sont signalées automatiquement.
+              {isReadOnly
+                ? "Classe archivée : les notes sont figées (lecture seule)."
+                : "Laissez une cellule vide pour retirer une note. Les notes sous le seuil sont signalées automatiquement."}
             </p>
           )}
 
           <Button
             type="submit"
-            disabled={saving || sheet.students.length === 0}
+            disabled={isReadOnly || saving || sheet.students.length === 0}
+            title={
+              isReadOnly
+                ? "Classe archivée — la saisie des notes est désactivée"
+                : undefined
+            }
           >
-            {saving ? (
+            {isReadOnly ? (
+              <LockIcon data-icon="inline-start" />
+            ) : saving ? (
               <Loader2Icon data-icon="inline-start" className="animate-spin" />
             ) : (
               <SaveIcon data-icon="inline-start" />
             )}
-            {saving ? "Enregistrement..." : "Enregistrer les notes"}
+            {isReadOnly
+              ? "Lecture seule"
+              : saving
+                ? "Enregistrement..."
+                : "Enregistrer les notes"}
           </Button>
         </div>
       </div>
 
-      {organization && report ? (
-        <ReportCardDialog
-          data={report}
+      {organization && examReport ? (
+        <ExamReportDialog
+          data={examReport}
           organization={organization}
           open={reportOpen}
           onOpenChange={setReportOpen}
         />
       ) : (
-        <ReportCardDialog
+        <ExamReportDialog
           data={null}
           organization={{
             name: "Centre de Formation Excellence",

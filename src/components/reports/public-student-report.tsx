@@ -35,7 +35,7 @@ export function PublicStudentReport({
 
   return (
     <main className="min-h-screen bg-slate-100/70 print:bg-white">
-      <div className="mx-auto flex max-w-4xl flex-col gap-4 p-4 md:p-6 print:hidden">
+      <div className="mx-auto flex max-w-4xl flex-col gap-4 p-4 md:p-6 print:hidden" data-print-hide="true">
         <header className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -65,7 +65,10 @@ export function PublicStudentReport({
         </header>
       </div>
 
-      <div className="rounded-xl border bg-slate-100/70 p-3 print:border-0 print:bg-white print:p-0">
+      <div
+        data-print-shell="true"
+        className="rounded-xl border bg-slate-100/70 p-3 print:border-0 print:bg-white print:p-0"
+      >
         <PremiumReportSheet data={data} organization={organization} />
       </div>
     </main>

@@ -1,29 +1,22 @@
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 
-import { getClassDetail } from "@/actions/classes";
-import { ClassDetailView } from "@/components/classes/class-detail-view";
-
-export const metadata = {
-  title: "Détail de la classe | EduFlow",
-  description:
-    "Fiche détaillée de la classe : étudiants inscrits, présences et cahier de texte.",
-};
-
-export default async function ClassDetailPage({
+/**
+ * Vue de classe UNIFIÉE.
+ *
+ * La seconde vue de classe détaillée n'existe plus : tout accès à une classe
+ * (lien de la liste des classes, menu, historique, lien direct) est
+ * redirigé vers la page unique « Présences & Cahier de texte », qui porte la
+ * classe sélectionnée via `?classId=…`.
+ *
+ * Le 307 est volontaire : l'URL reste partageable / rechargeable, et
+ * `/dashboard/classes/[id]` demeure un point d'entrée stable.
+ */
+export default async function ClassDetailRedirect({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
 
-  // L'action lève une erreur si la classe est introuvable ou si
-  // l'utilisateur n'a pas les droits (enseignant non assigné, étudiant…).
-  let detail;
-  try {
-    detail = await getClassDetail(id);
-  } catch {
-    notFound();
-  }
-
-  return <ClassDetailView detail={detail} />;
+  redirect(`/dashboard/attendance?classId=${encodeURIComponent(id)}`);
 }

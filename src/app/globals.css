@@ -57,6 +57,11 @@
   --color-mint-light: #34D399;
   --color-gold: #F59E0B;
   --color-gold-light: #FBBF24;
+  /* Couleurs du certificat */
+  --color-navy: #1e3a5f;
+  --color-silver: #718096;
+  --color-cream: #faf8f3;
+  --color-light-gold: #fdf6e3;
 }
 
 

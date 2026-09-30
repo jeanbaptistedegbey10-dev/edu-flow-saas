@@ -6,6 +6,17 @@ import type { ClassStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
+import { logAuditEvent } from "@/lib/actions/audit";
+import {
+  canUnarchiveClass,
+  resolveRestoredStatus,
+} from "@/lib/class-status";
+import { canManageClassLifecycle } from "@/lib/role";
+import {
+  getClassClosureReadiness,
+  type ClosureMissingRequirement,
+} from "@/actions/class-closure";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -37,7 +48,7 @@ export type ClassDTO = {
   teacherId: string | null;
   teacherName: string | null;
   studentCount: number;
-  /** Statut pédagogique : ACTIVE (en cours), COMPLETED (clôturée), ARCHIVED. */
+  /** Statut pédagogique : PLANIFIED (programmée), IN_PROGRESS/ACTIVE (en cours), COMPLETED (clôturée), ARCHIVED. */
   status: ClassStatus;
   /** Créneaux hebdomadaires détaillés de la classe. */
   schedules: ClassScheduleDTO[];
@@ -75,8 +86,17 @@ export type ClassFormState = {
 
 /** Résultat des mutations rapides (suppression) côté client. */
 export type ClassMutationResult =
-  | { ok: true }
-  | { ok: false; message: string };
+  | { ok: true; message?: string }
+  | {
+      ok: false;
+      message: string;
+      /**
+       * Prérequis métier non satisfaits (archivage / désarchivage), listés
+       * explicitement afin que l'interface affiche l'alerte bloquante au lieu
+       * d'un message opaque. Même logique que `CloseClassResult`.
+       */
+      missingRequirements?: ClosureMissingRequirement[];
+    };
 
 // --------------------------------------
 // Constantes & helpers internes
@@ -408,6 +428,9 @@ export async function createClassAction(
         tuitionFee: parsed.data.tuitionFee,
         courseId: parsed.data.courseId,
         teacherId: parsed.data.teacherId,
+        // Cycle de vie : toute nouvelle classe est « programmée » jusqu'à
+        // l'action « Démarrer » (PLANIFIED → IN_PROGRESS).
+        status: "PLANIFIED",
         schedules: {
           create: parsed.data.schedules.map((s) => ({
             dayOfWeek: s.dayOfWeek,
@@ -434,6 +457,87 @@ export async function createClassAction(
       status: "error",
       message:
         "Une erreur est survenue lors de la création de la classe.",
+    };
+  }
+}
+
+/**
+ * Démarre une classe programmée : PLANIFIED → IN_PROGRESS.
+ *
+ * Le démarrage acte le début effectif des sessions (émargement, cahier de
+ * texte, évaluations). La clôture reste disponible à tout moment via
+ * l'écran de décision de passage.
+ */
+export async function startClassAction(
+  classId: string
+): Promise<ClassMutationResult> {
+  await assertCanMutate();
+
+  if (!classId) {
+    return { ok: false, message: "Identifiant de la classe manquant." };
+  }
+
+  const user = await getCurrentSessionUser();
+
+  // Acte de gestion : réservé aux rôles administratifs (cohérent avec la
+  // clôture) ; les enseignants consultent sans muter le cycle de vie.
+  if (user.role === "TEACHER" || user.role === "STUDENT") {
+    return {
+      ok: false,
+      message: "Accès refusé : le démarrage d'une classe est réservé aux administrateurs.",
+    };
+  }
+
+  try {
+    const klass = await prisma.class.findFirst({
+      where: { id: classId, organizationId: user.organizationId },
+      select: { id: true, name: true, status: true },
+    });
+
+    if (!klass) {
+      return { ok: false, message: "Classe introuvable dans votre organisation." };
+    }
+
+    if (klass.status !== "PLANIFIED") {
+      return {
+        ok: false,
+        message:
+          klass.status === "COMPLETED" || klass.status === "ARCHIVED"
+            ? "Cette classe est déjà clôturée : impossible de la redémarrer."
+            : "Cette classe est déjà démarrée.",
+      };
+    }
+
+    await prisma.class.update({
+      where: { id: klass.id },
+      data: { status: "IN_PROGRESS" },
+    });
+
+    revalidatePath("/dashboard/classes");
+    revalidatePath(`/dashboard/classes/${klass.id}`);
+
+    // Journal d'audit (hors transaction : ne doit pas annuler le démarrage).
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.CLASS_STARTED,
+      entity: AUDIT_ENTITIES.CLASS,
+      entityId: klass.id,
+      details: {
+        className: klass.name,
+        previousStatus: klass.status,
+        newStatus: "IN_PROGRESS",
+      },
+    });
+
+    return { ok: true };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+
+    console.error("[startClassAction] Échec du démarrage :", error);
+
+    return {
+      ok: false,
+      message:
+        "Une erreur est survenue lors du démarrage de la classe.",
     };
   }
 }
@@ -593,6 +697,43 @@ export async function deleteClassAction(
 }
 
 // --------------------------------------
+// Cycle de vie — Séance du jour & Archivage
+// --------------------------------------
+
+/** Séance du jour d'une classe (synthèse pour la fiche détail). */
+export type TodaySessionDTO = {
+  id: string;
+  sessionDate: Date;
+  subjectName: string;
+  chapter: string;
+  summary: string | null;
+  isCompleted: boolean;
+  endedAt: Date | null;
+  attendanceCount: number;
+  presentCount: number;
+  absentCount: number;
+};
+
+/** Paramètres de démarrage de la séance du jour. */
+export type StartTodaySessionInput = {
+  classId: string;
+  subjectName?: string;
+  chapter?: string;
+  summary?: string;
+};
+
+/** Résultat enrichi des actions de séance. */
+export type SessionMutationResult =
+  | { ok: true; sessionId: string; message?: string }
+  | { ok: false; message: string };
+
+/** Borne UTC minuit de la journée courante. */
+function todayUtcMidnight(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+// --------------------------------------
 // Types pour la fiche détaillée d'une classe
 // --------------------------------------
 
@@ -616,7 +757,7 @@ export type ClassDetailDTO = {
   courseCode: string;
   teacherId: string | null;
   teacherName: string | null;
-  /** Statut pédagogique : ACTIVE (en cours), COMPLETED (clôturée), ARCHIVED. */
+  /** Statut pédagogique : PLANIFIED (programmée), IN_PROGRESS/ACTIVE (en cours), COMPLETED (clôturée), ARCHIVED. */
   status: ClassStatus;
   students: ClassStudentDTO[];
   /** Créneaux hebdomadaires détaillés de la classe. */
@@ -721,4 +862,591 @@ export async function getClassDetail(
       room: s.room,
     })),
   };
+}
+
+// --------------------------------------
+// Server Actions — Séance du jour (Supabase via Prisma)
+// --------------------------------------
+
+/**
+ * Récupère la séance du jour (`ClassSession` à la date UTC du jour) avec les
+ * compteurs d'émargement. Retourne `null` si aucune séance démarrée.
+ */
+export async function getTodaySession(classId: string): Promise<TodaySessionDTO | null> {
+  const user = await getCurrentSessionUser();
+
+  if (user.role === "STUDENT") {
+    throw new Error("Accès refusé : les étudiants n'ont pas accès au tableau de bord.");
+  }
+
+  const where =
+    user.role === "TEACHER"
+      ? { id: classId, organizationId: user.organizationId, teacherId: user.id }
+      : { id: classId, organizationId: user.organizationId };
+
+  const klass = await prisma.class.findFirst({ where, select: { id: true } });
+  if (!klass) return null;
+
+  const sessionDate = todayUtcMidnight();
+  // Lecture résiliente : les flags de clôture peuvent être absents en base
+  // si la migration n'a pas encore été appliquée.
+  const sessionLegacy = await prisma.classSession.findUnique({
+    where: { classId_sessionDate: { classId: klass.id, sessionDate } },
+    select: {
+      id: true,
+      sessionDate: true,
+      subjectName: true,
+      chapter: true,
+      summary: true,
+      attendances: { select: { status: true } },
+    },
+  });
+
+  if (!sessionLegacy) return null;
+
+  let completion: { isCompleted: boolean; endedAt: Date | null } = {
+    isCompleted: false,
+    endedAt: null,
+  };
+  try {
+    const flags = await (prisma.classSession as unknown as {
+      findUnique: (args: unknown) => Promise<{ isCompleted?: boolean; endedAt?: Date | null } | null>;
+    }).findUnique({
+      where: { id: sessionLegacy.id },
+      select: { isCompleted: true, endedAt: true },
+    });
+    completion = {
+      isCompleted: flags?.isCompleted ?? false,
+      endedAt: flags?.endedAt ?? null,
+    };
+  } catch {
+    completion = { isCompleted: false, endedAt: null };
+  }
+
+  return {
+    id: sessionLegacy.id,
+    sessionDate: sessionLegacy.sessionDate,
+    subjectName: sessionLegacy.subjectName,
+    chapter: sessionLegacy.chapter,
+    summary: sessionLegacy.summary,
+    isCompleted: completion.isCompleted,
+    endedAt: completion.endedAt,
+    attendanceCount: sessionLegacy.attendances.length,
+    presentCount: sessionLegacy.attendances.filter(
+      (a) => a.status === "PRESENT" || a.status === "LATE"
+    ).length,
+    absentCount: sessionLegacy.attendances.filter(
+      (a) => a.status === "ABSENT" || a.status === "EXCUSED"
+    ).length,
+  };
+}
+
+/**
+ * Démarre la séance du jour : crée la `ClassSession` du jour (unique par
+ * `[classId, sessionDate]`). Idempotent — retourne la séance existante.
+ * La classe doit être en cours (IN_PROGRESS / ACTIVE).
+ */
+export async function startTodaySessionAction(
+  input: StartTodaySessionInput
+): Promise<SessionMutationResult> {
+  await assertCanMutate();
+
+  try {
+    const user = await getCurrentSessionUser();
+
+    if (user.role === "STUDENT") {
+      return { ok: false, message: "Accès refusé." };
+    }
+
+    const where =
+      user.role === "TEACHER"
+        ? { id: input.classId, organizationId: user.organizationId, teacherId: user.id }
+        : { id: input.classId, organizationId: user.organizationId };
+
+    const klass = await prisma.class.findFirst({
+      where,
+      select: { id: true, name: true, status: true, course: { select: { title: true } } },
+    });
+
+    if (!klass) {
+      return { ok: false, message: "Classe introuvable ou non autorisée." };
+    }
+
+    if (klass.status !== "IN_PROGRESS" && klass.status !== "ACTIVE") {
+      return { ok: false, message: "Démarrez d'abord la classe avant d'ouvrir la séance du jour." };
+    }
+
+    const sessionDate = todayUtcMidnight();
+    const existing = await prisma.classSession.findUnique({
+      where: { classId_sessionDate: { classId: klass.id, sessionDate } },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return { ok: true, sessionId: existing.id, message: "Séance du jour déjà démarrée." };
+    }
+
+    const now = new Date();
+    const session = await prisma.classSession.create({
+      data: {
+        organizationId: user.organizationId,
+        classId: klass.id,
+        subjectName: input.subjectName?.trim() || klass.course.title.slice(0, 200),
+        chapter: input.chapter?.trim() || "Séance du jour",
+        summary: input.summary?.trim() || null,
+        sessionDate,
+        startTime: now,
+        endTime: new Date(now.getTime() + 2 * 60 * 60 * 1000),
+      },
+      select: { id: true },
+    });
+
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.SESSION_STARTED,
+      entity: AUDIT_ENTITIES.CLASS,
+      entityId: klass.id,
+      details: { className: klass.name, sessionId: session.id },
+    });
+
+    revalidatePath("/dashboard/classes");
+    revalidatePath(`/dashboard/classes/${klass.id}`);
+    revalidatePath("/dashboard/attendance");
+    revalidatePath("/dashboard/attendance/sheet");
+
+    return { ok: true, sessionId: session.id };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    console.error("[startTodaySessionAction] Échec :", error);
+    return { ok: false, message: "Impossible de démarrer la séance du jour." };
+  }
+}
+
+/**
+ * Termine la séance du jour : exige un émargement non vide puis journalise la
+ * fin de séance (le schéma `ClassSession` n'a pas de statut dédié — la fin est
+ * matérialisée par l'audit et la revalidation des caches).
+ */
+export async function endTodaySessionAction(classId: string): Promise<SessionMutationResult> {
+  await assertCanMutate();
+
+  try {
+    const user = await getCurrentSessionUser();
+
+    if (user.role === "STUDENT") {
+      return { ok: false, message: "Accès refusé." };
+    }
+
+    const where =
+      user.role === "TEACHER"
+        ? { id: classId, organizationId: user.organizationId, teacherId: user.id }
+        : { id: classId, organizationId: user.organizationId };
+
+    const klass = await prisma.class.findFirst({ where, select: { id: true, name: true } });
+    if (!klass) {
+      return { ok: false, message: "Classe introuvable ou non autorisée." };
+    }
+
+    const sessionDate = todayUtcMidnight();
+    const now = new Date();
+    // Lecture résiliente : si la migration de clôture (`isCompleted`/`endedAt`)
+    // n'a pas encore été appliquée en base, on retombe sur une lecture legacy
+    // au lieu de lever une erreur non interceptée (bug « Terminer la séance »).
+    const sessionLegacy = await prisma.classSession.findUnique({
+      where: { classId_sessionDate: { classId: klass.id, sessionDate } },
+      select: {
+        id: true,
+        chapter: true,
+        summary: true,
+        attendances: { select: { id: true } },
+      },
+    });
+
+    if (!sessionLegacy) {
+      return { ok: false, message: "Aucune séance démarrée aujourd'hui." };
+    }
+
+    let alreadyCompleted = false;
+    try {
+      const flags = await prisma.classSession.findUnique({
+        where: { id: sessionLegacy.id },
+        select: { isCompleted: true },
+      });
+      alreadyCompleted = flags?.isCompleted ?? false;
+    } catch {
+      alreadyCompleted = false;
+    }
+
+    if (alreadyCompleted) {
+      return { ok: false, message: "La séance du jour est déjà terminée." };
+    }
+
+    if (sessionLegacy.attendances.length === 0) {
+      return { ok: false, message: "Émargement vide : enregistrez au moins une présence." };
+    }
+
+    if (!sessionLegacy.chapter.trim() || !(sessionLegacy.summary ?? "").trim()) {
+      return {
+        ok: false,
+        message:
+          "Cahier de texte incomplet : renseignez le chapitre/thème et le résumé de la séance avant de terminer.",
+      };
+    }
+
+    let endedSessionId = sessionLegacy.id;
+    try {
+      const ended = await (prisma.classSession as unknown as {
+        update: (args: unknown) => Promise<{ id: string }>;
+      }).update({
+        where: { id: sessionLegacy.id },
+        data: { isCompleted: true, endedAt: now },
+        select: { id: true },
+      });
+      endedSessionId = ended.id;
+    } catch (updateError) {
+      // Compatibilité ascendante : si la migration `isCompleted`/`endedAt` n'a
+      // pas encore été appliquée en base, la clôture retombe sur une mise à
+      // jour d'horodatage au lieu de lever une erreur non interceptée.
+      console.warn("[endTodaySessionAction] Clôture sans colonnes isCompleted/endedAt :", updateError);
+      await prisma.classSession.update({
+        where: { id: sessionLegacy.id },
+        data: { endTime: now },
+      });
+    }
+
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.SESSION_ENDED,
+      entity: AUDIT_ENTITIES.CLASS,
+      entityId: klass.id,
+      details: { className: klass.name, sessionId: sessionLegacy.id, count: sessionLegacy.attendances.length },
+    });
+
+    revalidatePath("/dashboard/classes");
+    revalidatePath(`/dashboard/classes/${klass.id}`);
+    revalidatePath("/dashboard/attendance");
+    revalidatePath("/dashboard/attendance/sheet");
+
+    return { ok: true, sessionId: endedSessionId, message: "Séance terminée." };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    console.error("[endTodaySessionAction] Échec :", error);
+    return { ok: false, message: "Impossible de terminer la séance du jour." };
+  }
+}
+
+/**
+ * Résultat standardisé `{ success, error }` pour le bouton
+ * « Terminer la séance » : ne lève jamais d'exception non interceptée et ne
+ * laisse jamais la promesse suspendue — toute erreur métier ou technique est
+ * convertie en `{ success: false, error }`.
+ */
+export async function endTodaySessionActionResult(
+  classId: string
+): Promise<{ success: true; sessionId: string } | { success: false; error: string }> {
+  try {
+    const result = await endTodaySessionAction(classId);
+    if (result.ok) return { success: true, sessionId: result.sessionId };
+    return { success: false, error: result.message };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    console.error("[endTodaySessionActionResult] Échec :", error);
+    return { success: false, error: "Impossible de terminer la séance du jour." };
+  }
+}
+
+/**
+ * Message d'erreur agrégé renvoyé par `archiveClassAction` lorsqu'un des
+ * prérequis pédagogiques manque (défense en profondeur : la même liste est
+ * affichée par l'alerte bloquante de l'interface).
+ */
+function buildArchiveBlockedMessage(
+  missing: ClosureMissingRequirement[]
+): string {
+  if (missing.length === 0) {
+    return "L'archivage est bloqué : des prérequis pédagogiques sont manquants.";
+  }
+
+  return `L'archivage est bloqué — ${missing.length} prérequis à satisfaire : ${missing
+    .map((requirement) => requirement.label)
+    .join(" ")}`;
+}
+
+/**
+ * Archive une classe clôturée (COMPLETED → ARCHIVED). Réservé aux
+ * administrateurs. L'historique (inscriptions, notes, certificats) est conservé :
+ * la classe bascule en lecture seule et reste consultable dans l'onglet
+ * « Archives » de la liste des classes, mais disparaît des sélecteurs
+ * opérationnels (émargement, cahier de texte, évaluations).
+ *
+ * GARDE-FOU MÉTIER (défense en profondeur) : les 3 prérequis pédagogiques sont
+ * recontrôlés côté serveur, quelle que soit l'entrée utilisée (carte de classe
+ * en état COMPLETED ou enchaînement « Clôturer et Archiver ») :
+ *  1. au moins une séance enregistrée avec présence émargée ;
+ *  2. au moins une séance dont le cahier de texte est rempli (chapitre ET
+ *     résumé) ;
+ *  3. des évaluations créées ET intégralement notées.
+ *
+ * L'archivage est donc refusé tant que l'un de ces éléments manque ; les
+ * prérequis non satisfaits sont retournés dans `missingRequirements` pour que
+ * l'interface affiche la boîte de dialogue « Archivage impossible ».
+ */
+export async function archiveClassAction(classId: string): Promise<ClassMutationResult> {
+  await assertCanMutate();
+
+  try {
+    const user = await getCurrentSessionUser();
+
+    if (user.role === "STUDENT" || user.role === "TEACHER") {
+      return { ok: false, message: "Seuls les administrateurs peuvent archiver une classe." };
+    }
+
+    const klass = await prisma.class.findFirst({
+      where: { id: classId, organizationId: user.organizationId },
+      select: { id: true, name: true, status: true },
+    });
+
+    if (!klass) {
+      return { ok: false, message: "Classe introuvable dans votre organisation." };
+    }
+
+    // Idempotence : une classe déjà archivée reste consultable en lecture
+    // seule, l'action est donc un no-op (et non une erreur).
+    if (klass.status === "ARCHIVED") {
+      return { ok: true, message: `Classe « ${klass.name} » déjà archivée.` };
+    }
+
+    if (klass.status !== "COMPLETED") {
+      return { ok: false, message: "Seule une classe clôturée (COMPLETED) peut être archivée." };
+    }
+
+    // Garde-fou métier : contrôle des 3 prérequis au moment de l'archivage
+    // (présences émargées, cahier de texte rempli, évaluations créées et
+    // intégralement notées). Même fonction que celle interrogée par
+    // l'interface avant l'ouverture de la confirmation — la règle est donc
+    // strictement identique des deux côtés, et un contournement de l'interface
+    // ne peut pas aboutir.
+    const readiness = await getClassClosureReadiness(classId);
+
+    if (!readiness.ok) {
+      return { ok: false, message: readiness.message };
+    }
+
+    if (!readiness.canClose) {
+      return {
+        ok: false,
+        message: buildArchiveBlockedMessage(readiness.missingRequirements),
+        missingRequirements: readiness.missingRequirements,
+      };
+    }
+
+    await prisma.class.update({ where: { id: klass.id }, data: { status: "ARCHIVED" } });
+
+    await logAuditEvent({
+      action: AUDIT_ACTIONS.CLASS_ARCHIVED,
+      entity: AUDIT_ENTITIES.CLASS,
+      entityId: klass.id,
+      details: {
+        className: klass.name,
+        previousStatus: klass.status,
+        newStatus: "ARCHIVED",
+      },
+    });
+
+    revalidatePath("/dashboard/classes");
+    revalidatePath(`/dashboard/classes/${klass.id}`);
+    revalidatePath("/dashboard/students");
+    // Une classe archivée sort des sélecteurs opérationnels (émargement,
+    // cahier de texte) et de la saisie de notes : ces écrans sont rafraîchis.
+    revalidatePath("/dashboard/attendance");
+    revalidatePath("/dashboard/evaluations");
+
+    return {
+      ok: true,
+      message: `Classe « ${klass.name} » archivée : elle reste consultable en lecture seule dans l'onglet « Archives ».`,
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    console.error("[archiveClassAction] Échec :", error);
+    return { ok: false, message: "Une erreur est survenue lors de l'archivage de la classe." };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Server Actions — Réouverture / Désarchivage (ADMIN / SUPER_ADMIN)
+// ----------------------------------------------------------------------------
+
+/**
+ * Implémentation commune des actions inverses du cycle de vie (désarchivage
+ * d'une classe ARCHIVED, annulation de clôture d'une classe COMPLETED).
+ * Réservée aux administrateurs (ADMIN / SUPER_ADMIN).
+ *
+ * `allowCompleted` distingue les deux entrées :
+ * - `false` (désarchivage) : seules les classes ARCHIVED sont concernées ;
+ * - `true` (réouverture) : ARCHIVED **et** COMPLETED sont acceptées.
+ *
+ * Le statut de retour est décidé par le domaine (`resolveRestoredStatus`) :
+ * ARCHIVED → ACTIVE, COMPLETED → IN_PROGRESS.
+ *
+ * COHÉRENCE DE L'EFFECTIF — le point critique de cette fonction. Lors de la
+ * clôture (`closeClassAction`), chaque `ClassEnrollment` ACTIVE bascule vers un
+ * statut de fin de session (PASSED / PROMOTED_MANUALLY / FAILED / DROPPED) et
+ * sa décision y est figée. Réactiver la classe SANS réactiver ses inscriptions
+ * laisserait donc l'organisation avec une classe « en activité » mais **zéro
+ * élève actif** : les écrans filtrés sur `status: "ACTIVE"` (fiche de classe,
+ * feuille d'émargement, récapitulatif de clôture, bulletins) afficheraient
+ * « Aucun étudiant actif n'est inscrit dans cette classe », et le garde-fou de
+ * clôture compterait 0 inscrit face aux notes existantes.
+ *
+ * Les deux écritures sont donc regroupées en UNE transaction : le retour à
+ * l'activité de la classe et la réactivation de ses inscriptions ne peuvent pas
+ * diverger (pas de classe ACTIVE à l'effectif nul), et un échec annule les deux.
+ */
+async function restoreClassToActivity(
+  classId: string,
+  options: { allowCompleted: boolean; logPrefix: string }
+): Promise<ClassMutationResult> {
+  await assertCanMutate();
+
+  try {
+    const user = await getCurrentSessionUser();
+
+    // Garde de rôle : réouverture / désarchivage = acte administratif.
+    if (!canManageClassLifecycle(user.role)) {
+      return {
+        ok: false,
+        message: "Seuls les administrateurs peuvent rouvrir une classe.",
+      };
+    }
+
+    const klass = await prisma.class.findFirst({
+      where: { id: classId, organizationId: user.organizationId },
+      select: { id: true, name: true, status: true },
+    });
+
+    if (!klass) {
+      return { ok: false, message: "Classe introuvable dans votre organisation." };
+    }
+
+    // Pas d'opération à effectuer si la classe est déjà en activité.
+    if (klass.status === "ACTIVE" || klass.status === "IN_PROGRESS") {
+      return { ok: true, message: `Classe « ${klass.name} » déjà active.` };
+    }
+
+    // Statuts acceptables pour l'action inverse.
+    const restorable =
+      canUnarchiveClass(klass.status) ||
+      (options.allowCompleted && klass.status === "COMPLETED");
+
+    if (!restorable) {
+      return {
+        ok: false,
+        message:
+          "Cette classe ne peut pas être désarchivée : elle n'est pas archivée. Utilisez « Rouvrir la classe » pour annuler une clôture.",
+      };
+    }
+
+    const restoredStatus: ClassStatus = resolveRestoredStatus(klass.status);
+
+    // Transaction : statut de la classe + réactivation de l'effectif.
+    // `finalDecisionNote` est vidé : la décision de fin de session qu'il portait
+    // est annulée par la réouverture, la conserver induirait en erreur.
+    const restoredEnrollments = await prisma.$transaction(async (tx) => {
+      await tx.class.update({
+        where: { id: klass.id },
+        data: { status: restoredStatus },
+      });
+
+      return tx.classEnrollment.updateMany({
+        where: {
+          classId: klass.id,
+          organizationId: user.organizationId,
+          status: { not: "ACTIVE" },
+        },
+        data: { status: "ACTIVE", finalDecisionNote: null },
+      });
+    });
+
+    await logAuditEvent({
+      action:
+        klass.status === "ARCHIVED"
+          ? AUDIT_ACTIONS.CLASS_UNARCHIVED
+          : AUDIT_ACTIONS.CLASS_REOPENED,
+      entity: AUDIT_ENTITIES.CLASS,
+      entityId: klass.id,
+      details: {
+        className: klass.name,
+        previousStatus: klass.status,
+        reopenedStatus: restoredStatus,
+        reactivatedEnrollments: restoredEnrollments.count,
+      },
+    });
+
+    revalidatePath("/dashboard/classes");
+    revalidatePath(`/dashboard/classes/${klass.id}`);
+    revalidatePath("/dashboard/students");
+    // La classe redevient exploitable : les écrans d'émargement, de cahier de
+    // texte et d'évaluations doivent ré-afficher leurs sélecteurs.
+    revalidatePath("/dashboard/attendance");
+    revalidatePath("/dashboard/attendance/sheet");
+    revalidatePath("/dashboard/evaluations");
+
+    return {
+      ok: true,
+      message:
+        klass.status === "ARCHIVED"
+          ? `Classe « ${klass.name} » désarchivée : elle réintègre l'onglet « Classes Actives » et accepte à nouveau l'inscription d'élèves, les présences, le cahier de texte et les évaluations.`
+          : `Classe « ${klass.name} » réouverte : l'inscription et la saisie de notes sont à nouveau possibles.`,
+    };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    console.error(`[${options.logPrefix}] Échec :`, error);
+    return {
+      ok: false,
+      message: "Une erreur est survenue lors de la réouverture de la classe.",
+    };
+  }
+}
+
+/**
+ * DÉSARCHIVE / RÉACTIVATE une classe archivée (ARCHIVED → ACTIVE).
+ *
+ * Action inverse de `archiveClassAction`, réservée aux rôles administratifs
+ * (ADMIN / SUPER_ADMIN) : le bouton « Désarchiver la classe » n'est rendu que
+ * pour ces rôles, sur les classes de l'onglet « Archives ».
+ *
+ * Sémantique de statut : ARCHIVED → ACTIVE. Toute autre valeur est refusée
+ * (une classe seulement clôturée se rouvre via `reopenClassAction`).
+ *
+ * Une fois désarchivée, la classe redevient pleinement exploitable : elle
+ * réapparaît dans les sélecteurs opérationnels et accepte de nouveau
+ * l'inscription d'élèves, la saisie ou la correction des présences, des
+ * cahiers de texte et des évaluations.
+ */
+export async function unarchiveClassAction(
+  classId: string
+): Promise<ClassMutationResult> {
+  return restoreClassToActivity(classId, {
+    allowCompleted: false,
+    logPrefix: "unarchiveClassAction",
+  });
+}
+
+/**
+ * Réouvre une classe clôturée ou archivée (COMPLETED / ARCHIVED → en cours).
+ * Réservé aux administrateurs. Une fois réouverte, la classe accepte à nouveau
+ * l'inscription de nouveaux élèves et la saisie de notes / bulletins pour des
+ * étudiants tardifs.
+ *
+ * Sémantique de statut :
+ * - ARCHIVED → ACTIVE (désarchivage — voir `unarchiveClassAction`) ;
+ * - COMPLETED → IN_PROGRESS (annulation de clôture — retour en activité) ;
+ * - toute autre valeur est refusée (la classe est déjà en activité ou dans un
+ *   état qu'on ne peut pas repasser en activité sans passer par la clôture).
+ */
+export async function reopenClassAction(
+  classId: string
+): Promise<ClassMutationResult> {
+  return restoreClassToActivity(classId, {
+    allowCompleted: true,
+    logPrefix: "reopenClassAction",
+  });
 }

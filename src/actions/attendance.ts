@@ -1,6 +1,6 @@
 "use server";
 
-import type { AttendanceStatus } from "@prisma/client";
+import type { AttendanceStatus, ClassStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
@@ -10,6 +10,7 @@ import {
   isNextRedirectError,
 } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import { SELECTABLE_CLASS_STATUSES } from "@/lib/class-status";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -49,6 +50,12 @@ export type TeacherClassDTO = {
   studentCount: number;
   /** Créneaux hebdomadaires détaillés de la classe. */
   schedules: ClassScheduleDTO[];
+  /**
+   * Statut pédagogique de la classe. `ARCHIVED` = classe archivée : elle ne
+   * doit plus apparaître dans les sélecteurs opérationnels (évaluations) et
+   * ses évaluations existantes sont en lecture seule.
+   */
+  status: ClassStatus;
 };
 
 /** Étudiant inscrit à un cours (liste d'émargement). */
@@ -126,7 +133,10 @@ async function assertCourseAccess(courseId: string) {
   // Vérifie que le cours appartient à l'organisation
   const course = await prisma.course.findFirst({
     where: { id: courseId, organizationId: user.organizationId },
-    select: { id: true },
+    select: {
+      id: true,
+      teacher: { select: { firstName: true, lastName: true } },
+    },
   });
 
   if (!course) {
@@ -275,9 +285,15 @@ export async function getMyCourses(): Promise<TeacherCourseDTO[]> {
 }
 
 /**
- * Liste des classes / cohortes accessibles à l'utilisateur connecté :
+ * Liste des classes / cohortes accessibles à l'utilisateur connecté ET
+ * encore exploitables pour les opérations dePresence :
  * - TEACHER : uniquement les classes qui lui sont assignées ;
  * - autres rôles staff : toutes les classes de l'organisation.
+ *
+ * Filtre STRICT : seules les classes « En cours » (IN_PROGRESS / alias
+ * historique ACTIVE) et « Planifiées » (PLANIFIED) sont retournées. Les
+ * classes clôturées (COMPLETED) et archivées (ARCHIVED) sont EXCLUES — elles
+ * ne doivent plus apparaître dans le sélecteur de classe du cahier de texte.
  */
 export async function getMyClasses(): Promise<TeacherClassDTO[]> {
   const user = await getCurrentSessionUser();
@@ -288,15 +304,20 @@ export async function getMyClasses(): Promise<TeacherClassDTO[]> {
 
   try {
     const classes = await prisma.class.findMany({
-      where:
-        user.role === "TEACHER"
-          ? { organizationId: user.organizationId, teacherId: user.id }
-          : { organizationId: user.organizationId },
+      where: {
+        ...(user.role === "TEACHER"
+          ? { teacherId: user.id }
+          : {}),
+        organizationId: user.organizationId,
+        // Uniquement les classes actives (En cours / Planifiée).
+        status: { in: SELECTABLE_CLASS_STATUSES },
+      },
       orderBy: [{ course: { title: "asc" } }, { name: "asc" }],
       select: {
         id: true,
         name: true,
         schedule: true,
+        status: true,
         courseId: true,
         course: {
           select: { title: true, code: true },
@@ -319,6 +340,7 @@ export async function getMyClasses(): Promise<TeacherClassDTO[]> {
       id: klass.id,
       name: klass.name,
       schedule: klass.schedule,
+      status: klass.status,
       courseId: klass.courseId,
       courseTitle: klass.course.title,
       courseCode: klass.course.code,
@@ -1228,6 +1250,12 @@ export type ClassSessionWithAttendanceDTO = {
   startTime: Date;
   endTime: Date;
   status: "PENDING" | "VALIDATED";
+  /**
+   * Clôture explicite via « Terminer la séance » (optionnel pour
+   * compatibilité ascendante si la migration n'est pas encore appliquée).
+   */
+  isCompleted?: boolean;
+  endedAt?: Date | null;
   attendances: Array<{
     studentId: string;
     status: AttendanceStatus;
@@ -1242,9 +1270,50 @@ export type ClassSessionHistoryEntryDTO = {
   sessionDate: Date;
   subjectName: string;
   chapter: string;
+  summary: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  teacherName: string;
   presentCount: number;
   totalCount: number;
   status: "PENDING" | "VALIDATED";
+};
+
+/** Ligne de presence pour l export global d une classe. */
+export type FullClassExportAttendanceRow = {
+  studentId: string;
+  studentCode: string;
+  firstName: string;
+  lastName: string;
+  status: AttendanceStatus;
+  notes: string | null;
+  arrivalTime: string | null;
+};
+
+/** Seance complete pour l export global d une classe. */
+export type FullClassExportSessionDTO = {
+  id: string;
+  sessionDate: Date;
+  subjectName: string;
+  chapter: string;
+  summary: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  teacherName: string;
+  status: "PENDING" | "VALIDATED";
+  isCompleted: boolean;
+  attendances: FullClassExportAttendanceRow[];
+};
+
+/** Export global d une classe : roster + toutes les seances. */
+export type FullClassExportDTO = {
+  classId: string;
+  className: string;
+  schedule: string;
+  courseTitle: string;
+  courseCode: string;
+  roster: EnrolledStudentDTO[];
+  sessions: FullClassExportSessionDTO[];
 };
 
 // --------------------------------------
@@ -1278,6 +1347,133 @@ export type AttendancePageDataDTO = {
     homework: string | null;
   } | null;
 };
+
+// --------------------------------------
+// Server Action — Export global d'une classe (toutes seances)
+// --------------------------------------
+
+/**
+ * Exporte l'integralite d'une classe : roster + TOUTES les seances avec
+ * leurs emargements. Alimente le menu d'export global de la page
+ * Presences & Cahier de texte : feuille de presence, cahier de texte
+ * complet et rapport combine (Presences + Cahier de texte).
+ */
+export async function getFullClassExport(
+  classId: string
+): Promise<FullClassExportDTO> {
+  const user = await getCurrentSessionUser();
+
+  if (user.role === "STUDENT") {
+    throw new Error(
+      "Acces refuse : les etudiants n'ont pas acces au tableau de bord."
+    );
+  }
+
+  const where =
+    user.role === "TEACHER"
+      ? { id: classId, organizationId: user.organizationId, teacherId: user.id }
+      : { id: classId, organizationId: user.organizationId };
+
+  const klass = await prisma.class.findFirst({
+    where,
+    select: {
+      id: true,
+      name: true,
+      schedule: true,
+      course: { select: { id: true, title: true, code: true } },
+      teacher: { select: { firstName: true, lastName: true } },
+    },
+  });
+
+  if (!klass) {
+    throw new Error("Classe introuvable ou non autorisee.");
+  }
+
+  const classTeacherName =
+    [klass.teacher?.firstName, klass.teacher?.lastName]
+      .filter(Boolean)
+      .join(" ") || "Enseignant";
+
+  const [students, sessions] = await Promise.all([
+    prisma.student.findMany({
+      where: { currentClassId: classId },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      select: { id: true, studentCode: true, firstName: true, lastName: true },
+    }),
+    prisma.classSession.findMany({
+      where: { classId, organizationId: user.organizationId },
+      orderBy: { sessionDate: "asc" },
+      select: {
+        id: true,
+        sessionDate: true,
+        subjectName: true,
+        chapter: true,
+        summary: true,
+        startTime: true,
+        endTime: true,
+        attendances: {
+          select: {
+            studentId: true,
+            status: true,
+            notes: true,
+            arrivalTime: true,
+            student: { select: { studentCode: true, firstName: true, lastName: true } },
+          },
+          orderBy: { studentId: "asc" },
+        },
+      },
+    }),
+  ]);
+
+  const byId = new Map(students.map((st) => [st.id, st]));
+
+  const mapped: FullClassExportSessionDTO[] = [];
+  for (const session of sessions) {
+    const totalCount = session.attendances.length;
+    const completion = await readSessionCompletionFlags(session.id);
+    mapped.push({
+      id: session.id,
+      sessionDate: session.sessionDate,
+      subjectName: session.subjectName,
+      chapter: session.chapter,
+      summary: session.summary,
+      startTime: session.startTime ? session.startTime.toISOString().slice(11, 16) : null,
+      endTime: session.endTime ? session.endTime.toISOString().slice(11, 16) : null,
+      teacherName: classTeacherName,
+      status: (totalCount > 0 ? "VALIDATED" : "PENDING") as "VALIDATED" | "PENDING",
+      isCompleted: completion.isCompleted,
+      attendances: session.attendances.map((a) => {
+        const ref = byId.get(a.studentId);
+        return {
+          studentId: a.studentId,
+          studentCode: ref?.studentCode ?? a.student.studentCode,
+          firstName: ref?.firstName ?? a.student.firstName,
+          lastName: ref?.lastName ?? a.student.lastName,
+          status: a.status,
+          notes: a.notes,
+          arrivalTime: a.arrivalTime ? a.arrivalTime.toISOString().slice(11, 16) : null,
+        };
+      }),
+    });
+  }
+
+  return {
+    classId: klass.id,
+    className: klass.name,
+    schedule: klass.schedule,
+    courseTitle: klass.course.title,
+    courseCode: klass.course.code,
+    roster: students.map((st) => ({
+      studentId: st.id,
+      studentCode: st.studentCode,
+      firstName: st.firstName,
+      lastName: st.lastName,
+      progress: 0,
+    })),
+    sessions: mapped,
+  };
+}
+
 
 // --------------------------------------
 // Server Action — Rôle de l'utilisateur connecté
@@ -1330,12 +1526,21 @@ export async function getAttendancePageData(
 
   const klass = await prisma.class.findFirst({
     where,
-    select: { id: true, courseId: true },
+    select: {
+      id: true,
+      courseId: true,
+      teacher: { select: { firstName: true, lastName: true } },
+    },
   });
 
   if (!klass) {
     throw new Error("Classe introuvable ou non autorisée.");
   }
+
+  const classTeacherName =
+    [klass.teacher?.firstName, klass.teacher?.lastName]
+      .filter(Boolean)
+      .join(" ") || "Enseignant";
 
   const sessionDate = parseAttendanceDay(date);
   if (!sessionDate) {
@@ -1387,12 +1592,15 @@ export async function getAttendancePageData(
       prisma.classSession.findMany({
         where: { classId, organizationId: user.organizationId },
         orderBy: { sessionDate: "desc" },
-        take: 10,
+        take: 200,
         select: {
           id: true,
           sessionDate: true,
           subjectName: true,
           chapter: true,
+          summary: true,
+          startTime: true,
+          endTime: true,
           attendances: {
             select: { status: true },
           },
@@ -1453,6 +1661,10 @@ export async function getAttendancePageData(
         sessionDate: s.sessionDate,
         subjectName: s.subjectName,
         chapter: s.chapter,
+        summary: s.summary,
+        startTime: s.startTime ? s.startTime.toISOString().slice(11, 16) : null,
+        endTime: s.endTime ? s.endTime.toISOString().slice(11, 16) : null,
+        teacherName: classTeacherName,
         presentCount,
         totalCount,
         status: hasAttendance || !isPast ? "VALIDATED" : "PENDING",
@@ -1496,6 +1708,28 @@ export async function getAttendancePageData(
 // --------------------------------------
 // Server Action — Récupérer une séance avec ses présences
 // --------------------------------------
+
+/**
+ * Lecture résiliente des flags de clôture (`isCompleted`/`endedAt`) :
+ * retourne `{ isCompleted: false, endedAt: null }` si la migration n'a pas
+ * encore été appliquée en base (évite toute erreur non interceptée côté
+ * « Terminer la séance »).
+ */
+async function readSessionCompletionFlags(
+  sessionId: string
+): Promise<{ isCompleted: boolean; endedAt: Date | null }> {
+  try {
+    const row = await (prisma.classSession as unknown as {
+      findUnique: (args: unknown) => Promise<{ isCompleted?: boolean; endedAt?: Date | null } | null>;
+    }).findUnique({
+      where: { id: sessionId },
+      select: { isCompleted: true, endedAt: true },
+    });
+    return { isCompleted: row?.isCompleted ?? false, endedAt: row?.endedAt ?? null };
+  } catch {
+    return { isCompleted: false, endedAt: null };
+  }
+}
 
 /**
  * Récupère la séance d'une classe pour une date donnée avec ses présences.
@@ -1561,6 +1795,7 @@ export async function getClassSessionWithAttendance(
       return null;
     }
 
+    const completion = await readSessionCompletionFlags(session.id);
     const isPast = sessionDate < startOfUtcDay(new Date());
     const hasAttendance = session.attendances.length > 0;
 
@@ -1574,6 +1809,8 @@ export async function getClassSessionWithAttendance(
       startTime: session.startTime,
       endTime: session.endTime,
       status: hasAttendance || !isPast ? "VALIDATED" : "PENDING",
+      isCompleted: completion.isCompleted,
+      endedAt: completion.endedAt,
       attendances: session.attendances.map((a) => ({
         studentId: a.studentId,
         status: a.status,
@@ -1602,12 +1839,14 @@ export async function getClassSessionWithAttendance(
 /**
  * Enregistre la feuille de présence d'une classe pour une date donnée.
  *
- * Le cahier de texte (`CourseLog`) est saisi exclusivement dans la fiche du
- * cours (« Mes cours ») et affiché ici en lecture seule : cette action ne
- * crée ni ne remplace jamais le texte du chapitre. Elle s'appuie sur le
- * `CourseLog` parent (requête exacte `[courseId, date]`) pour renseigner le
- * titre/chapitre/résumé de la `ClassSession`, puis upsert uniquement les
- * présences.
+ * Fusion Émargement + Cahier de texte (fiche classe, 100 % in-place) :
+ * - le `title` (matière / intitulé du cours), le `chapter` (chapitre / thème
+ *   du jour) et le `summary` (résumé de la séance / devoirs) sont saisis
+ *   directement au-dessus de la liste d'émargement ;
+ * - `chapter` et `summary` sont OBLIGATOIRES (rejet `{ ok: false }` sinon,
+ *   sans lever d'exception) ;
+ * - au moins un statut d'émargement doit être sélectionné (la liste
+ *   `attendances` ne doit pas être vide).
  *
  * Isolation : vérifie que l'enseignant est assigné à la classe.
  */
@@ -1632,10 +1871,17 @@ export async function saveClassSessionWithAttendance(
   if (!date) {
     return { ok: false, message: "La date est requise." };
   }
-  // Le titre/chapitre ne sont plus saisis ici (cahier en lecture seule) :
-  // la résolution se fait via le `CourseLog` parent, avec repli neutre.
+  // Fusion Émargement + Cahier de texte : blocage serveur (en plus du blocage
+  // client du bouton) tant que le chapitre/thème ET le résumé ne sont pas
+  // renseignés, et tant qu'aucun statut d'émargement n'est sélectionné.
+  if (!chapter.trim()) {
+    return { ok: false, message: "Le chapitre / thème du jour est requis." };
+  }
+  if (!summary.trim()) {
+    return { ok: false, message: "Le résumé de la séance / devoirs est requis." };
+  }
   if (!attendances || attendances.length === 0) {
-    return { ok: false, message: "Aucune présence à enregistrer." };
+    return { ok: false, message: "Sélectionnez au moins un statut d'émargement." };
   }
 
   try {
@@ -1672,9 +1918,9 @@ export async function saveClassSessionWithAttendance(
     const endTime = new Date(sessionDate);
     endTime.setUTCHours(10, 0, 0, 0);
 
-    // Cahier de texte parent (lecture seule, saisi dans « Mes cours ») :
-    // requête exacte [courseId, date]. Ne crée / ne remplace jamais le texte
-    // du chapitre ici — sert uniquement à renseigner la séance rattachée.
+    // Fusion Émargement + Cahier de texte : la saisie fiche classe fait foi.
+    // Le `CourseLog` parent (requête exacte [courseId, date]) n'est utilisé
+    // qu'en repli pour l'intitulé si celui-ci est vide.
     const parentCourseLog = await prisma.courseLog.findUnique({
       where: { courseId_date: { courseId, date: sessionDate } },
       select: { chapterTitle: true, content: true, homework: true },
@@ -1682,21 +1928,14 @@ export async function saveClassSessionWithAttendance(
 
     const resolvedSubject =
       title.trim() || parentCourseLog?.chapterTitle.trim() || "Séance de cours";
-    const resolvedChapter =
-      chapter.trim() ||
-      parentCourseLog?.chapterTitle.trim() ||
-      resolvedSubject;
-    const resolvedSummary = summary.trim()
-      ? summary.trim()
-      : parentCourseLog
-        ? [parentCourseLog.content, parentCourseLog.homework]
-            .filter((part) => part && part.trim().length > 0)
-            .join("\n\n") || null
-        : null;
+    // `chapter` et `summary` ont été validés non-vides plus haut : la saisie
+    // fiche classe est persistée telle quelle (100 % in-place, sans repli).
+    const resolvedChapter = chapter.trim();
+    const resolvedSummary: string = summary.trim();
 
     // Transaction : upsert ClassSession (via contrainte unique [classId, sessionDate])
     // + upsert Attendances. Garantit qu'une seule séance existe par classe et par date.
-    // Aucune écriture sur `CourseLog` ici (source unique = fiche cours).
+    // La saisie fiche classe (Émargement + Cahier de texte) fait foi.
     const result = await prisma.$transaction(async (tx) => {
       const session = await tx.classSession.upsert({
         where: {
@@ -1720,6 +1959,19 @@ export async function saveClassSessionWithAttendance(
           endTime,
         },
       });
+      // Si la séance était clôturée (« Terminer la séance »), l'enregistrement
+      // la rouvre (isCompleted=false, endedAt=null) — repli silencieux si la
+      // migration de clôture n'est pas encore appliquée en base.
+      try {
+        await (tx.classSession as unknown as {
+          update: (args: unknown) => Promise<unknown>;
+        }).update({
+          where: { id: session.id },
+          data: { isCompleted: false, endedAt: null },
+        });
+      } catch {
+        /* migration de clôture non appliquée : on conserve la séance telle quelle */
+      }
 
       await Promise.all(
         filteredAttendances.map((entry) =>
@@ -1748,10 +2000,31 @@ export async function saveClassSessionWithAttendance(
         )
       );
 
-      // Aucune écriture sur `CourseLog` ici : le texte du chapitre reste la
-      // propriété exclusive de la fiche cours (« Mes cours »).
+      // Cahier de texte du cours porteur : l édition depuis la page
+      // Présences met à jour (upsert) le `CourseLog` [courseId, date].
+      const existingLog = await tx.courseLog.findUnique({
+        where: { courseId_date: { courseId, date: sessionDate } },
+        select: { id: true, teacherId: true },
+      });
+      const logTeacherId = existingLog?.teacherId ?? user.id;
+      await tx.courseLog.upsert({
+        where: { courseId_date: { courseId, date: sessionDate } },
+        create: {
+          organizationId: user.organizationId,
+          courseId,
+          teacherId: logTeacherId,
+          date: sessionDate,
+          chapterTitle: resolvedChapter,
+          content: resolvedSummary,
+          homework: null,
+        },
+        update: { chapterTitle: resolvedChapter, content: resolvedSummary },
+      });
       return session;
     });
+
+    // Lecture résiliente des flags de clôture pour le DTO de retour.
+    const completion = await readSessionCompletionFlags(result.id);
 
     revalidatePath("/dashboard/attendance");
     revalidatePath(`/dashboard/classes/${classId}`);
@@ -1785,6 +2058,8 @@ export async function saveClassSessionWithAttendance(
       startTime: result.startTime,
       endTime: result.endTime,
       status: totalCount > 0 ? "VALIDATED" : "PENDING",
+      isCompleted: completion.isCompleted,
+      endedAt: completion.endedAt,
       attendances: savedAttendances.map((a) => ({
         studentId: a.studentId,
         status: a.status,
@@ -1802,6 +2077,10 @@ export async function saveClassSessionWithAttendance(
         sessionDate: result.sessionDate,
         subjectName: result.subjectName,
         chapter: result.chapter,
+        summary: result.summary,
+        startTime: result.startTime ? result.startTime.toISOString().slice(11, 16) : null,
+        endTime: result.endTime ? result.endTime.toISOString().slice(11, 16) : null,
+        teacherName: "",
         totalCount,
         presentCount,
         status: totalCount > 0 ? "VALIDATED" : "PENDING",
@@ -2013,12 +2292,20 @@ export async function getClassSessionsHistory(
 
   const klass = await prisma.class.findFirst({
     where,
-    select: { id: true },
+    select: {
+      id: true,
+      teacher: { select: { firstName: true, lastName: true } },
+    },
   });
 
   if (!klass) {
     throw new Error("Classe introuvable ou non autorisée.");
   }
+
+  const classTeacherName =
+    [klass.teacher?.firstName, klass.teacher?.lastName]
+      .filter(Boolean)
+      .join(" ") || "Enseignant";
 
   try {
     const sessions = await prisma.classSession.findMany({
@@ -2030,6 +2317,9 @@ export async function getClassSessionsHistory(
         sessionDate: true,
         subjectName: true,
         chapter: true,
+        summary: true,
+        startTime: true,
+        endTime: true,
         attendances: {
           select: { status: true },
         },
@@ -2049,6 +2339,10 @@ export async function getClassSessionsHistory(
         sessionDate: session.sessionDate,
         subjectName: session.subjectName,
         chapter: session.chapter,
+        summary: session.summary,
+        startTime: session.startTime ? session.startTime.toISOString().slice(11, 16) : null,
+        endTime: session.endTime ? session.endTime.toISOString().slice(11, 16) : null,
+        teacherName: classTeacherName,
         presentCount,
         totalCount,
         status: hasAttendance || !isPast ? "VALIDATED" : "PENDING",

@@ -107,12 +107,16 @@ async function computeSessionTotals(
   sessionOpenedAt: Date,
   tx: typeof prisma
 ): Promise<{ incoming: number; outgoing: number; transactionCount: number }> {
-  // Encaissements : ventes (netAmount) + paiements (amount, non voided) depuis l'ouverture
+    // Encaissements : ventes (netAmount) + paiements (amount, non voided) depuis l'ouverture.
+  // Les règlements / ventes « hors système » (isOutOfSystem) sont exclus de la
+  // session de caisse physique du jour — ils mettent à jour le solde débiteur
+  // de l'étudiant mais n'alimentent PAS le fond de caisse physique.
   const salesAgg = await tx.sale.aggregate({
     where: {
       organizationId,
       createdAt: { gte: sessionOpenedAt },
       status: "COMPLETED",
+      isOutOfSystem: false,
     },
     _sum: { netAmount: true },
   });
@@ -122,6 +126,7 @@ async function computeSessionTotals(
       organizationId,
       paidAt: { gte: sessionOpenedAt },
       isVoided: false,
+      isOutOfSystem: false,
       status: { in: ["COMPLETED", "PARTIAL"] },
     },
     _sum: { amount: true },
@@ -140,12 +145,13 @@ async function computeSessionTotals(
     (salesAgg._sum.netAmount ?? 0) + (paymentsAgg._sum.amount ?? 0);
   const outgoing = expensesAgg._sum.amount ?? 0;
 
-  // Nombre de transactions
+    // Nombre de transactions (hors-système exclus de la caisse physique)
   const salesCount = await tx.sale.count({
     where: {
       organizationId,
       createdAt: { gte: sessionOpenedAt },
       status: "COMPLETED",
+      isOutOfSystem: false,
     },
   });
   const paymentsCount = await tx.payment.count({
@@ -153,6 +159,7 @@ async function computeSessionTotals(
       organizationId,
       paidAt: { gte: sessionOpenedAt },
       isVoided: false,
+      isOutOfSystem: false,
     },
   });
 
@@ -170,14 +177,23 @@ async function computeSessionTotals(
 /**
  * Ouvre une nouvelle session de caisse avec un fond de caisse initial.
  * Empêche l'ouverture si une session est déjà active pour l'organisation.
+ *
+ * Un fond de caisse de 0 FCFA est explicitement autorisé : la caisse peut
+ * démarrer vide. Ce montant est un simple apport de départ — il n'est
+ * JAMAIS comptabilisé comme recette / chiffre d'affaires (seuls les
+ * encaissements de la session alimentent `totalIncoming`).
  */
 export async function openCashSession(
   initialAmount: number
 ): Promise<CashSessionResult> {
   await assertCanMutate();
 
-  if (initialAmount < 0) {
-    return { ok: false, message: "Le fond de caisse ne peut pas être négatif." };
+  if (!Number.isFinite(initialAmount) || initialAmount < 0) {
+    return {
+      ok: false,
+      message:
+        "Le fond de caisse doit être un montant positif ou nul (0 FCFA accepté).",
+    };
   }
 
   const organizationId = await getCurrentOrganizationId();
@@ -325,6 +341,12 @@ export async function closeCashSession(
 /**
  * Récupère la session de caisse active (ouverte) de l'organisation.
  * Retourne null si aucune session n'est ouverte.
+ *
+ * Le solde théorique est RECALCULÉ à la volée (fond de caisse + encaissements
+ * live − dépenses) : la ligne d'ouverture ne stocke que le fond initial, un
+ * affichage direct serait donc figé. Les règlements / ventes « hors système »
+ * sont exclus de ce calcul (ils n'alimentent jamais le tiroir-caisse), et le
+ * fond de caisse initial reste un simple apport de départ — jamais une recette.
  */
 export async function getCashSessionStatus(): Promise<CashSessionDTO | null> {
   const organizationId = await getCurrentOrganizationId();
@@ -338,7 +360,21 @@ export async function getCashSessionStatus(): Promise<CashSessionDTO | null> {
       orderBy: { openedAt: "desc" },
     });
 
-    return session ? mapSession(session) : null;
+    if (!session) return null;
+
+    const totals = await computeSessionTotals(
+      organizationId,
+      session.openedAt,
+      prisma
+    );
+
+    return {
+      ...mapSession(session),
+      totalIncoming: totals.incoming,
+      totalOutgoing: totals.outgoing,
+      theoreticalBalance:
+        session.initialAmount + totals.incoming - totals.outgoing,
+    };
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
     console.error("[getCashSessionStatus] Échec :", error);
@@ -367,7 +403,7 @@ export async function getCashSessionSummary(): Promise<CashSessionSummaryResult>
 
     const since = activeSession.openedAt;
 
-    // Ventes par moyen de paiement
+        // Ventes par moyen de paiement (hors système exclues de la caisse physique)
     const salesByMethodRaw = await prisma.sale.groupBy({
       by: ["paymentMethod"],
       where: {
@@ -375,6 +411,7 @@ export async function getCashSessionSummary(): Promise<CashSessionSummaryResult>
         createdAt: { gte: since },
         status: "COMPLETED",
         paymentMethod: { not: null },
+        isOutOfSystem: false,
       },
       _sum: { netAmount: true },
     });
@@ -389,13 +426,14 @@ export async function getCashSessionSummary(): Promise<CashSessionSummaryResult>
       }
     }
 
-    // Paiements par moyen de paiement
+        // Paiements par moyen de paiement (hors système exclus de la caisse physique)
     const paymentsByMethodRaw = await prisma.payment.groupBy({
       by: ["paymentMethod"],
       where: {
         organizationId,
         paidAt: { gte: since },
         isVoided: false,
+        isOutOfSystem: false,
       },
       _sum: { amount: true },
     });
@@ -425,7 +463,16 @@ export async function getCashSessionSummary(): Promise<CashSessionSummaryResult>
     return {
       ok: true,
       summary: {
-        session: mapSession(activeSession),
+        // Session enrichie des totaux live : le fond de caisse initial sert
+        // uniquement de base au solde théorique — il n'est JAMAIS compté comme
+        // une recette / un chiffre d'affaires (seuls les encaissements de la
+        // session alimentent `totalIncoming`).
+        session: {
+          ...mapSession(activeSession),
+          totalIncoming: totals.incoming,
+          totalOutgoing: totals.outgoing,
+          theoreticalBalance,
+        },
         salesByMethod,
         paymentsByMethod,
         expensesTotal: expensesAgg._sum.amount ?? 0,
