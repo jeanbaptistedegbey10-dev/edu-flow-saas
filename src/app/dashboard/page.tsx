@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getSuperAdminRoute } from "@/lib/super-admin-route";
 import { getOrganizationDataPresence } from "@/lib/demo-data";
+import { isDemoDataFeatureEnabled } from "@/lib/demo-data-feature";
 import { listOrganizationBackupsAction } from "@/lib/actions/organization-backup";
 import { getClassOptions } from "@/actions/classes";
 import { getDefaultRegistrationFee } from "@/actions/organization";
@@ -82,36 +83,38 @@ export default async function DashboardPage() {
     getDefaultRegistrationFee(),
   ]);
 
-  // Le rôle SUPER_ADMIN a été redirigé ci-dessus : la gestion des données de
-  // démonstration reste réservée aux administrateurs du centre.
-  const isAdmin = role === "ADMIN";
+  // Le rôle SUPER_ADMIN a été redirigé ci-dessus vers son back-office : sur cette
+  // page, la gestion des données de démonstration est réservée aux
+  // administrateurs du centre. SUPER_ADMIN figure malgré tout dans la liste
+  // pour rester cohérent avec les Server Actions (qui, elles, autorisent
+  // ADMIN / SUPER_ADMIN) si la redirection évolue un jour.
+  const ADMIN_ROLES: ReadonlyArray<string> = ["ADMIN", "SUPER_ADMIN"];
+  const isAdmin = ADMIN_ROLES.includes(role ?? "");
 
   // --------------------------------------
-  // Masquage de la carte « Données de démonstration » en production
+  // Affichage de la carte « Données de démonstration »
   // --------------------------------------
-  // La carte (injection / réinitialisation) n'est visible que lorsque les
-  // DEUX conditions sont réunies :
-  //   - NODE_ENV !== "production" (jamais sur un déploiement client payant) ;
-  //   - NEXT_PUBLIC_ENABLE_DEMO_DATA === "true" (sandbox explicitement
-  //     activée via la variable d'environnement).
-  // Toute autre configuration masque le composant. Les Server Actions
-  // correspondantes rejouent la même règle côté serveur
+  // La carte (injection / réinitialisation) et l'« Historique des sauvegardes »
+  // sont rendues par DÉFAUT, y compris en production : le garde est désormais
+  // OPT-OUT (`NEXT_PUBLIC_ENABLE_DEMO_DATA` vaut « false » pour masquer).
+  // L'ancienne règle exigeait `NODE_ENV !== "production"`, ce qui rendait la
+  // condition toujours fausse sur Vercel (NODE_ENV y vaut toujours
+  // « production ») et faisait disparaître ces blocs du tableau de bord.
+  // Les Server Actions rejouent la MÊME règle côté serveur
   // (src/lib/actions/demo-data.ts) — défense en profondeur.
-  const showDemoData =
-    process.env.NODE_ENV !== "production" &&
-    process.env.NEXT_PUBLIC_ENABLE_DEMO_DATA === "true";
+  const showDemoData = isDemoDataFeatureEnabled();
 
   // Deletion guard de la carte démo : l'organisation contient-elle des données
   // (démonstration ou réelles) ? Sans donnée, « Supprimer la démo » est inactif.
-  // La requête est sautée lorsque la carte est masquée (production).
+  // La requête n'est jouée que lorsque la carte est rendue.
   const dataPresence = showDemoData
     ? await getOrganizationDataPresence(session?.user?.organizationId)
     : { hasData: false, demoAccounts: 0 };
 
   // Historique des sauvegardes : alimenté par les sauvegardes automatiques
   // créées AVANT chaque purge. La requête n'est jouée que pour les
-  // administrateurs (les autres n'ont aucun droit de restauration) et hors
-  // production, où la carte démo est masquée.
+  // administrateurs (les autres n'ont aucun droit de restauration) et quand la
+  // carte démo est rendue.
   const backups =
     showDemoData && isAdmin
       ? await listOrganizationBackupsAction()
@@ -129,7 +132,7 @@ export default async function DashboardPage() {
       />
 
       {/* Gestion des données de démonstration (injection / réinitialisation) —
-          rendue UNIQUEMENT en développement / sandbox (cf. showDemoData). */}
+          rendue par défaut, y compris en production (cf. showDemoData). */}
       {showDemoData ? (
         <DemoDataCard isAdmin={isAdmin} hasData={dataPresence.hasData} />
       ) : null}

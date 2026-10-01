@@ -16,6 +16,10 @@ import {
   BACKUP_REASONS,
   type DemoDataActionState,
 } from "@/lib/demo-data-constants";
+import {
+  DEMO_FEATURE_DISABLED_MESSAGE,
+  isDemoDataFeatureEnabled,
+} from "@/lib/demo-data-feature";
 import { assertCanMutate } from "@/lib/license-check";
 import { createOrganizationBackup } from "@/lib/organization-backup";
 import {
@@ -70,6 +74,30 @@ import {
 // possibilité de retour en arrière. L'historique est consultable et
 // restaurable depuis le tableau de bord (« Historique des sauvegardes »).
 
+// -----------------------------------------------------------------------
+// Garde d'activation de la fonctionnalité de démonstration (côté serveur)
+// -----------------------------------------------------------------------
+// La règle vit désormais dans `@/lib/demo-data-feature` (SOURCE DE VÉRITÉ
+// partagée avec l'affichage — `src/app/dashboard/page.tsx`) : la
+// fonctionnalité est ACTIVE PAR DÉFAUT, y compris en production (opt-OUT).
+// Seule une désactivation explicite (`NEXT_PUBLIC_ENABLE_DEMO_DATA=false`)
+// la coupe. L'ancienne règle `NODE_ENV !== "production" && … === "true"`
+// rendait la condition toujours fausse sur Vercel (NODE_ENV y vaut toujours
+// « production ») : les actions étaient refusées alors même que la carte était
+// censée y être disponible pour les administrateurs.
+//
+// Défense en profondeur : `isDemoDataFeatureEnabled()` rejoue ici la MÊME règle
+// que l'UI — toute invocation directe des Server Actions (client obsolète,
+// requête forgée) est refusée dès que l'instance a désactivé la fonctionnalité.
+//
+// La sécurité ne repose PAS sur ce drapeau : chaque action rejoue ses propres
+// gardes (session, `assertCanMutate`, rôle ADMIN / SUPER_ADMIN, confirmation
+// mot-clé, sauvegarde automatique avant purge).
+//
+// NOTE : le seeding à l'ONBOARDING (inscription avec jeu de démonstration)
+// emprunte un chemin distinct (auth.ts / actions/register.ts) et n'est PAS
+// concerné par ce garde.
+
 /** Mots de confirmation reconnus par les étapes de nettoyage. */
 type ResetConfirmationWord = "SUPPRIMER" | "CONFIRMER";
 
@@ -78,36 +106,10 @@ const ALLOWED_CONFIRMATION_WORDS: ReadonlyArray<ResetConfirmationWord> = [
   "CONFIRMER",
 ];
 
-/** Message renvoyé lorsque la fonctionnalité démo est désactivée. */
-const DEMO_FEATURE_DISABLED_MESSAGE =
-  "Fonctionnalité de démonstration désactivée sur cette instance " +
-  "(réservée au développement / à la sandbox).";
-
-/**
- * Garde « sandbox uniquement » de la fonctionnalité de démonstration.
- *
- * La carte « Données de démonstration » n'est rendue que lorsque
- * `NODE_ENV !== "production"` ET `NEXT_PUBLIC_ENABLE_DEMO_DATA === "true"`
- * (voir src/app/dashboard/page.tsx). Ce garde rejoue la MÊME règle côté
- * serveur : toute invocation directe des Server Actions (client obsolète,
- * requête forgée) est refusée dès qu'une instance de production est détectée
- * ou que la sandbox n'est pas explicitement activée. Défense en profondeur —
- * le masquage UI seul ne suffirait pas à protéger un client payant.
- *
- * NOTE : le seeding à l'ONBOARDING (inscription avec jeu de démonstration)
- * emprunte un chemin distinct (auth.ts / actions/register.ts) et n'est PAS
- * concerné par ce garde.
- */
-function isDemoDataFeatureEnabled(): boolean {
-  return (
-    process.env.NODE_ENV !== "production" &&
-    process.env.NEXT_PUBLIC_ENABLE_DEMO_DATA === "true"
-  );
-}
-
 /**
  * Vérifications communes partagées par les trois étapes de nettoyage :
- *   1. fonctionnalité démo activée (développement / sandbox uniquement) ;
+ *   1. fonctionnalité démo activée (opt-OUT : désactivée seulement si
+ *      NEXT_PUBLIC_ENABLE_DEMO_DATA=false) ;
  *   2. session présente (organisation rattachée au JWT) ;
  *   3. garde d'écriture `assertCanMutate` (peut rediriger vers /billing) ;
  *   4. contexte de session revalidé contre la base (source de vérité) ;
@@ -120,7 +122,8 @@ async function resolveDemoMutationContext(
   | { ok: true; organizationId: string }
   | { ok: false; state: DemoDataActionState }
 > {
-  // 0. Garde « sandbox uniquement » : refus immédiat hors environnement autorisé.
+  // 0. Garde d'activation : refus immédiat si l'instance a explicitement
+  //    désactivé la fonctionnalité (NEXT_PUBLIC_ENABLE_DEMO_DATA=false).
   if (!isDemoDataFeatureEnabled()) {
     return {
       ok: false,
@@ -403,9 +406,8 @@ export async function injectDemoDataAction(
   console.log("[demo-data] injectDemoDataAction — début");
 
   try {
-    // 0. Garde « sandbox uniquement » : la fonctionnalité de démonstration est
-    //    désactivée sur toute instance de production non explicitement
-    //    autorisée (cf. isDemoDataFeatureEnabled).
+    // 0. Garde d'activation : la fonctionnalité n'est refusée que si l'instance
+    //    l'a explicitement désactivée (cf. isDemoDataFeatureEnabled).
     if (!isDemoDataFeatureEnabled()) {
       return {
         status: "error",
@@ -559,9 +561,8 @@ export async function resetDemoDataAction(
   console.log("[demo-data] resetDemoDataAction — début");
 
   try {
-    // 0. Garde « sandbox uniquement » : la fonctionnalité de démonstration est
-    //    désactivée sur toute instance de production non explicitement
-    //    autorisée (cf. isDemoDataFeatureEnabled).
+    // 0. Garde d'activation : la fonctionnalité n'est refusée que si l'instance
+    //    l'a explicitement désactivée (cf. isDemoDataFeatureEnabled).
     if (!isDemoDataFeatureEnabled()) {
       return {
         status: "error",
