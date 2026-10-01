@@ -18,6 +18,16 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "EduFlow SaaS - Centre de Formation",
   description: "Plateforme SaaS de gestion pour centres de formation et agences de mobilité internationale",
+  // Favicons servis depuis `public/` — fichiers statiques, jamais traités par
+  // Turbopack au build. `src/app/icon.png` reste le fallback automatique de
+  // l'App Router (asset régénérable via `scripts/generate-default-logo.mjs`).
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "16x16 32x32 48x48" },
+      { url: "/logo.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: [{ url: "/logo.png", sizes: "512x512" }],
+  },
 };
 
 export default function RootLayout({

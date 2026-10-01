@@ -6,8 +6,8 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 
-import { DEFAULT_ORGANIZATION_LOGO_URL } from "@/lib/demo-data";
 import { seedDemoDataForOrganization } from "@/lib/demo-seed";
+import { getDefaultOrganizationLogoUrl } from "@/lib/platform-settings";
 import { computeTrialEndDate } from "@/lib/license-check";
 import { prisma } from "@/lib/prisma";
 import { generateUniqueOrganizationSlug } from "@/lib/slug";
@@ -324,6 +324,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             10
           );
 
+          // Logo appliqué à l'organisation porteuse de la plateforme : lu AVANT
+          // l'ouverture de la transaction (la lecture se fait sur le client
+          // principal, pas sur la transaction).
+          const defaultLogoUrl = await getDefaultOrganizationLogoUrl();
+
           await prisma.$transaction(async (tx) => {
             let platformOrg = await tx.organization.findUnique({
               where: { slug: "eduflow-platform" },
@@ -336,7 +341,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   name: "EduFlow Platform",
                   slug: "eduflow-platform",
                   email,
-                  logoUrl: DEFAULT_ORGANIZATION_LOGO_URL,
+                  logoUrl: defaultLogoUrl,
                 },
               });
             }
@@ -416,6 +421,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           let createdAdmin: { id: string; organizationId: string } | null =
             null;
 
+          // Logo appliqué par défaut : valeur définie par le Super-Admin
+          // (`SystemSettings.default_organization_logo_url`), ou logo EduFlow
+          // « /logo.png » si aucune configuration n'est enregistrée. Résolu
+          // AVANT la transaction pour éviter une lecture sur le client de
+          // transaction.
+          const defaultLogoUrl = await getDefaultOrganizationLogoUrl();
+
           // La valeur est RETOURNÉE par le callback de transaction : TypeScript
           // infère son type depuis le retour (évite le narrowing à `never`).
           createdAdmin = await prisma.$transaction(async (tx) => {
@@ -427,10 +439,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 planType: "TRIAL",
                 planStatus: "ACTIVE",
                 trialEndsAt,
-                // Logo EduFlow par défaut : l'organisation est immédiatement
-                // illustrée (reçus, bulletins, en-tête du tableau de bord)
-                // avant tout téléversement de logo par l'administrateur.
-                logoUrl: DEFAULT_ORGANIZATION_LOGO_URL,
+                // L'organisation est immédiatement illustrée (reçus, bulletins,
+                // en-tête du tableau de bord) avant tout téléversement de logo
+                // par l'administrateur.
+                logoUrl: defaultLogoUrl,
               },
             });
 

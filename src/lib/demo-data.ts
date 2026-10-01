@@ -1,4 +1,5 @@
 import { seedDemoDataForOrganization } from "@/lib/demo-seed";
+import { getDefaultOrganizationLogoUrl } from "@/lib/platform-settings";
 import { prisma } from "@/lib/prisma";
 
 // --------------------------------------
@@ -32,16 +33,19 @@ import { prisma } from "@/lib/prisma";
 // (compatibilité) — elle enchaîne simplement les trois étapes ci-dessus.
 
 /**
- * Logo EduFlow appliqué par défaut aux organisations.
+ * ⚠️ Le logo appliqué par défaut aux organisations n'est PLUS codé en dur.
  *
- * L'asset est servi par le dossier `public/` : le chemin `/logo.png` est donc
- * résolu directement par le navigateur. Il est injecté à la création de
- * l'organisation et lors de l'injection du jeu de démonstration, afin que les
+ * Il est résolu à l'exécution par `getDefaultOrganizationLogoUrl()` (voir
+ * `src/lib/platform-settings.ts`), qui interroge le paramètre global
+ * `default_organization_logo_url` de la table `SystemSettings` — modifiable
+ * depuis le back-office Super-Admin (« Paramètres de la plateforme »).
+ *
+ * Si aucun logo n'est configuré (clé absente, vide ou invalide), le chemin
+ * statique « /logo.png » servi par `public/` est utilisé. Il garantit que les
  * documents imprimables (reçus, bulletins) et l'en-tête du tableau de bord
- * affichent toujours un logo — même avant que l'administrateur n'en
- * téléverse un.
+ * affichent toujours un logo — même avant que l'administrateur n'en téléverse
+ * un.
  */
-export const DEFAULT_ORGANIZATION_LOGO_URL = "/logo.png";
 
 /** Résultat typé d'une injection de données de démonstration. */
 export type DemoDataInjectResult =
@@ -83,14 +87,17 @@ export async function injectDemoDataForOrganization(
     };
   }
 
-  // Logo par défaut : l'organisation reçoit immédiatement le logo EduFlow
-  // (« /logo.png »), afin que les reçus, bulletins et l'en-tête du tableau de
-  // bord soient illustrés dès la première utilisation. Un logo téléversé plus
-  // tard par l'administrateur le remplace.
+  // Logo par défaut : l'organisation reçoit immédiatement le logo défini par
+  // le Super-Admin (`SystemSettings.default_organization_logo_url`), ou le logo
+  // EduFlow « /logo.png » si aucun n'est configuré. Les reçus, bulletins et
+  // l'en-tête du tableau de bord sont ainsi illustrés dès la première
+  // utilisation. Un logo téléversé plus tard par l'administrateur le remplace.
+  const defaultLogoUrl = await getDefaultOrganizationLogoUrl();
+
   await prisma.organization
     .update({
       where: { id: organizationId },
-      data: { logoUrl: DEFAULT_ORGANIZATION_LOGO_URL },
+      data: { logoUrl: defaultLogoUrl },
     })
     .catch((error: unknown) => {
       // Non bloquant : l'injection des données de démonstration a réussi, un

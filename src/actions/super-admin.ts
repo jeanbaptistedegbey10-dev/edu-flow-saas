@@ -26,6 +26,13 @@ import {
   type PricingPlanType,
 } from "@/lib/plan-pricing";
 import { getPlanPricingGrid } from "@/lib/payment";
+import { isValidLogoUrl, LOGO_MAX_VALUE_LENGTH } from "@/lib/logo-url";
+import {
+  DEFAULT_ORGANIZATION_LOGO_KEY,
+  DEFAULT_ORGANIZATION_LOGO_LABEL,
+  FALLBACK_DEFAULT_ORGANIZATION_LOGO_URL,
+  PLATFORM_SETTINGS_CATEGORY,
+} from "@/lib/platform-settings";
 import { getSuperAdminContext, PAYMENT_SETTING_KEYS } from "@/lib/super-admin";
 
 // --------------------------------------
@@ -1256,4 +1263,124 @@ export async function updatePaymentSettingsAction(
     status: "success",
     message: "Clés API de paiement enregistrées avec succès.",
   };
+}
+
+// --------------------------------------
+// Paramètres de la plateforme (logo par défaut)
+// --------------------------------------
+
+/** État du formulaire « logo par défaut des organisations ». */
+export type UpdateDefaultLogoFormState = {
+  status: "idle" | "success" | "error";
+  message?: string;
+};
+
+/**
+ * Enregistre le logo appliqué par défaut aux NOUVELLES organisations dans
+ * `SystemSettings` (clé `default_organization_logo_url`).
+ *
+ * Réservé au rôle SUPER_ADMIN (barrière re-vérifiée ici, comme pour toutes les
+ * actions de ce module). Trois valeurs sont acceptées pour le champ :
+ *   - une chaîne vide      → réinitialisation sur le logo EduFlow « /logo.png » ;
+ *   - une URL http(s)      → logo distant (CDN, espace de stockage) ;
+ *   - une data URL image   → import local recadré, stocké en base comme le logo
+ *                            d'organisation.
+ *
+ * Une valeur invalide est refusée AVANT écriture : la clé conserve alors sa
+ * valeur précédente, et l'injection du jeu de démonstration comme la création
+ * d'organisation continuent d'appliquer le logo valide déjà en place.
+ */
+export async function updateDefaultOrganizationLogoAction(
+  _prevState: UpdateDefaultLogoFormState,
+  formData: FormData
+): Promise<UpdateDefaultLogoFormState> {
+  const admin = await getSuperAdminContext();
+
+  if (!admin) {
+    return {
+      status: "error",
+      message: "Accès réservé au Super-Admin de la plateforme.",
+    };
+  }
+
+  const rawValue = String(formData.get("defaultLogoUrl") ?? "").trim();
+
+  // Champ vide : on SUPPRIME la clé pour revenir au comportement par défaut.
+  // Une chaîne nulle n'est pas acceptée par le schéma (`value` non null).
+  if (!rawValue) {
+    try {
+      await prisma.systemSettings.deleteMany({
+        where: { key: DEFAULT_ORGANIZATION_LOGO_KEY },
+      });
+
+      revalidatePath(superAdminPath("settings"));
+      revalidatePath(superAdminPath());
+
+      return {
+        status: "success",
+        message: `Logo par défaut réinitialisé sur « ${FALLBACK_DEFAULT_ORGANIZATION_LOGO_URL} ».`,
+      };
+    } catch (error) {
+      console.error(
+        "[super-admin] Réinitialisation du logo par défaut impossible",
+        error
+      );
+      return {
+        status: "error",
+        message: "Réinitialisation impossible : la base de données est indisponible.",
+      };
+    }
+  }
+
+  if (rawValue.length > LOGO_MAX_VALUE_LENGTH) {
+    return {
+      status: "error",
+      message:
+        "L'image est trop volumineuse (500 Ko maximum après compression). Recadrez-la plus serré.",
+    };
+  }
+
+  if (!isValidLogoUrl(rawValue)) {
+    return {
+      status: "error",
+      message:
+        "Le logo doit être une URL d'image valide (https://…) ou une image importée.",
+    };
+  }
+
+  try {
+    await prisma.systemSettings.upsert({
+      where: { key: DEFAULT_ORGANIZATION_LOGO_KEY },
+      create: {
+        key: DEFAULT_ORGANIZATION_LOGO_KEY,
+        value: rawValue,
+        label: DEFAULT_ORGANIZATION_LOGO_LABEL,
+        isSecret: false,
+        category: PLATFORM_SETTINGS_CATEGORY,
+        updatedBy: admin.userId,
+      },
+      update: {
+        value: rawValue,
+        label: DEFAULT_ORGANIZATION_LOGO_LABEL,
+        isSecret: false,
+        category: PLATFORM_SETTINGS_CATEGORY,
+        updatedBy: admin.userId,
+      },
+    });
+
+    revalidatePath(superAdminPath("settings"));
+    revalidatePath(superAdminPath());
+
+    return {
+      status: "success",
+      message:
+        "Logo par défaut enregistré : il sera appliqué aux prochaines organisations créées.",
+    };
+  } catch (error) {
+    console.error("[super-admin] Enregistrement du logo par défaut impossible", error);
+    return {
+      status: "error",
+      message: "Enregistrement impossible : la base de données est indisponible.",
+    };
+  }
 }

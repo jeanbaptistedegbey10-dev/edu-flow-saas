@@ -6,6 +6,7 @@ import {
   CreditCard,
   KeyRound,
   ReceiptText,
+  Settings,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
@@ -38,7 +39,8 @@ import { cn } from "@/lib/utils";
  * - 🏢 Organisations (gestion des écoles / clients) ;
  * - 💰 Tarifs & Offres (grille tarifaire dynamique — acquisition + renouvellement) ;
  * - 🔑 Générateur de Licences (clés Ed25519 pour clients offline/desktop) ;
- * - 💳 Factures & Paiements SaaS.
+ * - 💳 Factures & Paiements SaaS ;
+ * - ⚙️ Paramètres de la plateforme (réglages globaux, ex. logo par défaut).
  */
 type SuperAdminMenuItem = {
   title: string;
@@ -74,6 +76,11 @@ const superAdminMenu: SuperAdminMenuItem[] = [
     title: "Paiements & API",
     url: superAdminPath("payments"),
     icon: CreditCard,
+  },
+  {
+    title: "Paramètres de la plateforme",
+    url: superAdminPath("settings"),
+    icon: Settings,
   },
 ];
 
