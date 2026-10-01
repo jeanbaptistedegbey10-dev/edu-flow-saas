@@ -154,10 +154,11 @@ export async function activateLicenseWithKeyAction(
  *
  * @param planType       Formule commerciale (SAAS_CLOUD | SELF_HOSTED | DESKTOP_OFFLINE).
  * @param durationMonths Durée souscrite : 12 mois (annuel) ou 6 mois (semestriel).
- * @returns URL de paiement (page agrégateur ou widget interne) à ouvrir.
+ * @returns Les paramètres du widget modal FedaPay (clé publique, montant,
+ *          référence, metadata) à ouvrir PAR-DESSUS la page courante — aucune
+ *          redirection d'URL n'est nécessaire.
  */
 export type InitiateSubscriptionActionResult =
-  | { status: "success"; checkoutUrl: string; provider: string }
   | { status: "fedapay_widget"; widget: FedapayWidgetPayment }
   | { status: "error"; message: string };
 
@@ -235,26 +236,14 @@ export async function initiateSubscriptionPaymentAction(
 
   revalidatePath("/dashboard/billing");
 
-  if (result.status === "fedapay_widget") {
-    // Démonstration : pas d'URL serveur — le widget FedaPay est ouvert côté
-    // navigateur avec les paramètres préparés (clé publique, montant,
-    // environnement, metadata…).
-    return { status: "fedapay_widget", widget: result.widget };
-  }
-
-  // FedaPay : l'URL de guichet (champ `url` de POST /v1/transactions/{id}/token
-  // ou reconstruite depuis le token) est transmise TELLE QUELLE au composant
-  // client `SubscriptionCheckout`, qui redirige vers elle
-  // (`window.location.assign(result.checkoutUrl)`).
+  // FedaPay : les paramètres du widget modal sont transmis au composant client
+  // `SubscriptionCheckout`, qui ouvre la modale PAR-DESSUS la page courante via
+  // le SDK officiel (`cdn.fedapay.com/fedapay.js`) — aucune redirection.
   console.log(
-    `[payment][action] Transaction FedaPay créée pour l'organisation ${organization.id} — redirection vers le guichet : ${result.checkoutUrl}`
+    `[payment][action] Collecte FedaPay préparée pour l'organisation ${organization.id} — widget modal inline (environnement live).`
   );
 
-  return {
-    status: "success",
-    checkoutUrl: result.checkoutUrl,
-    provider: result.provider,
-  };
+  return { status: "fedapay_widget", widget: result.widget };
 }
 
 // --------------------------------------

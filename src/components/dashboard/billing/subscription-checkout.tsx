@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   CreditCardIcon,
   LoaderCircleIcon,
   ShieldCheckIcon,
   SmartphoneIcon,
+  XCircleIcon,
 } from "lucide-react";
 
 import {
@@ -20,14 +22,22 @@ import { Button } from "@/components/ui/button";
 //
 // Composant client : affiche les offres SaaS (mensuel / annuel en XOF) et
 // déclenche le paiement via la Server Action `initiateSubscriptionPaymentAction`.
-// - Mode Live : le serveur crée la transaction FedaPay et renvoie l'URL de
-//   guichet → redirection du navigateur vers `checkout.fedapay.com` ;
-// - Mode démo : le widget officiel FedaPay (cdn.fedapay.com/fedapay.js) est
-//   ouvert côté navigateur avec `environment: "sandbox"`.
+// L'action renvoie les paramètres de la collecte (clé publique, montant,
+// référence, metadata) calculés côté serveur ; le composant ouvre ensuite le
+// WIDGET MODAL / POP-UP INLINE FedaPay PAR-DESSUS la page courante, via
+// `FedaPay.init({ public_key, environment: "live" })` puis `widget.open()`.
 //
-// Aucune clé secrète ne transite ici : seule la clé publique est utilisée par
-// le widget FedaPay. La validation finale (licence + organisation + facture)
-// est réalisée côté serveur par le webhook signé `/api/webhooks/payment`.
+// Il n'y a PLUS de redirection d'URL : `checkout.fedapay.com` n'est jamais
+// utilisé, l'utilisateur reste sur la page de facturation pendant tout le
+// parcours. La fermeture du dialogue est notifiée par le callback
+// `onComplete` du SDK, qui distingue le paiement confirmé
+// (`FedaPay.CHECKOUT_COMPLETED`) de la fermeture / annulation
+// (`FedaPay.DIALOG_DISMISSED`).
+//
+// Aucune clé secrète ne transite ici : seule la clé publique
+// `NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY` est utilisée par le widget FedaPay. La
+// validation finale (licence + organisation + facture) est réalisée côté
+// serveur par le webhook signé `/api/webhooks/payment`.
 
 /** Option de prix pré-formatée par la page serveur (aucun import serveur ici). */
 export type CheckoutPlanOption = {
@@ -73,14 +83,16 @@ type Props = {
 // --------------------------------------
 //
 // SDK officiel : https://cdn.fedapay.com/fedapay.js (global `FedaPay`).
-// `FedaPay.init({ public_key, environment })` renvoie un widget à ouvrir via
-// `widget.open()`.
+// `FedaPay.init({ public_key, environment, transaction, onComplete })` renvoie
+// un widget modal à ouvrir via `widget.open()` — il s'affiche PAR-DESSUS la
+// page courante, sans navigation.
 //
-// Le même script sert aux deux environnements : c'est l'option `environment`
-// (« live » ou « sandbox ») passée à `FedaPay.init` qui sélectionne
-// l'hôte FedaPay ciblé. Elle est décidée côté SERVEUR par
-// `getFedapayWidgetEnvironment()` (donc par `PAYMENT_PROVIDER_MODE`) et
-// reçue dans `widget.environment` : le client ne peut pas la contourner.
+// L'option `environment` est fixée à « live » : la clé publique
+// `NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY` désigne le compte FedaPay de production et
+// les paiements sont réellement encaissés. Le SDK notifie la fermeture du
+// dialogue via `onComplete({ reason, transaction })`, où `reason` vaut
+// `FedaPay.CHECKOUT_COMPLETED` (paiement confirmé) ou
+// `FedaPay.DIALOG_DISMISSED` (fermeture / annulation par l'utilisateur).
 
 /**
  * Script officiel du widget FedaPay.
@@ -95,8 +107,22 @@ type FedaPayCheckoutWidget = {
   open: () => void;
 };
 
+/**
+ * Raisons de fermeture du dialogue FedaPay, telles que documentées par
+ * l'SDK (https://docs.fedapay.com — Checkout.js, option `onComplete`).
+ * Le callback reçoit `{ reason, transaction }`.
+ */
+const FedaPayDialogDismissed = "dialog_dismissed";
+
+type FedaPayCompletion = {
+  reason?: number | string;
+  transaction?: Record<string, unknown> | null;
+};
+
 type FedaPayGlobal = {
   init: (options: Record<string, unknown>) => FedaPayCheckoutWidget;
+  DIALOG_DISMISSED?: number | string;
+  CHECKOUT_COMPLETED?: number | string;
 };
 
 let fedapayScriptPromise: Promise<void> | null = null;
@@ -126,7 +152,15 @@ function loadFedapayScript(): Promise<void> {
   return fedapayScriptPromise;
 }
 
-/** Paramètres du widget préparés par le serveur. */
+/**
+ * Paramètres du widget préparés par le serveur (`FedapayWidgetPayment`).
+ *
+ * Deux différences volontaires avec le type serveur, le composant étant le seul
+ * point d'usage de l'intégration :
+ * - aucun `callbackUrl` : le widget est modal, l'utilisateur ne quitte jamais
+ *   la page — la fin du parcours est notifiée par `onComplete` ;
+ * - `environment` y est toujours « live » (voir `openFedapayWidget`).
+ */
 type FedapayWidgetParams = {
   publicKey: string;
   amount: number;
@@ -134,12 +168,31 @@ type FedapayWidgetParams = {
   reference: string;
   description: string;
   environment: "live" | "sandbox";
-  callbackUrl: string;
   metadata: { organizationId: string; planType: string };
 };
 
-/** Ouvre le widget FedaPay puis redirige vers la page de retour. */
-async function openFedapayWidget(widget: FedapayWidgetParams): Promise<void> {
+/**
+ * Résultat de l'ouverture du widget : l'utilisateur a-t-il confirmé le
+ * paiement ou a-t-il fermé / annulé la modale ?
+ */
+type FedapayWidgetOutcome =
+  | { status: "completed" }
+  | { status: "dismissed" };
+
+/**
+ * Ouvre le widget FedaPay EN MODALITÉ, par-dessus la page courante (aucune
+ * redirection d'URL, aucun changement de page). Le SDK notifie la fermeture
+ * via le callback `onComplete` : on distingue alors le paiement confirmé
+ * (`CHECKOUT_COMPLETED`) d'une fermeture / annulation par l'utilisateur
+ * (`DIALOG_DISMISSED`).
+ *
+ * La confirmation serveur fait toujours foi (webhook signé) : ce retour n'est
+ * qu'un retour d'expérience immédiat côté interface.
+ */
+async function openFedapayWidget(
+  widget: FedapayWidgetParams,
+  onOutcome: (outcome: FedapayWidgetOutcome) => void
+): Promise<void> {
   await loadFedapayScript();
 
   const win = window as unknown as { FedaPay?: FedaPayGlobal };
@@ -148,10 +201,13 @@ async function openFedapayWidget(widget: FedapayWidgetParams): Promise<void> {
     throw new Error("Widget de paiement FedaPay indisponible.");
   }
 
+  const dismissedReason = win.FedaPay.DIALOG_DISMISSED ?? FedaPayDialogDismissed;
+
   const checkout = win.FedaPay.init({
     public_key: widget.publicKey,
-    // « live » → transactions réelles ; « sandbox » → démonstration.
-    environment: widget.environment,
+    // Environnement « live » : transactions réelles via la clé publique
+    // NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY.
+    environment: "live",
     locale: "fr",
     transaction: {
       amount: widget.amount,
@@ -162,14 +218,28 @@ async function openFedapayWidget(widget: FedapayWidgetParams): Promise<void> {
         reference: widget.reference,
       },
     },
+    // Appelé par le SDK à la fermeture du dialogue (succès OU annulation).
+    onComplete: (completion: FedaPayCompletion) => {
+      const reason = completion?.reason;
+
+      const dismissed =
+        reason === dismissedReason || reason === FedaPayDialogDismissed;
+
+      onOutcome(
+        dismissed
+          ? { status: "dismissed" }
+          : { status: "completed" }
+      );
+    },
   });
 
   try {
     checkout.open();
-  } finally {
-    // En fin de parcours (succès, annulation ou erreur), le webhook signé fera
-    // foi ; on ramène l'utilisateur sur la page de facturation.
-    window.location.href = widget.callbackUrl;
+  } catch (error) {
+    // Si l'ouverture du dialogue échoue, on considère l'annulation, pour éviter
+    // tout état « en attente » fantôme côté interface.
+    onOutcome({ status: "dismissed" });
+    throw error;
   }
 }
 
@@ -185,10 +255,17 @@ export function SubscriptionCheckout({
 }: Props) {
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Message d'annulation : affiché si l'utilisateur ferme la modale FedaPay
+  // ou clique sur « Annuler le paiement ». Distinct de `error` (rouge) pour
+  // ne jamais laisser croire à un échec de débit ni à un paiement « en
+  // attente ».
+  const [cancelled, setCancelled] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const router = useRouter();
 
   function purchase(planType: CheckoutPlan["planType"], durationMonths: number) {
     setError(null);
+    setCancelled(false);
     setPendingPlan(`${planType}:${durationMonths}`);
 
     startTransition(async () => {
@@ -201,24 +278,24 @@ export function SubscriptionCheckout({
           return;
         }
 
-        if (result.status === "success") {
-          // Mode Live : le serveur a transmis l'URL de guichet FedaPay (token
-          // généré par POST /v1/transactions/{id}/token ou champ `url` renvoyé
-          // par FedaPay) — redirection du navigateur vers cette URL.
-          if (!result.checkoutUrl) {
-            setError(
-              "La passerelle de paiement n'a pas retourné d'URL de paiement. Réessayez dans quelques instants."
-            );
+        // Widget modal FedaPay : s'ouvre PAR-DESSUS la page courante, sans
+        // redirection d'URL. Le SDK notifie la fermeture via `onComplete`.
+        await openFedapayWidget(result.widget, (outcome) => {
+          if (outcome.status === "dismissed") {
+            // Fermeture / annulation par l'utilisateur : AUCUNE somme
+            // débitée. On réinitialise l'état local — pas d'attente, pas de
+            // « paiement en cours de réception ».
+            setCancelled(true);
+            setError(null);
             return;
           }
 
-          window.location.assign(result.checkoutUrl);
-          return;
-        }
-
-        if (result.status === "fedapay_widget") {
-          await openFedapayWidget(result.widget);
-        }
+          // Paiement confirmé par l'utilisateur : la confirmation serveur
+          // arrive par le webhook signé, qui active la licence.
+          setCancelled(false);
+          setError(null);
+          router.refresh();
+        });
       } catch (caught) {
         setError(
           caught instanceof Error
@@ -358,6 +435,19 @@ export function SubscriptionCheckout({
           </div>
         ))}
       </div>
+
+      {cancelled ? (
+        <p
+          role="status"
+          className="mt-4 flex items-start gap-2 rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800 dark:border-slate-500/30 dark:bg-slate-500/10 dark:text-slate-200"
+        >
+          <XCircleIcon className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <span className="font-semibold">Paiement annulé.</span> Aucune
+            somme n&apos;a été débitée.
+          </span>
+        </p>
+      ) : null}
 
       {error ? (
         <p

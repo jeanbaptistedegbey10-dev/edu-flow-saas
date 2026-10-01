@@ -6,6 +6,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 
+import { DEFAULT_ORGANIZATION_LOGO_URL } from "@/lib/demo-data";
 import { seedDemoDataForOrganization } from "@/lib/demo-seed";
 import { computeTrialEndDate } from "@/lib/license-check";
 import { prisma } from "@/lib/prisma";
@@ -335,6 +336,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   name: "EduFlow Platform",
                   slug: "eduflow-platform",
                   email,
+                  logoUrl: DEFAULT_ORGANIZATION_LOGO_URL,
                 },
               });
             }
@@ -425,6 +427,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 planType: "TRIAL",
                 planStatus: "ACTIVE",
                 trialEndsAt,
+                // Logo EduFlow par défaut : l'organisation est immédiatement
+                // illustrée (reçus, bulletins, en-tête du tableau de bord)
+                // avant tout téléversement de logo par l'administrateur.
+                logoUrl: DEFAULT_ORGANIZATION_LOGO_URL,
               },
             });
 

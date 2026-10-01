@@ -334,15 +334,17 @@ export async function updateOrganizationAction(
       "Le site web ne doit pas dépasser 200 caractères.";
   }
 
-  // Logo : URL http(s) classique ou image encodée en data URL (upload local
-  // redimensionné côté client avant envoi).
+  // Logo : chemin interne servi par `public/` (ex : « /logo.png », le logo
+  // EduFlow appliqué par défaut), URL http(s) classique, ou image encodée en
+  // data URL (upload local redimensionné côté client avant envoi).
+  const isInternalAssetPath = /^\/[\w.-]+(?:\/[\w.-]+)*$/.test(logoUrl);
   const isHttpImageUrl = /^https?:\/\/\S+$/i.test(logoUrl);
   const isDataImageUrl =
     /^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/i.test(
       logoUrl
     );
 
-  if (logoUrl && !isHttpImageUrl && !isDataImageUrl) {
+  if (logoUrl && !isInternalAssetPath && !isHttpImageUrl && !isDataImageUrl) {
     fieldErrors.logoUrl =
       "Le logo doit être une URL d'image valide (https://… ou image importée).";
   } else if (logoUrl.length > 500_000) {

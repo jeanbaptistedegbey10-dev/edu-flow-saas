@@ -31,6 +31,18 @@ import { prisma } from "@/lib/prisma";
 // `resetOrganizationData` reste disponible en orchestration « tout en un »
 // (compatibilité) — elle enchaîne simplement les trois étapes ci-dessus.
 
+/**
+ * Logo EduFlow appliqué par défaut aux organisations.
+ *
+ * L'asset est servi par le dossier `public/` : le chemin `/logo.png` est donc
+ * résolu directement par le navigateur. Il est injecté à la création de
+ * l'organisation et lors de l'injection du jeu de démonstration, afin que les
+ * documents imprimables (reçus, bulletins) et l'en-tête du tableau de bord
+ * affichent toujours un logo — même avant que l'administrateur n'en
+ * téléverse un.
+ */
+export const DEFAULT_ORGANIZATION_LOGO_URL = "/logo.png";
+
 /** Résultat typé d'une injection de données de démonstration. */
 export type DemoDataInjectResult =
   | {
@@ -70,6 +82,25 @@ export async function injectDemoDataForOrganization(
         summary.reason === "ORG_NOT_FOUND" ? "ORG_NOT_FOUND" : "ALREADY_SEEDED",
     };
   }
+
+  // Logo par défaut : l'organisation reçoit immédiatement le logo EduFlow
+  // (« /logo.png »), afin que les reçus, bulletins et l'en-tête du tableau de
+  // bord soient illustrés dès la première utilisation. Un logo téléversé plus
+  // tard par l'administrateur le remplace.
+  await prisma.organization
+    .update({
+      where: { id: organizationId },
+      data: { logoUrl: DEFAULT_ORGANIZATION_LOGO_URL },
+    })
+    .catch((error: unknown) => {
+      // Non bloquant : l'injection des données de démonstration a réussi, un
+      // logo manquant ne doit pas faire échouer l'opération.
+      console.error(
+        "[demo-data] Impossible d'appliquer le logo par défaut à l'organisation",
+        organizationId,
+        error
+      );
+    });
 
   return {
     seeded: true,

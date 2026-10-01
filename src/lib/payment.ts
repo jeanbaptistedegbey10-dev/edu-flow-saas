@@ -741,11 +741,10 @@ export type InitiateSubscriptionInput = {
 /**
  * Configuration transmise au widget FedaPay côté navigateur.
  *
- * L'initiation FedaPay peut se faire de deux façons, gérées ici :
- *  - « widget »  : `FedaPay.init({ public_key, environment })` puis
- *                  `widget.open()` — aucune clé secrète côté navigateur ;
- *  - « redirect »: la transaction est créée côté SERVEUR (clé secrète) et
- *                  l'utilisateur est redirigé vers l'URL de guichet.
+ * Intégration DIRECTE (widget modal / pop-up inline) : la transaction est
+ * créée par l'agrégateur depuis le navigateur, via
+ * `FedaPay.init({ public_key, environment })` puis `widget.open()` — aucune
+ * redirection d'URL, la modale s'ouvre par-dessus la page courante.
  *
  * Seule la clé PUBLIQUE est transmise au client ; la validation finale
  * (licence + organisation + facture) reste faite côté serveur par le webhook
@@ -754,7 +753,7 @@ export type InitiateSubscriptionInput = {
 export type FedapayWidgetPayment = {
   /** Clé publique de l'intégration (`NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY`). */
   publicKey: string;
-  /** Montant à payer en XOF (FCFA). */
+  /** Montant à payer en XOF (FCFA), calculé côté serveur. */
   amount: number;
   currency: "XOF";
   /** Référence unique de la tentative (EDU-<timestamp>-<aléa>). */
@@ -762,12 +761,10 @@ export type FedapayWidgetPayment = {
   /** Libellé affiché dans le guichet FedaPay. */
   description: string;
   /**
-   * Environnement FedaPay : « live » en production (transactions réelles),
-   * « sandbox » en démonstration. Piloté par `PAYMENT_PROVIDER_MODE`.
+   * Environnement FedaPay du widget : « live » cible la production
+   * (transactions réelles avec `NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY`).
    */
   environment: "live" | "sandbox";
-  /** Page de retour après tentative de paiement. */
-  callbackUrl: string;
   /** Métadonnées ré-acheminées par FedaPay dans le webhook. */
   metadata: {
     organizationId: string;
@@ -776,8 +773,15 @@ export type FedapayWidgetPayment = {
   };
 };
 
+/**
+ * Résultat de l'initiation d'un abonnement.
+ *
+ * FedaPay passe par le WIDGET MODAL : le composant client ouvre la modale
+ * inline (SDK `cdn.fedapay.com/fedapay.js`) au-dessus de la page — aucune
+ * redirection d'URL. Le montant reste calculé côté serveur : le navigateur
+ * ne fait que le déclencher.
+ */
 export type InitiateSubscriptionResult =
-  | { status: "success"; provider: "fedapay"; checkoutUrl: string }
   | {
       status: "fedapay_widget";
       provider: "fedapay";
@@ -1014,19 +1018,15 @@ export function getFedapayWidgetConfig(): {
  * Démarre l'achat d'un abonnement :
  * 1. Génère une référence unique `EDU-<timestamp>-<aléa>` ;
   * 2. Calcule le tarif dynamique (initial / renouvellement) selon l'historique ;
- * 3. Démarre le paiement via FedaPay (guichet serveur en Live, widget en
- *    démonstration).
+ * 3. Démarre le paiement via FedaPay.
  *
- * Deux modes d'initiation FedaPay coexistent :
- * - **Live** (`PAYMENT_PROVIDER_MODE="live"` ou `NODE_ENV=production`) : la
- *   transaction est créée côté SERVEUR avec `FEDAPAY_SECRET_KEY`
- *   (`custom_data` + `merchant_reference`), puis l'utilisateur est redirigé
- *   vers le guichet `checkout.fedapay.com`. Ce chemin garantit que les
- *   metadata d'abonnement parviennent intactes au webhook.
- * - **Sandbox / démonstration** : le widget client `cdn.fedapay.com/fedapay.js`
- *   est ouvert directement (`FedaPay.init({ environment: "sandbox" })`), sans
- *   appel server-to-server — indispensable sur une instance vierge, où les
- *   clés sont des placeholders.
+ * FedaPay fonctionne en INTÉGRATION DIRECTE : le composant client ouvre la
+ * modale / pop-up inline via le SDK officiel (`cdn.fedapay.com/fedapay.js`,
+ * `FedaPay.init({ public_key: NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY, environment:
+ * "live" })` puis `widget.open()`) PAR-DESSUS la page courante — aucune
+ * redirection d'URL, aucun changement de page. Seule la clé PUBLIQUE est
+ * transmise au navigateur ; le montant et les metadata d'abonnement sont
+ * calculés ici, côté serveur, afin qu'ils parviennent intacts au webhook.
  *
  * Aucune activation n'a lieu ici : seule la confirmation signée du webhook
  * (`activateSubscriptionAfterPayment`) débloque la licence.
@@ -1071,10 +1071,18 @@ export async function initiateSubscriptionPayment(
   // une fois le succès (ou l'échec) confirmé — ce qui garantit un historique
   // net, sans lignes PENDING.
   try {
-    // Démonstration / bac à sable : widget client FedaPay. Aucune clé secrète
-    // réelle n'est requise, le parcours reste donc cliquable sur une instance
-    // vierge. Le webhook signé reste la seule source de vérité côté serveur.
-    if (config.provider === "fedapay" && config.sandbox) {
+    // FedaPay — WIDGET MODAL INLINE (intégration directe).
+    //
+    // Aucun appel server-to-server et AUCUNE redirection : les paramètres de
+    // la collecte sont calculés ici (montant côté serveur, référence unique,
+    // metadata d'abonnement) puis transmis au client, qui ouvre la modale
+    // FedaPay par-dessus la page courante via le SDK officiel
+    // (`FedaPay.init(...).open()`).
+    //
+    // La clé publique `NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY` suffit au widget : la
+    // clé secrète n'est jamais exposée au navigateur. Le webhook signé reste
+    // la seule source de vérité pour activer la licence.
+    if (config.provider === "fedapay") {
       return {
         status: "fedapay_widget",
         provider: "fedapay",
@@ -1084,10 +1092,9 @@ export async function initiateSubscriptionPayment(
           currency: "XOF",
           reference,
           description: `${pricing.label} EduFlow — ${input.organizationName}`,
-          // Dérivé de `config.sandbox` (donc aussi de la condition du `if`
-          // ci-dessus) : le widget ne peut pas contredire le chemin choisi.
-          environment: config.sandbox ? "sandbox" : "live",
-          callbackUrl: `${getAppBaseUrl()}/dashboard/billing?payment=pending`,
+          // Environnement « live » : la clé publique désigne le compte
+          // FedaPay de production, le widget encaisse de vrais paiements.
+          environment: "live",
           metadata: {
             organizationId: input.organizationId,
             planType: input.planType,
@@ -1095,19 +1102,6 @@ export async function initiateSubscriptionPayment(
           },
         },
       };
-    }
-
-    // Mode Live : création de la transaction côté serveur puis redirection
-    // vers le guichet FedaPay (`checkout.fedapay.com/<token>`).
-    if (config.provider === "fedapay") {
-      const checkoutUrl = await initiateFedapayCheckout(
-        input,
-        reference,
-        config,
-        pricing
-      );
-
-      return { status: "success", provider: config.provider, checkoutUrl };
     }
 
     throw new Error(
