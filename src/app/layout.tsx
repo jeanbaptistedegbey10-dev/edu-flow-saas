@@ -18,15 +18,28 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "EduFlow SaaS - Centre de Formation",
   description: "Plateforme SaaS de gestion pour centres de formation et agences de mobilité internationale",
-  // Favicons servis depuis `public/` — fichiers statiques, jamais traités par
-  // Turbopack au build. `src/app/icon.png` reste le fallback automatique de
-  // l'App Router (asset régénérable via `scripts/generate-default-logo.mjs`).
+  // Toutes les icônes pointent vers des actifs DE LA PLATEFORME, servis
+  // statiquement depuis `public/` (jamais traités par Turbopack au build) :
+  //
+  //   - `/favicon.ico` : ICO multi-tailles 16/32/48/64/128/256 px, produit à
+  //     partir du logo par `node scripts/generate-favicon.mjs`. C'est aussi
+  //     l'URL demandée implicitement par les navigateurs pour `/favicon.ico`.
+  //   - `/logo.png`    : logo EduFlow 512x512 RGBA, même source que l'ICO.
+  //
+  // AUCUNE référence au favicon ni aux actifs Vercel d'origine : le fichier
+  // `src/app/favicon.ico` du squelette « Create Next App » a été SUPPRIMÉ. Sa
+  // présence créait une route App Router `/favicon.ico` prioritaire sur
+  // `public/`, ce qui exposait le logo Vercel aux navigateurs.
+  //
+  // `src/app/icon.png` reste le fallback automatique de la convention `icon`
+  // de l'App Router (mêmes octets que `public/logo.png`, régénérable via
+  // `node scripts/generate-default-logo.mjs`).
   icons: {
     icon: [
-      { url: "/favicon.ico", sizes: "16x16 32x32 48x48" },
+      { url: "/favicon.ico", sizes: "16x16 32x32 48x48 64x64 128x128 256x256" },
       { url: "/logo.png", type: "image/png", sizes: "512x512" },
     ],
-    apple: [{ url: "/logo.png", sizes: "512x512" }],
+    apple: [{ url: "/logo.png", type: "image/png", sizes: "512x512" }],
   },
 };
 

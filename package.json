@@ -13,6 +13,8 @@
     "db:enable-rls": "prisma db execute --file ./prisma/migrations/enable_rls_all_tables.sql",
     "postinstall": "prisma generate",
     "license:keygen": "tsx scripts/license-keygen.ts",
+    "logo:generate": "node scripts/generate-default-logo.mjs",
+    "favicon:generate": "node scripts/generate-favicon.mjs",
     "check:license:desktop": "tsx scripts/check-license-desktop-compat.mts",
     "build:desktop": "node scripts/build-desktop.mjs"
   },
