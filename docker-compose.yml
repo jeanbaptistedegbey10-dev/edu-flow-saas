@@ -75,11 +75,12 @@ services:
       # Obligatoire pour activer les clés SELF_HOSTED/OFFLINE sur /dashboard/billing.
       LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
       # Passerelle de paiement (optionnelle — laisser vide pour désactiver)
-      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-kkiapay}
-      PAYMENT_PUBLIC_KEY: ${PAYMENT_PUBLIC_KEY:-}
-      PAYMENT_SECRET_KEY: ${PAYMENT_SECRET_KEY:-}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-fedapay}
+      NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY: ${NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY:-}
+      FEDAPAY_SECRET_KEY: ${FEDAPAY_SECRET_KEY:-}
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-}
       PAYMENT_SANDBOX: ${PAYMENT_SANDBOX:-true}
+      PAYMENT_PROVIDER_MODE: ${PAYMENT_PROVIDER_MODE:-}
       # E-mails transactionnels (optionnel)
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-EduFlow <onboarding@resend.dev>}

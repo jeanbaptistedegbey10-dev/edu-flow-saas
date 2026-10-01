@@ -339,8 +339,7 @@ export default async function BillingPage({
         </p>
         <SubscriptionCheckout
           plans={checkoutPlans}
-          provider={gateway.provider}
-          providerLabel={gateway.provider === "fedapay" ? "Fedapay" : "Kkiapay"}
+          providerLabel={gateway.provider === "fedapay" ? "FedaPay" : "KKiaPay"}
           sandbox={gateway.sandbox}
           configured={gatewayConfigured && gatewayIsActive}
         />

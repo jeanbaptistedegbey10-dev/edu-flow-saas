@@ -1,5 +1,5 @@
 // --------------------------------------
-// Passerelle de paiement Mobile Money / Carte (Kkiapay & Fedapay)
+// Passerelle de paiement Mobile Money / Carte (FedaPay — passerelle active)
 // --------------------------------------
 //
 // Module SERVEUR uniquement : il manipule les clés secrètes de l'agrégateur
@@ -7,17 +7,18 @@
 // composant client — passer par une Server Action (src/actions/billing.ts).
 //
 // Sources (documentation officielle) :
-// - Fedapay  : POST /v1/transactions puis POST /v1/transactions/{id}/token
+// - Fedapay  : widget client (https://cdn.fedapay.com/fedapay.js, global
+//              `FedaPay`, `FedaPay.init({ public_key, environment })` puis
+//              `widget.open()`) ; serveur : POST /v1/transactions puis
+//              POST /v1/transactions/{id}/token
 //              (https://docs.fedapay.com/api-reference/transactions/) ;
 //              webhook signé via l'en-tête `X-FEDAPAY-SIGNATURE`
 //              (schéma `t=<timestamp>,s=<hmac>` — HMAC-SHA256 sur
 //              `<timestamp>.<corps brut>`, cf. docs.fedapay.com Webhooks).
-// - Kkiapay  : initiation via le widget client (cdn.kkiapay.me/k.js,
-//              global `openKkiapayWidget`) ; webhook notifié avec
-//              l'en-tête `x-kkiapay-secret` portant le « secret hash »
-//              configuré dans le tableau de bord (cf. docs.kkiapay.me,
-//              page Webhook). Payload : `transaction.success` /
-//              `transaction.failed`, champ `isPaymentSucces` (sic).
+// - Kkiapay  : LEGACY — conservé uniquement pour la lecture des webhooks
+//              historiques et des factures déjà enregistrées. Le widget
+//              Kkiapay (cdn.kkiapay.me/k.js) n'est plus chargé : toute
+//              configuration Kkiapay est migrée automatiquement vers FedaPay.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -263,7 +264,14 @@ export { formatXOF } from "@/lib/plan-pricing";
 // Configuration de l'agrégateur (variables d'environnement)
 // --------------------------------------
 
-/** Agrégateurs supportés. Fedapay = initiation server-side ; Kkiapay = widget. */
+/**
+ * Agrégateurs supportés. FedaPay est la passerelle ACTIVE (widget client
+ * `cdn.fedapay.com/fedapay.js` + initiation server-side).
+ *
+ * `kkiapay` n'est conservé que comme valeur LECTURE : normalisation des
+ * webhooks historiques et colonne `Invoice.paymentProvider` des factures déjà
+ * enregistrées. Toute initiation de paiement passe désormais par FedaPay.
+ */
 export type PaymentProvider = "fedapay" | "kkiapay";
 
 /**
@@ -277,12 +285,11 @@ export type PaymentMode = "test" | "live";
 // Clés de TEST (sandbox) utilisées PAR DÉFAUT dès qu'aucune clé réelle n'est
 // renseignée dans l'environnement ET que le bac à sable est autorisé
 // (voir `isPaymentSandboxEnabled`) :
-// - Kkiapay : le widget officiel s'ouvre côté navigateur avec la seule clé
+// - FedaPay : le widget officiel s'ouvre côté navigateur avec la seule clé
 //   publique sandbox (aucun appel server-to-server n'est nécessaire à
 //   l'initiation) → idéal pour tester / démontrer le parcours de paiement.
-// - Fedapay : valeurs de complément si l'intégrateur force « fedapay » en
-//   sandbox (les appels réels échoueront tant que de vraies clés ne seront
-//   pas configurées).
+// - Kkiapay : conservé uniquement comme valeur de repli historique (plus
+//   aucune initiation ne l'utilise depuis le basculement sur FedaPay).
 //
 // ⚠️ SÉCURITÉ — Ces valeurs sont PUBLIQUES (versionnées dans le dépôt).
 // Leur `webhookSecret` permet à quiconque de forger une notification de
@@ -313,6 +320,11 @@ const SANDBOX_TEST_KEYS: Record<
  *   1. `PAYMENT_PROVIDER_MODE` vaut explicitement « sandbox » OU
  *   2. `NODE_ENV` n'est PAS « production ».
  *
+ * `PAYMENT_PROVIDER_MODE="live"` est prioritaire : il force le mode
+ * PRODUCTION même hors `NODE_ENV=production` (ex. recette locale), de sorte
+ * que le widget FedaPay s'initialise avec `environment: "live"` et que les
+ * transactions soient réellement débitées.
+ *
  * En production, le mode sandbox est donc refusé SAUF demande explicite de
  * l'opérateur via `PAYMENT_PROVIDER_MODE="sandbox"`. Cette exception
  * volontaire permet à un environnement de recette hébergé en production de
@@ -334,6 +346,12 @@ export function isPaymentSandboxEnabled(): boolean {
     .trim()
     .toLowerCase();
 
+  // Production demandée explicitement : prioritaire sur tout le reste
+  // (y compris `NODE_ENV !== "production"`).
+  if (providerMode === "live") {
+    return false;
+  }
+
   // Activation explicite, y compris en production.
   if (providerMode === "sandbox") {
     return true;
@@ -341,6 +359,19 @@ export function isPaymentSandboxEnabled(): boolean {
 
   // Hors production : autorisé par défaut (dev, recette, CI).
   return process.env.NODE_ENV !== "production";
+}
+
+/**
+ * Environnement FedaPay à transmettre au widget client :
+ * « live » dès que le sandbox est refusé, « sandbox » sinon.
+ *
+ * Source de vérité : `isPaymentSandboxEnabled()` — c'est donc exactement le
+ * même calcul que celui appliqué côté serveur pour résoudre l'hôte de l'API
+ * (`resolveFedapayApiBaseUrl`), ce qui garantit qu'aucun widget sandbox ne
+ * peut s'ouvrir pendant qu'une transaction réelle est initiée.
+ */
+export function getFedapayWidgetEnvironment(): "live" | "sandbox" {
+  return isPaymentSandboxEnabled() ? "sandbox" : "live";
 }
 
 /**
@@ -365,17 +396,21 @@ export function isTestWebhookSecret(secret: string): boolean {
 
 /**
  * Lit la configuration de la passerelle depuis l'environnement :
- * - `PAYMENT_PROVIDER`       : « kkiapay » (défaut) ou « fedapay » ;
- * - `PAYMENT_PUBLIC_KEY`     : clé publique (widget Kkiapay / identification) ;
- * - `PAYMENT_SECRET_KEY`     : clé secrète (appels server-to-server) ;
- * - `PAYMENT_WEBHOOK_SECRET` : secret de vérification des webhooks ;
- * - `PAYMENT_SANDBOX`        : « false » pour forcer le mode réel ;
- * - `PAYMENT_PROVIDER_MODE`  : « sandbox » pour autoriser le bac à sable.
+ * - `PAYMENT_PROVIDER`           : « fedapay » (défaut) ou « kkiapay » (legacy) ;
+ * - `NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY` / `FEDAPAY_PUBLIC_KEY`
+ *                                 : clé PUBLIQUE (widget FedaPay côté client) ;
+ * - `FEDAPAY_SECRET_KEY`         : clé SECRÈTE (appels server-to-server) ;
+ * - `PAYMENT_PUBLIC_KEY`         : clé publique générique (fallback legacy) ;
+ * - `PAYMENT_SECRET_KEY`         : clé secrète générique (fallback legacy) ;
+ * - `PAYMENT_WEBHOOK_SECRET`     : secret de vérification des webhooks ;
+ * - `PAYMENT_SANDBOX`            : « false » pour forcer le mode réel ;
+ * - `PAYMENT_PROVIDER_MODE`      : « live » / « sandbox » pour choisir
+ *                                 explicitement l'environnement FedaPay.
  *
  * Mode démo/sandbox : si le bac à sable est AUTORISÉ (voir
  * `isPaymentSandboxEnabled`) et qu'AUCUNE clé réelle n'est fournie, la
  * configuration retombe sur des clés de TEST et le fournisseur est forcé sur
- * Kkiapay — le paiement en ligne reste testable sur une instance vierge.
+ * FedaPay — le paiement en ligne reste testable sur une instance vierge.
  *
  * En production, ce repli sur les clés de test est IMPOSSIBLE : sans clés
  * réelles, la configuration reste vide et le webhook répond 503 plutôt que
@@ -392,25 +427,59 @@ export function getPaymentConfig(): {
   webhookSecret: string;
   sandbox: boolean;
 } {
-  const providerRaw = (process.env.PAYMENT_PROVIDER ?? "kkiapay").toLowerCase();
+  const providerRaw = (process.env.PAYMENT_PROVIDER ?? "fedapay").toLowerCase();
   let provider: PaymentProvider =
-    providerRaw === "fedapay" ? "fedapay" : "kkiapay";
+    providerRaw === "kkiapay" ? "kkiapay" : "fedapay";
 
   const sandbox = isPaymentSandboxEnabled();
 
-  // Aucune clé réelle ? → mode démo : on force Kkiapay, le seul agrégateur
-  // dont le widget sandbox s'ouvre avec la seule clé publique (testable).
+  // Clés FedaPay : nomenclature actuelle (NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY /
+  // FEDAPAY_SECRET_KEY) avec repli sur l'ancienne (FEDA_PAY_*) et sur les
+  // variables génériques (PAYMENT_*).
+  const fedapayPublicKey =
+    process.env.NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY?.trim() ||
+    process.env.FEDAPAY_PUBLIC_KEY?.trim() ||
+    process.env.FEDA_PAY_PUBLIC_KEY?.trim() ||
+    "";
+  const fedapaySecretKey =
+    process.env.FEDAPAY_SECRET_KEY?.trim() ||
+    process.env.FEDA_PAY_SECRET_KEY?.trim() ||
+    "";
+
+  // Aucune clé réelle ? → mode démo : on force FedaPay, seul agrégateur dont
+  // le widget officiel s'ouvre avec la seule clé publique (testable).
   const hasRealKeys = Boolean(
-    process.env.PAYMENT_PUBLIC_KEY ||
+    fedapayPublicKey ||
+      fedapaySecretKey ||
+      process.env.PAYMENT_PUBLIC_KEY ||
       process.env.PAYMENT_SECRET_KEY ||
       process.env.PAYMENT_WEBHOOK_SECRET
   );
 
   if (sandbox && !hasRealKeys) {
-    provider = "kkiapay";
+    provider = "fedapay";
   }
 
   const fallback = sandbox ? SANDBOX_TEST_KEYS[provider] : null;
+
+  if (provider === "fedapay") {
+    return {
+      provider,
+      publicKey: fedapayPublicKey || fallback?.publicKey || "",
+      secretKey:
+        fedapaySecretKey ||
+        process.env.PAYMENT_SECRET_KEY?.trim() ||
+        fallback?.secretKey ||
+        "",
+      webhookSecret:
+        process.env.PAYMENT_WEBHOOK_SECRET?.trim() ||
+        process.env.FEDAPAY_WEBHOOK_SECRET?.trim() ||
+        fedapaySecretKey ||
+        fallback?.webhookSecret ||
+        "",
+      sandbox,
+    };
+  }
 
   return {
     provider,
@@ -471,17 +540,29 @@ export async function getPaymentConfigWithDb(): Promise<{
   const kkiapayIsActive = kkiapayIsActiveDb === "" ? true : kkiapayIsActiveDb === "true";
   const fedapayIsActive = fedapayIsActiveDb === "" ? true : fedapayIsActiveDb === "true";
 
-  const providerRaw = (process.env.PAYMENT_PROVIDER ?? "kkiapay").toLowerCase();
-  let provider: PaymentProvider = providerRaw === "fedapay" ? "fedapay" : "kkiapay";
+  const providerRaw = (process.env.PAYMENT_PROVIDER ?? "fedapay").toLowerCase();
+  let provider: PaymentProvider =
+    providerRaw === "kkiapay" ? "kkiapay" : "fedapay";
+
+  const fedapayEnvPublicKey =
+    process.env.NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY?.trim() ||
+    process.env.FEDAPAY_PUBLIC_KEY?.trim() ||
+    process.env.FEDA_PAY_PUBLIC_KEY?.trim() ||
+    "";
+  const fedapayEnvSecretKey =
+    process.env.FEDAPAY_SECRET_KEY?.trim() ||
+    process.env.FEDA_PAY_SECRET_KEY?.trim() ||
+    "";
 
   // Résolution du fournisseur en respectant le drapeau `isActive` :
   // un agrégateur désactivé (IsActive = false) est ignoré, même s'il a des clés.
-  if (fedapayIsActive && fedapayDbKey && fedapayDbSecret) {
+  // FedaPay est prioritaire : c'est la seule passerelle d'initiation active.
+  if (fedapayIsActive && (fedapayDbKey || fedapayEnvPublicKey || fedapayEnvSecretKey)) {
+    provider = "fedapay";
+  } else if (fedapayIsActive && fedapayDbSecret) {
     provider = "fedapay";
   } else if (kkiapayIsActive && kkiapayDbKey) {
     provider = "kkiapay";
-  } else if (fedapayIsActive && (process.env.FEDA_PAY_PUBLIC_KEY || process.env.FEDA_PAY_SECRET_KEY)) {
-    provider = "fedapay";
   } else if (kkiapayIsActive && process.env.KKIAPAY_PUBLIC_KEY) {
     provider = "kkiapay";
   }
@@ -499,8 +580,8 @@ export async function getPaymentConfigWithDb(): Promise<{
   const kkiapayPrivateKey = kkiapayDbPrivate || process.env.KKIAPAY_PRIVATE_KEY?.trim() || "";
   const kkiapaySecret = kkiapayDbSecret || process.env.KKIAPAY_SECRET?.trim() || process.env.PAYMENT_WEBHOOK_SECRET?.trim() || "";
 
-  const fedapayPublicKey = fedapayDbKey || process.env.FEDA_PAY_PUBLIC_KEY?.trim() || "";
-  const fedapaySecretKey = fedapayDbSecret || process.env.FEDA_PAY_SECRET_KEY?.trim() || "";
+  const fedapayPublicKey = fedapayDbKey || fedapayEnvPublicKey;
+  const fedapaySecretKey = fedapayDbSecret || fedapayEnvSecretKey;
 
   // Cohérence clé ↔ environnement : une clé FedaPay LIVE (`pk_live_*` /
   // `sk_live_*`) force le mode Production (sandbox = false) même si le
@@ -514,7 +595,7 @@ export async function getPaymentConfigWithDb(): Promise<{
 
   const hasRealKeys = Boolean(kkiapayPublicKey || kkiapayPrivateKey || fedapayPublicKey || fedapaySecretKey);
   if (sandbox && !hasRealKeys) {
-    provider = "kkiapay";
+    provider = "fedapay";
   }
 
   const fallback = sandbox ? SANDBOX_TEST_KEYS[provider] : null;
@@ -575,9 +656,24 @@ export async function getPaymentGatewaysStatus(): Promise<{
   const kkiapayIsActiveDb = get("kkiapay.isActive");
   const kkiapayIsActive = kkiapayIsActiveDb === "" ? true : kkiapayIsActiveDb === "true";
 
-  const fedapayPublicKey = get("fedapay.publicKey") || process.env.FEDA_PAY_PUBLIC_KEY?.trim() || "";
-  const fedapaySecretKey = get("fedapay.secretKey") || process.env.FEDA_PAY_SECRET_KEY?.trim() || "";
-  const fedapayMode: PaymentMode = get("fedapay.mode") === "live" || process.env.FEDA_PAY_MODE?.trim() === "live" ? "live" : "test";
+  const fedapayPublicKey =
+    get("fedapay.publicKey") ||
+    process.env.NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY?.trim() ||
+    process.env.FEDAPAY_PUBLIC_KEY?.trim() ||
+    process.env.FEDA_PAY_PUBLIC_KEY?.trim() ||
+    "";
+  const fedapaySecretKey =
+    get("fedapay.secretKey") ||
+    process.env.FEDAPAY_SECRET_KEY?.trim() ||
+    process.env.FEDA_PAY_SECRET_KEY?.trim() ||
+    "";
+  const fedapayMode: PaymentMode =
+    get("fedapay.mode") === "live" ||
+    process.env.FEDAPAY_MODE?.trim() === "live" ||
+    process.env.FEDA_PAY_MODE?.trim() === "live" ||
+    getFedapayWidgetEnvironment() === "live"
+      ? "live"
+      : "test";
   const fedapayIsActiveDb = get("fedapay.isActive");
   const fedapayIsActive = fedapayIsActiveDb === "" ? true : fedapayIsActiveDb === "true";
 
@@ -643,22 +739,36 @@ export type InitiateSubscriptionInput = {
 };
 
 /**
- * Configuration transmise au widget Kkiapay côté navigateur (l'initiation
- * Kkiapay est pilotée côté client ; seule la notification signée du webhook
- * fait foi côté serveur).
+ * Configuration transmise au widget FedaPay côté navigateur.
+ *
+ * L'initiation FedaPay peut se faire de deux façons, gérées ici :
+ *  - « widget »  : `FedaPay.init({ public_key, environment })` puis
+ *                  `widget.open()` — aucune clé secrète côté navigateur ;
+ *  - « redirect »: la transaction est créée côté SERVEUR (clé secrète) et
+ *                  l'utilisateur est redirigé vers l'URL de guichet.
+ *
+ * Seule la clé PUBLIQUE est transmise au client ; la validation finale
+ * (licence + organisation + facture) reste faite côté serveur par le webhook
+ * signé `/api/webhooks/payment`.
  */
-export type KkiapayWidgetPayment = {
-  /** Clé publique unique de l'intégration (PAYMENT_PUBLIC_KEY). */
+export type FedapayWidgetPayment = {
+  /** Clé publique de l'intégration (`NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY`). */
   publicKey: string;
   /** Montant à payer en XOF (FCFA). */
   amount: number;
   currency: "XOF";
   /** Référence unique de la tentative (EDU-<timestamp>-<aléa>). */
   reference: string;
-  sandbox: boolean;
+  /** Libellé affiché dans le guichet FedaPay. */
+  description: string;
+  /**
+   * Environnement FedaPay : « live » en production (transactions réelles),
+   * « sandbox » en démonstration. Piloté par `PAYMENT_PROVIDER_MODE`.
+   */
+  environment: "live" | "sandbox";
   /** Page de retour après tentative de paiement. */
   callbackUrl: string;
-  /** Métadonnées ré-acheminées par Kkiapay dans le webhook (`stateData`). */
+  /** Métadonnées ré-acheminées par FedaPay dans le webhook. */
   metadata: {
     organizationId: string;
     planType: PricingPlanType;
@@ -669,9 +779,9 @@ export type KkiapayWidgetPayment = {
 export type InitiateSubscriptionResult =
   | { status: "success"; provider: "fedapay"; checkoutUrl: string }
   | {
-      status: "kkiapay_widget";
-      provider: "kkiapay";
-      widget: KkiapayWidgetPayment;
+      status: "fedapay_widget";
+      provider: "fedapay";
+      widget: FedapayWidgetPayment;
     }
   | { status: "error"; message: string };
 
@@ -689,6 +799,15 @@ const FEDAPAY_LIVE_API_BASE_URL = "https://api.fedapay.com";
 
 /** Hôte officiel de l'API FedaPay en Sandbox (clés de test). */
 const FEDAPAY_SANDBOX_API_BASE_URL = "https://sandbox-api.fedapay.com";
+
+/**
+ * Script officiel du widget FedaPay, exposé en global `FedaPay`
+ * (`FedaPay.init({ public_key, environment })` puis `widget.open()`).
+ *
+ * Le MÊME script sert aux deux environnements : c'est l'option
+ * `environment` passée à `FedaPay.init` qui cible `live` ou `sandbox`.
+ */
+export const FEDAPAY_SCRIPT_URL = "https://cdn.fedapay.com/fedapay.js";
 
 /**
  * Résout l'hôte de l'API FedaPay à partir des CLÉS réellement utilisées :
@@ -861,25 +980,29 @@ export async function initiateFedapayCheckout(
 }
 
 /**
- * Vérifie que le widget Kkiapay est intégrable : le script `k.js` et la clé
- * publique doivent être disponibles. L'initiation elle-même est réalisée par
- * le widget côté navigateur ; le webhook signé fait foi côté serveur.
+ * Vérifie que le widget FedaPay est intégrable : le script `fedapay.js` et la
+ * clé publique doivent être disponibles. L'initiation elle-même est réalisée
+ * par le widget côté navigateur ; le webhook signé fait foi côté serveur.
+ *
+ * L'environnement transmis au widget (« live » ou « sandbox ») provient de
+ * `getFedapayWidgetEnvironment()`, donc de `PAYMENT_PROVIDER_MODE` : en mode
+ * Live, le widget s'ouvre sur l'environnement de PRODUCTION FedaPay.
  */
-export function getKkiapayWidgetConfig(): {
+export function getFedapayWidgetConfig(): {
   scriptUrl: string;
   publicKey: string;
-  sandbox: boolean;
+  environment: "live" | "sandbox";
 } | null {
   const config = getPaymentConfig();
 
-  if (!config.publicKey) {
+  if (config.provider !== "fedapay" || !config.publicKey) {
     return null;
   }
 
   return {
-    scriptUrl: "https://cdn.kkiapay.me/k.js",
+    scriptUrl: FEDAPAY_SCRIPT_URL,
     publicKey: config.publicKey,
-    sandbox: config.sandbox,
+    environment: getFedapayWidgetEnvironment(),
   };
 }
 
@@ -891,7 +1014,19 @@ export function getKkiapayWidgetConfig(): {
  * Démarre l'achat d'un abonnement :
  * 1. Génère une référence unique `EDU-<timestamp>-<aléa>` ;
   * 2. Calcule le tarif dynamique (initial / renouvellement) selon l'historique ;
- * 3. Appelle l'agrégateur configuré pour obtenir l'URL de paiement.
+ * 3. Démarre le paiement via FedaPay (guichet serveur en Live, widget en
+ *    démonstration).
+ *
+ * Deux modes d'initiation FedaPay coexistent :
+ * - **Live** (`PAYMENT_PROVIDER_MODE="live"` ou `NODE_ENV=production`) : la
+ *   transaction est créée côté SERVEUR avec `FEDAPAY_SECRET_KEY`
+ *   (`custom_data` + `merchant_reference`), puis l'utilisateur est redirigé
+ *   vers le guichet `checkout.fedapay.com`. Ce chemin garantit que les
+ *   metadata d'abonnement parviennent intactes au webhook.
+ * - **Sandbox / démonstration** : le widget client `cdn.fedapay.com/fedapay.js`
+ *   est ouvert directement (`FedaPay.init({ environment: "sandbox" })`), sans
+ *   appel server-to-server — indispensable sur une instance vierge, où les
+ *   clés sont des placeholders.
  *
  * Aucune activation n'a lieu ici : seule la confirmation signée du webhook
  * (`activateSubscriptionAfterPayment`) débloque la licence.
@@ -905,7 +1040,7 @@ export async function initiateSubscriptionPayment(
     return {
       status: "error",
       message:
-        "La passerelle de paiement n'est pas configurée sur le serveur (PAYMENT_PUBLIC_KEY / PAYMENT_SECRET_KEY / PAYMENT_WEBHOOK_SECRET).",
+        "La passerelle de paiement n'est pas configurée sur le serveur (NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY / FEDAPAY_SECRET_KEY / PAYMENT_WEBHOOK_SECRET).",
     };
   }
 
@@ -930,12 +1065,40 @@ export async function initiateSubscriptionPayment(
   const random = Math.random().toString(36).slice(2, 8).toUpperCase();
   const reference = `EDU-${Date.now()}-${random}`;
 
-  // Aucune facture n'est créée au clic « Payer » : l'initiation Kkiapay est
-  // pilotée par le widget côté navigateur, et Fedapay ne crée la transaction
-  // que côté agrégateur. La facture est écrite UNIQUEMENT par le webhook signé
-  // (`activateSubscriptionAfterPayment`), une fois le succès (ou l'échec)
-  // confirmé — ce qui garantit un historique net, sans lignes PENDING.
+  // Aucune facture n'est créée au clic « Payer » : FedaPay ne crée la
+  // transaction que côté agrégateur (widget ou appel serveur). La facture est
+  // écrite UNIQUEMENT par le webhook signé (`activateSubscriptionAfterPayment`),
+  // une fois le succès (ou l'échec) confirmé — ce qui garantit un historique
+  // net, sans lignes PENDING.
   try {
+    // Démonstration / bac à sable : widget client FedaPay. Aucune clé secrète
+    // réelle n'est requise, le parcours reste donc cliquable sur une instance
+    // vierge. Le webhook signé reste la seule source de vérité côté serveur.
+    if (config.provider === "fedapay" && config.sandbox) {
+      return {
+        status: "fedapay_widget",
+        provider: "fedapay",
+        widget: {
+          publicKey: config.publicKey,
+          amount: pricing.amount,
+          currency: "XOF",
+          reference,
+          description: `${pricing.label} EduFlow — ${input.organizationName}`,
+          // Dérivé de `config.sandbox` (donc aussi de la condition du `if`
+          // ci-dessus) : le widget ne peut pas contredire le chemin choisi.
+          environment: config.sandbox ? "sandbox" : "live",
+          callbackUrl: `${getAppBaseUrl()}/dashboard/billing?payment=pending`,
+          metadata: {
+            organizationId: input.organizationId,
+            planType: input.planType,
+            durationMonths: input.durationMonths,
+          },
+        },
+      };
+    }
+
+    // Mode Live : création de la transaction côté serveur puis redirection
+    // vers le guichet FedaPay (`checkout.fedapay.com/<token>`).
     if (config.provider === "fedapay") {
       const checkoutUrl = await initiateFedapayCheckout(
         input,
@@ -947,29 +1110,9 @@ export async function initiateSubscriptionPayment(
       return { status: "success", provider: config.provider, checkoutUrl };
     }
 
-    // Kkiapay : initiation pilotée par le widget côté navigateur. Le webhook
-    // signé (`x-kkiapay-secret`) reste la seule source de vérité côté serveur.
-    if (!config.publicKey) {
-      throw new Error("PAYMENT_PUBLIC_KEY manquante pour l'agrégateur Kkiapay.");
-    }
-
-    return {
-      status: "kkiapay_widget",
-      provider: "kkiapay",
-      widget: {
-        publicKey: config.publicKey,
-        amount: pricing.amount,
-        currency: "XOF",
-        reference,
-        sandbox: config.sandbox,
-        callbackUrl: `${getAppBaseUrl()}/dashboard/billing?payment=pending`,
-        metadata: {
-          organizationId: input.organizationId,
-          planType: input.planType,
-          durationMonths: input.durationMonths,
-        },
-      },
-    };
+    throw new Error(
+      `Passerelle de paiement non prise en charge : « ${config.provider} ». Seule FedaPay est active.`
+    );
   } catch (error) {
     // Journalisation PRÉCISE de la cause : message de l'erreur (statut HTTP +
     // corps renvoyé par FedaPay lorsque la création de transaction échoue),

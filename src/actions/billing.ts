@@ -6,7 +6,7 @@ import { verifyLicenseKey } from "@/lib/crypto-license";
 import {
   getPaymentGatewaysStatus,
   initiateSubscriptionPayment,
-  type KkiapayWidgetPayment,
+  type FedapayWidgetPayment,
 } from "@/lib/payment";
 import { isBillingDuration, isPricingPlanType } from "@/lib/plan-pricing";
 import { prisma } from "@/lib/prisma";
@@ -158,7 +158,7 @@ export async function activateLicenseWithKeyAction(
  */
 export type InitiateSubscriptionActionResult =
   | { status: "success"; checkoutUrl: string; provider: string }
-  | { status: "kkiapay_widget"; widget: KkiapayWidgetPayment }
+  | { status: "fedapay_widget"; widget: FedapayWidgetPayment }
   | { status: "error"; message: string };
 
 export async function initiateSubscriptionPaymentAction(
@@ -235,10 +235,11 @@ export async function initiateSubscriptionPaymentAction(
 
   revalidatePath("/dashboard/billing");
 
-  if (result.status === "kkiapay_widget") {
-    // Kkiapay : pas d'URL serveur — le widget est ouvert côté navigateur
-    // avec les paramètres préparés (clé publique, montant, metadata…).
-    return { status: "kkiapay_widget", widget: result.widget };
+  if (result.status === "fedapay_widget") {
+    // Démonstration : pas d'URL serveur — le widget FedaPay est ouvert côté
+    // navigateur avec les paramètres préparés (clé publique, montant,
+    // environnement, metadata…).
+    return { status: "fedapay_widget", widget: result.widget };
   }
 
   // FedaPay : l'URL de guichet (champ `url` de POST /v1/transactions/{id}/token

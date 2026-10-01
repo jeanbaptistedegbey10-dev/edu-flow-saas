@@ -20,11 +20,13 @@ import { Button } from "@/components/ui/button";
 //
 // Composant client : affiche les offres SaaS (mensuel / annuel en XOF) et
 // déclenche le paiement via la Server Action `initiateSubscriptionPaymentAction`.
-// - Fedapay : redirection vers la page de checkout de l'agrégateur ;
-// - Kkiapay : ouverture du widget officiel (cdn.kkiapay.me/k.js) côté navigateur.
+// - Mode Live : le serveur crée la transaction FedaPay et renvoie l'URL de
+//   guichet → redirection du navigateur vers `checkout.fedapay.com` ;
+// - Mode démo : le widget officiel FedaPay (cdn.fedapay.com/fedapay.js) est
+//   ouvert côté navigateur avec `environment: "sandbox"`.
 //
 // Aucune clé secrète ne transite ici : seule la clé publique est utilisée par
-// le widget Kkiapay. La validation finale (licence + organisation + facture)
+// le widget FedaPay. La validation finale (licence + organisation + facture)
 // est réalisée côté serveur par le webhook signé `/api/webhooks/payment`.
 
 /** Option de prix pré-formatée par la page serveur (aucun import serveur ici). */
@@ -59,75 +61,111 @@ export type CheckoutPlan = {
 
 type Props = {
   plans: CheckoutPlan[];
-  provider: "fedapay" | "kkiapay";
+  /** Libellé commercial de la passerelle (« FedaPay »). */
   providerLabel: string;
+  /** `true` en mode démonstration (bac à sable FedaPay). */
   sandbox: boolean;
   configured: boolean;
 };
 
 // --------------------------------------
-// Widget Kkiapay (chargement + ouverture)
+// Widget FedaPay (chargement + ouverture)
 // --------------------------------------
+//
+// SDK officiel : https://cdn.fedapay.com/fedapay.js (global `FedaPay`).
+// `FedaPay.init({ public_key, environment })` renvoie un widget à ouvrir via
+// `widget.open()`.
+//
+// Le même script sert aux deux environnements : c'est l'option `environment`
+// (« live » ou « sandbox ») passée à `FedaPay.init` qui sélectionne
+// l'hôte FedaPay ciblé. Elle est décidée côté SERVEUR par
+// `getFedapayWidgetEnvironment()` (donc par `PAYMENT_PROVIDER_MODE`) et
+// reçue dans `widget.environment` : le client ne peut pas la contourner.
 
-let kkiapayScriptPromise: Promise<void> | null = null;
+/**
+ * Script officiel du widget FedaPay.
+ *
+ * Constante redéclarée ici (et non importée de `@/lib/payment`) : ce module
+ * manipule la clé SECRÈTE et `node:crypto`, il est donc strictement serveur
+ * et ne doit jamais entrer dans le bundle client.
+ */
+const FEDAPAY_SCRIPT_URL = "https://cdn.fedapay.com/fedapay.js";
 
-function loadKkiapayWidgetScript(): Promise<void> {
-  if (kkiapayScriptPromise) return kkiapayScriptPromise;
+type FedaPayCheckoutWidget = {
+  open: () => void;
+};
 
-  kkiapayScriptPromise = new Promise<void>((resolve, reject) => {
-    const win = window as unknown as { openKkiapayWidget?: unknown };
+type FedaPayGlobal = {
+  init: (options: Record<string, unknown>) => FedaPayCheckoutWidget;
+};
 
-    if (typeof win.openKkiapayWidget === "function") {
+let fedapayScriptPromise: Promise<void> | null = null;
+
+function loadFedapayScript(): Promise<void> {
+  if (fedapayScriptPromise) return fedapayScriptPromise;
+
+  fedapayScriptPromise = new Promise<void>((resolve, reject) => {
+    const win = window as unknown as { FedaPay?: FedaPayGlobal };
+
+    if (typeof win.FedaPay?.init === "function") {
       resolve();
       return;
     }
 
     const script = document.createElement("script");
-    script.src = "https://cdn.kkiapay.me/k.js";
+    script.src = FEDAPAY_SCRIPT_URL;
     script.async = true;
     script.onload = () => resolve();
     script.onerror = () => {
-      kkiapayScriptPromise = null;
-      reject(new Error("Impossible de charger le widget de paiement Kkiapay."));
+      fedapayScriptPromise = null;
+      reject(new Error("Impossible de charger le widget de paiement FedaPay."));
     };
     document.body.appendChild(script);
   });
 
-  return kkiapayScriptPromise;
+  return fedapayScriptPromise;
 }
 
-type KkiapayWidgetParams = {
+/** Paramètres du widget préparés par le serveur. */
+type FedapayWidgetParams = {
   publicKey: string;
   amount: number;
   currency: "XOF";
   reference: string;
-  sandbox: boolean;
+  description: string;
+  environment: "live" | "sandbox";
   callbackUrl: string;
   metadata: { organizationId: string; planType: string };
 };
 
-/** Ouvre le widget Kkiapay puis redirige vers la page de retour. */
-async function openKkiapayWidget(widget: KkiapayWidgetParams): Promise<void> {
-  await loadKkiapayWidgetScript();
+/** Ouvre le widget FedaPay puis redirige vers la page de retour. */
+async function openFedapayWidget(widget: FedapayWidgetParams): Promise<void> {
+  await loadFedapayScript();
 
-  const win = window as unknown as {
-    openKkiapayWidget?: (opts: Record<string, unknown>) => Promise<unknown>;
-  };
+  const win = window as unknown as { FedaPay?: FedaPayGlobal };
 
-  if (typeof win.openKkiapayWidget !== "function") {
-    throw new Error("Widget de paiement Kkiapay indisponible.");
+  if (typeof win.FedaPay?.init !== "function") {
+    throw new Error("Widget de paiement FedaPay indisponible.");
   }
 
-  try {
-    await win.openKkiapayWidget({
+  const checkout = win.FedaPay.init({
+    public_key: widget.publicKey,
+    // « live » → transactions réelles ; « sandbox » → démonstration.
+    environment: widget.environment,
+    locale: "fr",
+    transaction: {
       amount: widget.amount,
-      key: widget.publicKey,
-      sandbox: widget.sandbox,
-      reference: widget.reference,
-      position: "center",
-      metadata: widget.metadata,
-      callback_url: widget.callbackUrl,
-    });
+      currency: { iso: widget.currency },
+      description: widget.description,
+      custom_metadata: {
+        ...widget.metadata,
+        reference: widget.reference,
+      },
+    },
+  });
+
+  try {
+    checkout.open();
   } finally {
     // En fin de parcours (succès, annulation ou erreur), le webhook signé fera
     // foi ; on ramène l'utilisateur sur la page de facturation.
@@ -141,7 +179,6 @@ async function openKkiapayWidget(widget: KkiapayWidgetParams): Promise<void> {
 
 export function SubscriptionCheckout({
   plans,
-  provider,
   providerLabel,
   sandbox,
   configured,
@@ -165,9 +202,9 @@ export function SubscriptionCheckout({
         }
 
         if (result.status === "success") {
-          // Fedapay : le serveur a transmis l'URL de guichet (token généré
-          // par POST /v1/transactions/{id}/token ou champ `url` renvoyé par
-          // FedaPay) — redirection du navigateur vers cette URL.
+          // Mode Live : le serveur a transmis l'URL de guichet FedaPay (token
+          // généré par POST /v1/transactions/{id}/token ou champ `url` renvoyé
+          // par FedaPay) — redirection du navigateur vers cette URL.
           if (!result.checkoutUrl) {
             setError(
               "La passerelle de paiement n'a pas retourné d'URL de paiement. Réessayez dans quelques instants."
@@ -179,8 +216,8 @@ export function SubscriptionCheckout({
           return;
         }
 
-        if (result.status === "kkiapay_widget") {
-          await openKkiapayWidget(result.widget);
+        if (result.status === "fedapay_widget") {
+          await openFedapayWidget(result.widget);
         }
       } catch (caught) {
         setError(
@@ -220,7 +257,15 @@ export function SubscriptionCheckout({
               débitée, vous pouvez tester l&apos;ouverture du widget de
               paiement.
             </p>
-          ) : null}
+          ) : (
+            <p
+              role="note"
+              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800"
+            >
+              Mode Live — les paiements sont réellement débités via{" "}
+              {providerLabel}.
+            </p>
+          )}
         </div>
       )}
 
@@ -297,7 +342,7 @@ export function SubscriptionCheckout({
                         >
                           {loading ? (
                             <LoaderCircleIcon className="size-4 animate-spin" />
-                          ) : provider === "kkiapay" ? (
+                          ) : sandbox ? (
                             <SmartphoneIcon className="size-4" />
                           ) : (
                             <CreditCardIcon className="size-4" />

@@ -603,9 +603,9 @@ async function startRuntime(licenseState) {
     NEXT_PUBLIC_APP_URL: `http://127.0.0.1:${config.port}`,
     LICENSE_PUBLIC_KEY: ACTIVE_PUBLIC_KEY,
     PAYMENT_SANDBOX: "true",
-    PAYMENT_PROVIDER: "kkiapay",
-    PAYMENT_PUBLIC_KEY: "",
-    PAYMENT_SECRET_KEY: "",
+    PAYMENT_PROVIDER: "fedapay",
+    NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY: "",
+    FEDAPAY_SECRET_KEY: "",
     PAYMENT_WEBHOOK_SECRET: "",
   };
 
