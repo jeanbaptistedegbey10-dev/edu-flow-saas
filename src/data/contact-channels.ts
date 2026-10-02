@@ -46,9 +46,9 @@ export const CONTACT_PHONE_CHANNELS: readonly ContactPhoneChannel[] = [
   },
   {
     country: "Togo",
-    display: "+228 97 78 52 70",
-    whatsappNumber: "22897785270",
-    telHref: "tel:+22897785270",
+    display: "+228 97 76 85 27",
+    whatsappNumber: "22897768527",
+    telHref: "tel:+22897768527",
   },
 ] as const;
 

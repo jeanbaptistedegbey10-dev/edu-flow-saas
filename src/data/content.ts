@@ -293,7 +293,7 @@ export const FOOTER_LINKS = {
     { label: "Connexion", href: "/login" },
   ],
   company: [
-    { label: "A propos", href: "/" },
+    { label: "A propos", href: "/a-propos" },
     { label: "Contact", href: "/contact" },
   ],
   legal: [

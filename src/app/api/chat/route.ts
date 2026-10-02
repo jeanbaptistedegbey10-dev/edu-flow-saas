@@ -68,7 +68,7 @@ function buildSystemPrompt(): string {
     "  menu, de bouton ou de fonctionnalité.",
     "- Si la question demande un contact humain, invite à passer par le",
     "  formulaire de contact du site (/contact) ou par téléphone / WhatsApp",
-    "  au +229 01 62 20 48 25 (Bénin) ou +228 97 78 52 70 (Togo).",
+    "  au +229 01 62 20 48 25 (Bénin) ou +228 97 76 85 27 (Togo).",
     "  Ne communique AUCUNE adresse e-mail : elles ne sont pas publiées.",
     "- Si la question sort du périmètre EduFlow, propose poliment de parler",
     "  à un agent humain.",

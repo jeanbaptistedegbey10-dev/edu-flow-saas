@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProgressBar } from "@/components/providers/navigation-progress";
+import CookieBanner from "@/components/cookie-banner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -60,6 +61,9 @@ export default function RootLayout({
           <NavigationProgressBar />
         </Suspense>
         <TooltipProvider>{children}</TooltipProvider>
+        {/* Bandeau de consentement RGPD : le choix (accepter / refuser) est
+            persisté dans `localStorage`, il ne réapparaît donc plus ensuite. */}
+        <CookieBanner />
       </body>
     </html>
   );
