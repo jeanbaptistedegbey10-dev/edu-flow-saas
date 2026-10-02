@@ -10,12 +10,14 @@ import {
   ExternalLink,
   Share2,
   MessageCircle,
-  Mail,
   Phone,
   MapPin,
-  Heart,
 } from "lucide-react";
 import { FOOTER_LINKS } from "@/data/content";
+import {
+  buildContactWhatsAppUrl,
+  CONTACT_PHONE_CHANNELS,
+} from "@/data/contact-channels";
 
 const socialIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   Globe,
@@ -144,19 +146,41 @@ export default function Footer() {
 
         {/* Contact Info Bar */}
         <div className="py-6 border-t border-white/10">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-gray-400">
-              <span className="flex items-center gap-2">
-                <Mail className="w-4 h-4 text-brand-light" />
-                contact@eduflow.com
-              </span>
-              <span className="flex items-center gap-2">
-                <Phone className="w-4 h-4 text-brand-light" />
-                +229 00 00 00 00
-              </span>
+          <div className="flex flex-col items-center justify-center gap-6">
+            {/* Coordonnées : appel direct + WhatsApp pour chaque numéro officiel.
+                Aucune adresse e-mail n'est exposée (les messages du formulaire
+                de contact sont relayés côté serveur). */}
+            <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-5 text-sm text-gray-400">
+              {CONTACT_PHONE_CHANNELS.map((phone) => (
+                <div key={phone.telHref} className="flex flex-col gap-1.5">
+                  <span className="flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-brand-light" />
+                    <a
+                      href={phone.telHref}
+                      className="hover:text-white transition-colors"
+                      aria-label={`Appeler le ${phone.country} : ${phone.display}`}
+                    >
+                      {phone.display}
+                    </a>
+                    <span className="text-xs text-gray-500">
+                      ({phone.country})
+                    </span>
+                  </span>
+                  <a
+                    href={buildContactWhatsAppUrl(phone)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 pl-6 text-xs text-gray-400 hover:text-[#4ade80] transition-colors"
+                    aria-label={`Écrire sur WhatsApp au ${phone.country} : ${phone.display}`}
+                  >
+                    <MessageCircle className="w-3.5 h-3.5 text-[#25D366]" />
+                    WhatsApp {phone.country}
+                  </a>
+                </div>
+              ))}
               <span className="flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-brand-light" />
-                Cotonou, Benin
+                Cotonou, Bénin
               </span>
             </div>
           </div>
@@ -168,8 +192,8 @@ export default function Footer() {
             <p className="text-sm text-gray-500">
               &copy; {new Date().getFullYear()} EduFlow par Digital Infotech. Tous droits reserves.
             </p>
-            <p className="text-sm text-gray-500 flex items-center gap-1">
-              Fait avec <Heart className="w-3.5 h-3.5 text-red-500 fill-red-500" /> au Benin
+            <p className="text-sm text-gray-500">
+              Réalisé par Digital Infotech
             </p>
           </div>
         </div>

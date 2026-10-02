@@ -66,8 +66,10 @@ function buildSystemPrompt(): string {
     "- Structure en étapes numérotées courtes quand tu expliques un workflow.",
     "- Utilise uniquement les sujets listés ci-dessus : n'invente jamais de",
     "  menu, de bouton ou de fonctionnalité.",
-    "- Si la question demande un contact humain, donne l'e-mail",
-    "  contact@eduflow.com et le téléphone +229 00 00 00 00.",
+    "- Si la question demande un contact humain, invite à passer par le",
+    "  formulaire de contact du site (/contact) ou par téléphone / WhatsApp",
+    "  au +229 01 62 20 48 25 (Bénin) ou +228 97 78 52 70 (Togo).",
+    "  Ne communique AUCUNE adresse e-mail : elles ne sont pas publiées.",
     "- Si la question sort du périmètre EduFlow, propose poliment de parler",
     "  à un agent humain.",
   ].join("\n");

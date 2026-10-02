@@ -1,9 +1,15 @@
 import { createElement, type ReactNode } from "react";
 import { Resend } from "resend";
 
+import { ContactFormEmail } from "@/components/emails/contact-form-email";
 import { PaymentEmail } from "@/components/emails/payment-email";
 import { formatFcfa } from "@/components/emails/format";
 import { WelcomeEmail } from "@/components/emails/welcome-email";
+import {
+  CONTACT_PHONE_CHANNELS,
+  CONTACT_SUBJECT_LABELS,
+  type ContactSubject,
+} from "@/data/contact-channels";
 
 // --------------------------------------
 // Configuration
@@ -11,6 +17,17 @@ import { WelcomeEmail } from "@/components/emails/welcome-email";
 
 /** Expéditeur par défaut (à remplacer par un domaine vérifié Resend en production). */
 const DEFAULT_FROM = "EduFlow <onboarding@resend.dev>";
+
+/**
+ * Destinataire par défaut des messages du formulaire de contact public.
+ *
+ * ⚠️ L'adresse n'est JAMAIS exposée au navigateur : elle n'est lue que dans
+ * ce module serveur. La variable d'environnement `CONTACT_EMAIL_TO` est
+ * prioritaire ; cette valeur n'est qu'un repli de secours pour que le
+ * formulaire reste fonctionnel sur une instance où la variable n'a pas été
+ * renseignée.
+ */
+const DEFAULT_CONTACT_EMAIL_TO = "jeanbaptistedegbey10@gmail.com";
 
 /** Regex de validation basique d'une adresse e-mail. */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -79,6 +96,19 @@ export interface PaymentConfirmationEmailPayload {
   paidAt?: Date;
 }
 
+export interface ContactFormEmailPayload {
+  /** Nom complet du demandeur. */
+  name: string;
+  /** Adresse e-mail du demandeur (utilisée en `replyTo`). */
+  email: string;
+  /** Centre / organisation du demandeur (facultatif). */
+  organization?: string | null;
+  /** Sujet du formulaire, déjà validé par la Server Action. */
+  subject: ContactSubject;
+  /** Corps du message. */
+  message: string;
+}
+
 // --------------------------------------
 // Mécanique d'envoi interne
 // --------------------------------------
@@ -95,6 +125,8 @@ async function sendEmail(options: {
   subject: string;
   /** Élément React Email à rendre en HTML par le SDK Resend. */
   react: ReactNode;
+  /** Adresse de réponse (facultatif) : permet de répondre au demandeur. */
+  replyTo?: string;
 }): Promise<SendEmailResult> {
   const client = getResendClient();
 
@@ -117,6 +149,7 @@ async function sendEmail(options: {
       from: getFromAddress(),
       to: options.to,
       subject: options.subject,
+      replyTo: options.replyTo,
       react: options.react,
     });
 
@@ -190,6 +223,52 @@ export async function sendPaymentConfirmationEmail({
       amount,
       reference,
       paidAt,
+    }),
+  });
+}
+
+// --------------------------------------
+// Formulaire de contact public
+// --------------------------------------
+
+/**
+ * Destinataire des soumissions du formulaire de contact.
+ *
+ * La valeur provient de la variable d'environnement serveur `CONTACT_EMAIL_TO`
+ * (jamais exposée au client). En son absence, on retombe sur l'adresse
+ * interne par défaut afin que le formulaire reste opérationnel.
+ */
+function getContactRecipient(): string {
+  return process.env.CONTACT_EMAIL_TO?.trim() || DEFAULT_CONTACT_EMAIL_TO;
+}
+
+/**
+ * Relaye une soumission du formulaire de contact vers l'adresse interne de
+ * l'équipe (`CONTACT_EMAIL_TO`), en mettant l'expéditeur en `replyTo` pour
+ * permettre une réponse directe au demandeur.
+ *
+ * Silencieux en cas d'échec : ne lève jamais d'exception (voir `SendEmailResult`).
+ */
+export async function sendContactFormEmail({
+  name,
+  email,
+  organization,
+  subject,
+  message,
+}: ContactFormEmailPayload): Promise<SendEmailResult> {
+  const subjectLabel = CONTACT_SUBJECT_LABELS[subject];
+
+  return sendEmail({
+    to: getContactRecipient(),
+    subject: `[Site EduFlow] ${subjectLabel} — ${name}`,
+    replyTo: email,
+    react: createElement(ContactFormEmail, {
+      name,
+      email,
+      organization,
+      subjectLabel,
+      message,
+      replyPhoneDisplay: CONTACT_PHONE_CHANNELS[0].display,
     }),
   });
 }

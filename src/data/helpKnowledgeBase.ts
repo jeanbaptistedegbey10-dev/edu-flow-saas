@@ -1,6 +1,11 @@
 import type { ComponentType } from "react";
 
 import {
+  CONTACT_HOURS,
+  CONTACT_PHONE_CHANNELS,
+} from "@/data/contact-channels";
+
+import {
   ArchiveIcon,
   BookOpenCheckIcon,
   Building2Icon,
@@ -102,17 +107,21 @@ export type HelpTopic = {
 
 /**
  * Coordonnées support officielles d'EduFlow (cohérentes avec la page /contact
- * et les mentions légales). Le message WhatsApp est prérempli.
+ * et le Footer — source de vérité : `@/data/contact-channels`).
+ *
+ * ⚠️ Aucune adresse e-mail n'est exposée à l'utilisateur : l'escalade humaine
+ * passe par le téléphone ou WhatsApp. Le message WhatsApp est prérempli.
  */
 export const SUPPORT_CONTACT = {
   /** Numéro WhatsApp au format international sans « + » ni espaces. */
-  whatsappNumber: "22900000000",
+  whatsappNumber: CONTACT_PHONE_CHANNELS[0].whatsappNumber,
   /** Message prérempli du bouton WhatsApp. */
   defaultMessage: "Bonjour, j'ai besoin d'aide sur EduFlow...",
-  email: "contact@eduflow.com",
-  phoneDisplay: "+229 00 00 00 00",
-  phoneHref: "tel:+22900000000",
-  hours: "Lundi – Vendredi, 8 h – 18 h",
+  /** Tous les numéros officiels (appel direct + WhatsApp). */
+  phones: CONTACT_PHONE_CHANNELS,
+  phoneDisplay: CONTACT_PHONE_CHANNELS[0].display,
+  phoneHref: CONTACT_PHONE_CHANNELS[0].telHref,
+  hours: CONTACT_HOURS,
 } as const;
 
 /** Construit l'URL WhatsApp avec un message prérempli (contexte facultatif). */

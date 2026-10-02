@@ -3,7 +3,6 @@
 import * as React from "react";
 import {
   ClockIcon,
-  MailIcon,
   MessageCircleIcon,
   PhoneIcon,
 } from "lucide-react";
@@ -19,8 +18,8 @@ import { cn } from "@/lib/utils";
  *
  * Affichée dans le fil de discussion quand l'utilisateur demande explicitement
  * un contact humain (« humain », « agent », « support », « téléphone »…) :
- * bouton WhatsApp direct avec message prérempli, e-mail et téléphone du
- * support EduFlow.
+ * bouton WhatsApp direct avec message prérempli, ainsi que les numéros de
+ * téléphone officiels d'EduFlow. Aucune adresse e-mail n'est exposée.
  */
 
 type HumanSupportCardProps = {
@@ -66,22 +65,21 @@ export function HumanSupportCard({ context, className }: HumanSupportCardProps) 
         Continuer sur WhatsApp
       </a>
 
-      {/* Coordonnées directes */}
+      {/* Coordonnées directes (aucune adresse e-mail exposée) */}
       <div className="mt-2.5 space-y-1.5">
-        <a
-          href={`mailto:${SUPPORT_CONTACT.email}?subject=${encodeURIComponent("Demande d'aide EduFlow")}`}
-          className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
-        >
-          <MailIcon className="size-3.5 shrink-0 text-mint-light" />
-          <span className="truncate">{SUPPORT_CONTACT.email}</span>
-        </a>
-        <a
-          href={SUPPORT_CONTACT.phoneHref}
-          className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
-        >
-          <PhoneIcon className="size-3.5 shrink-0 text-mint-light" />
-          <span className="truncate">{SUPPORT_CONTACT.phoneDisplay}</span>
-        </a>
+        {SUPPORT_CONTACT.phones.map((phone) => (
+          <a
+            key={phone.telHref}
+            href={phone.telHref}
+            className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+          >
+            <PhoneIcon className="size-3.5 shrink-0 text-mint-light" />
+            <span className="truncate">{phone.display}</span>
+            <span className="shrink-0 text-[11px] text-slate-500">
+              ({phone.country})
+            </span>
+          </a>
+        ))}
         <p className="flex items-center gap-2 px-1 py-1 text-[11px] text-slate-500">
           <ClockIcon className="size-3.5 shrink-0 text-slate-500" />
           {SUPPORT_CONTACT.hours}
