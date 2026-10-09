@@ -10,6 +10,7 @@ import {
   isNextRedirectError,
 } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import { ensureDefaultCourseSchedule } from "@/lib/actions/schedules";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -285,7 +286,7 @@ export async function createCourseAction(
       };
     }
 
-    await prisma.course.create({
+    const course = await prisma.course.create({
       data: {
         organizationId,
         title: parsed.data.title,
@@ -295,6 +296,10 @@ export async function createCourseAction(
         durationWeeks: parsed.data.durationWeeks,
       },
     });
+
+    // Génère automatiquement un échéancier par défaut selon la durée du cours
+    // (1 tranche par mois). L'administrateur pourra le personnaliser ensuite.
+    await ensureDefaultCourseSchedule(course.id);
 
     revalidatePath("/dashboard/courses");
 

@@ -10,6 +10,7 @@ import {
   isNextRedirectError,
 } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import { ensureDefaultWorkflowSchedule } from "@/lib/actions/schedules";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -824,7 +825,7 @@ export async function createWorkflowAction(
   try {
     const organizationId = await getCurrentOrganizationId();
 
-    await prisma.workflow.create({
+    const workflow = await prisma.workflow.create({
       data: {
         organizationId,
         country: parsed.data.country,
@@ -834,6 +835,10 @@ export async function createWorkflowAction(
         isDefault: false,
       },
     });
+
+    // Génère automatiquement un échéancier par défaut (3 tranches) pour le
+    // coût de la procédure — personnalisable ensuite par l'administrateur.
+    await ensureDefaultWorkflowSchedule(workflow.id);
 
     revalidateTravels();
 

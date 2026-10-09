@@ -3,6 +3,10 @@ import { Resend } from "resend";
 
 import { ContactFormEmail } from "@/components/emails/contact-form-email";
 import { PaymentEmail } from "@/components/emails/payment-email";
+import {
+  PaymentReminderEmail,
+  type PaymentReminderEmailProps,
+} from "@/components/emails/payment-reminder-email";
 import { formatFcfa } from "@/components/emails/format";
 import { WelcomeEmail } from "@/components/emails/welcome-email";
 import {
@@ -96,8 +100,16 @@ export interface PaymentConfirmationEmailPayload {
   paidAt?: Date;
 }
 
+/**
+ * Charge utile d'un e-mail de RELANCE d'échéance : destinataire + détail de la
+ * tranche échue (reprenant les props du template `PaymentReminderEmail`).
+ */
+export type PaymentReminderEmailPayload = PaymentReminderEmailProps & {
+  /** Adresse e-mail de l'étudiant (déjà validée en amont). */
+  studentEmail: string;
+};
+
 export interface ContactFormEmailPayload {
-  /** Nom complet du demandeur. */
   name: string;
   /** Adresse e-mail du demandeur (utilisée en `replyTo`). */
   email: string;
@@ -224,6 +236,22 @@ export async function sendPaymentConfirmationEmail({
       reference,
       paidAt,
     }),
+  });
+}
+
+/**
+ * Envoie un e-mail de RELANCE pour une échéance de paiement arrivée à terme et
+ * non soldée, en spécifiant le RELIQUAT EXACT restant dû.
+ *
+ * Silencieux en cas d'échec : ne lève jamais d'exception.
+ */
+export async function sendPaymentReminderEmail(
+  payload: PaymentReminderEmailPayload
+): Promise<SendEmailResult> {
+  return sendEmail({
+    to: payload.studentEmail,
+    subject: `Rappel de paiement — ${formatFcfa(payload.remainingAmount)} à régler`,
+    react: createElement(PaymentReminderEmail, payload),
   });
 }
 

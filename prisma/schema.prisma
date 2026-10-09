@@ -349,6 +349,9 @@ model Organization {
   invoices         Invoice[]
   cashRegisterSessions CashRegisterSession[]
   paymentSchedules PaymentSchedule[]
+  /// Modèles d'échéanciers réutilisables (cours & procédures voyage).
+  coursePaymentSchedules   CoursePaymentSchedule[]
+  workflowPaymentSchedules WorkflowPaymentSchedule[]
   certificates     Certificate[]
   leadNotes        LeadNote[]
   auditLogs        AuditLog[]
@@ -504,6 +507,8 @@ model Course {
   classes      Class[]
   courseLogs   CourseLog[]
   certificates Certificate[]
+  /// Modèle d'échéancier par défaut des frais de scolarité de ce cours.
+  paymentSchedule CoursePaymentSchedule?
 }
 
 // --------------------------------------
@@ -544,6 +549,8 @@ model Class {
   sessions     ClassSession[]
   evaluations  Evaluation[]
   schedules    ClassSchedule[]
+  /// Échéanciers des étudiants activés au démarrage de cette classe.
+  paymentSchedules PaymentSchedule[] @relation("ClassPaymentSchedules")
 
   @@index([organizationId, status])
 }
@@ -829,6 +836,8 @@ model Workflow {
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   stages           WorkflowStage[]
   travelProcedures TravelProcedure[]
+  /// Modèle d'échéancier par défaut du coût de la procédure (tranches).
+  paymentSchedule  WorkflowPaymentSchedule?
 }
 
 model WorkflowStage {
@@ -967,10 +976,22 @@ model CashRegisterSession {
 
 /// Échéancier de paiement rattaché à un étudiant : découpe une dette totale
 /// en N tranches avec dates d'échéance précises.
+///
+/// RÈGLE MÉTIER — le décompte des impayés n'est ACTIVÉ que lorsque l'étudiant
+/// est inscrit dans une classe officiellement DÉMARRÉE. Tant que `activatedAt`
+/// est `null`, l'échéancier existe mais aucune tranche ne peut basculer en
+/// « en retard » (voir `refreshOverdueStatus` dans src/lib/actions/schedules.ts).
+/// Un échéancier autonome (créé manuellement, sans classe) est activé d'emblée.
 model PaymentSchedule {
   id                String    @id @default(cuid())
   organizationId    String
   studentId         String
+  /// Classe ayant déclenché l'activation de l'échéancier (null = échéancier
+  /// autonome / manuel, non rattaché à une cohorte).
+  classId           String?
+  /// Horodatage d'activation du décompte (démarrage effectif de la classe).
+  /// `null` = en attente d'activation : aucune échéance n'est « en retard ».
+  activatedAt       DateTime?
   totalAmount       Float
   installmentsCount Int
   startDate         DateTime
@@ -980,10 +1001,85 @@ model PaymentSchedule {
 
   organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   student      Student                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class        Class?                 @relation("ClassPaymentSchedules", fields: [classId], references: [id], onDelete: SetNull)
   items        PaymentScheduleItem[]
 
   @@index([organizationId, studentId])
   @@index([status])
+  @@index([classId])
+  @@index([activatedAt])
+}
+
+// --------------------------------------
+// Modèles d'échéanciers réutilisables (Cours & Procédures voyage)
+// --------------------------------------
+
+/// Modèle d'échéancier rattaché à un COURS : découpe par défaut des frais de
+/// scolarité en N tranches (montants et délais personnalisables). Copié à
+/// l'identique pour chaque étudiant lors du démarrage de sa classe.
+model CoursePaymentSchedule {
+  id                String   @id @default(cuid())
+  organizationId    String
+  courseId          String   @unique
+  installmentsCount Int
+  /// Intervalle par défaut entre deux tranches, en jours (ex : 30 = mensuel).
+  intervalDays      Int      @default(30)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  course       Course                     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  items        CoursePaymentScheduleItem[]
+
+  @@index([organizationId])
+}
+
+/// Tranche d'un modèle d'échéancier de cours. `offsetDays` = nombre de jours
+/// APRÈS le démarrage effectif de la classe ; `amount` = montant dû (FCFA).
+model CoursePaymentScheduleItem {
+  id                String   @id @default(cuid())
+  scheduleId        String
+  installmentNumber Int
+  amount            Float
+  offsetDays        Int
+  createdAt         DateTime @default(now())
+
+  schedule CoursePaymentSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, installmentNumber])
+}
+
+/// Modèle d'échéancier rattaché à un WORKFLOW de procédure voyage (analogue au
+/// modèle de cours) : découpe par défaut du coût de la procédure en N tranches.
+model WorkflowPaymentSchedule {
+  id                String   @id @default(cuid())
+  organizationId    String
+  workflowId        String   @unique
+  installmentsCount Int
+  /// Intervalle par défaut entre deux tranches, en jours.
+  intervalDays      Int      @default(30)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow      Workflow                    @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  items         WorkflowPaymentScheduleItem[]
+
+  @@index([organizationId])
+}
+
+/// Tranche d'un modèle d'échéancier de workflow voyage.
+model WorkflowPaymentScheduleItem {
+  id                String   @id @default(cuid())
+  scheduleId        String
+  installmentNumber Int
+  amount            Float
+  offsetDays        Int
+  createdAt         DateTime @default(now())
+
+  schedule WorkflowPaymentSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, installmentNumber])
 }
 
 /// Tranche individuelle d'un échéancier de paiement.

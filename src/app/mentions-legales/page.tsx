@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import PageShell, { LegalSection } from "@/components/landing/page-shell";
+import { CONTACT_PHONE_CHANNELS } from "@/data/contact-channels";
 
 export const metadata: Metadata = {
   title: "Mentions légales - EduFlow",
@@ -31,7 +32,20 @@ export default function MentionsLegalesPage() {
           >
             contact@eduflow.com
           </a>{" "}
-          — Téléphone : +229 00 00 00 00.
+          — Téléphones :{" "}
+          {CONTACT_PHONE_CHANNELS.map((phone, index) => (
+            <span key={phone.telHref}>
+              {index > 0 && ", "}
+              <a
+                href={phone.telHref}
+                className="text-brand-light hover:underline"
+              >
+                {phone.display}
+              </a>{" "}
+              ({phone.country})
+            </span>
+          ))}
+          .
         </p>
       </LegalSection>
 

@@ -22,6 +22,7 @@ import {
   AwardIcon,
   ScrollTextIcon,
   BookMarked,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
@@ -103,6 +104,11 @@ const mainMenu: MenuItem[] = [
     title: "Paiements",
     url: "/dashboard/payments",
     icon: Wallet,
+  },
+  {
+    title: "Échéances",
+    url: "/dashboard/echeances",
+    icon: CalendarClock,
   },
   {
     title: "Procédures voyage",

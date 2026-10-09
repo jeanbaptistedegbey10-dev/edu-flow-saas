@@ -121,8 +121,15 @@ export default function PolitiqueDeConfidentialitePage() {
         <p>
           Le Site utilise uniquement des cookies strictement nécessaires à son
           fonctionnement (session d&apos;authentification). Aucun cookie
-          publicitaire ou de traçage tiers n&apos;est déposé. Vous pouvez
-          néanmoins les gérer depuis les réglages de votre navigateur.
+          publicitaire ou de traçage tiers n&apos;est déposé.
+        </p>
+        <p>
+          Conformément au RGPD, un bandeau de consentement vous permet
+          d&apos;accepter ou de refuser ce dépôt dès votre première visite.
+          Votre choix est mémorisé dans le stockage local de votre navigateur,
+          après quoi le bandeau n&apos;est plus affiché. Vous pouvez à tout
+          moment revenir sur ce choix et gérer les cookies depuis les réglages
+          de votre navigateur.
         </p>
       </LegalSection>
 

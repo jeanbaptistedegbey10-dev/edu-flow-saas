@@ -130,6 +130,7 @@ async function resolveSessionToken(request: NextRequest) {
  */
 const TEACHER_FORBIDDEN_PREFIXES: readonly string[] = [
   "/dashboard/payments",
+  "/dashboard/echeances",
   "/dashboard/travels",
   "/dashboard/expenses",
   "/dashboard/pos",

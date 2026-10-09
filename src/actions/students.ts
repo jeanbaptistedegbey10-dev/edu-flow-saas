@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, getCurrentSessionActor, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
 import { getCurrentAcademicYear } from "@/lib/class-status";
 import { assertCanMutate } from "@/lib/license-check";
+import { activateScheduleForStudentInClass } from "@/lib/actions/schedules";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
 import { logAuditEvent } from "@/lib/actions/audit";
 
@@ -876,9 +877,14 @@ export async function reEnrollStudentAction(input: {
       },
     });
 
+    // Si la classe cible est déjà démarrée, active immédiatement l'échéancier
+    // de l'étudiant (règle « inscrit + classe démarrée »). Sans effet sinon.
+    await activateScheduleForStudentInClass(student.id, targetClass.id);
+
     revalidatePath("/dashboard/students");
     revalidatePath(`/dashboard/students/${student.id}`);
     revalidatePath("/dashboard/classes");
+    revalidatePath("/dashboard/echeances");
 
     return {
       ok: true,

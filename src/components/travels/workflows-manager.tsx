@@ -26,6 +26,7 @@ import {
   type WorkflowStageInput,
 } from "@/actions/travels";
 import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
+import { WorkflowScheduleButton } from "@/components/travels/workflow-schedule-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -564,7 +565,7 @@ export function WorkflowsManager({ workflows }: { workflows: WorkflowDTO[] }) {
                 </ol>
               ) : null}
 
-              <footer className="mt-auto pt-3">
+              <footer className="mt-auto flex flex-col gap-2 pt-3">
                 <Button
                   type="button"
                   variant="outline"
@@ -575,6 +576,11 @@ export function WorkflowsManager({ workflows }: { workflows: WorkflowDTO[] }) {
                   <PencilIcon data-icon="inline-start" />
                   Gérer les étapes
                 </Button>
+                <WorkflowScheduleButton
+                  workflowId={workflow.id}
+                  workflowLabel={`${workflow.country} — ${workflow.title}`}
+                  baseCost={workflow.baseCost}
+                />
               </footer>
             </article>
           ))}

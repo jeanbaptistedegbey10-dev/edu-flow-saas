@@ -17,6 +17,7 @@ import {
   getClassClosureReadiness,
   type ClosureMissingRequirement,
 } from "@/actions/class-closure";
+import { activateSchedulesForClass } from "@/lib/actions/schedules";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -513,8 +514,13 @@ export async function startClassAction(
       data: { status: "IN_PROGRESS" },
     });
 
+    // Active le décompte des échéances (tranches de scolarité) pour chaque
+    // étudiant inscrit : règle métier « étudiant inscrit + classe démarrée ».
+    await activateSchedulesForClass(klass.id);
+
     revalidatePath("/dashboard/classes");
     revalidatePath(`/dashboard/classes/${klass.id}`);
+    revalidatePath("/dashboard/echeances");
 
     // Journal d'audit (hors transaction : ne doit pas annuler le démarrage).
     await logAuditEvent({

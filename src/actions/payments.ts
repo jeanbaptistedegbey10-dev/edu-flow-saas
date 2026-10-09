@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 
 import { sendPaymentConfirmationEmail } from "@/lib/email";
+import { PAYMENT_AMOUNT_EPSILON } from "@/lib/payment-status";
 import { prisma } from "@/lib/prisma";
 import {
   getCurrentOrganizationId,
@@ -65,6 +66,23 @@ export type StudentOptionDTO = {
   studentCode: string;
   firstName: string;
   lastName: string;
+  /** Coût net à payer (totalCost − réduction) ; `null` si non défini. */
+  netAmount: number | null;
+  /** Montant déjà encaissé (somme des paiements COMPLETED actifs). */
+  paidAmount: number;
+  /**
+   * Montant hérité (réglé avant l'adoption du logiciel) déduit du reste à
+   * payer sans écriture de caisse courante. Affiché à part dans le récap pour
+   * que « Total dû − Déjà réglé − Hérité = Reste à payer » reste exact.
+   */
+  legacyCredit: number;
+  /**
+   * Reste à payer : `max(0, netAmount − encaissé − hérité hors système)`.
+   * `null` lorsqu'aucun coût n'est défini pour l'étudiant (montant non plafonné).
+   * Logique alignée sur `getStudentDetail` (module étudiants) pour garantir des
+   * soldes cohérents entre la fiche étudiant et la modale de paiement.
+   */
+  remainingAmount: number | null;
 };
 
 export type OrganizationProfileDTO = {
@@ -126,6 +144,52 @@ const PAYMENT_STATUSES: readonly PaymentStatus[] = [
 
 /** Plafond de sécurité pour un montant saisi (FCFA). */
 const MAX_AMOUNT = 1_000_000_000;
+
+/**
+ * Tolérance de comparaison des montants flottants (FCFA) — voir
+ * `PAYMENT_AMOUNT_EPSILON` dans `@/lib/payment-status`. Réutilisée telle quelle
+ * côté serveur pour garantir l'identité de règle avec la modale de paiement.
+ */
+const AMOUNT_EPSILON = PAYMENT_AMOUNT_EPSILON;
+
+/**
+ * Calcule le montant encaissé et le reste à payer d'un étudiant à partir de ses
+ * données de scolarité. Reproduit EXACTEMENT la logique de `getStudentDetail`
+ * (module étudiants) afin que les soldes affichés dans la modale de paiement
+ * restent cohérents avec la fiche étudiante.
+ *
+ * - `paidAmount` : somme des paiements confirmés (COMPLETED) non suspendus.
+ * - Crédit hérité : déduit du reste à payer uniquement s'il n'a PAS déjà été
+ *   injecté dans le journal de caisse courant (sinon double comptage).
+ */
+function computeStudentBalance(params: {
+  netAmount: number | null;
+  paidAmount: number;
+  legacyPaidAmount: number;
+  legacyAmountInCashJournal: boolean;
+}): {
+  paidAmount: number;
+  legacyCredit: number;
+  remainingAmount: number | null;
+} {
+  const { netAmount, paidAmount, legacyPaidAmount, legacyAmountInCashJournal } =
+    params;
+
+  if (netAmount === null) {
+    return { paidAmount, legacyCredit: 0, remainingAmount: null };
+  }
+
+  const legacyCredit = legacyAmountInCashJournal
+    ? 0
+    : Math.max(legacyPaidAmount, 0);
+
+  const remainingAmount = Math.max(
+    0,
+    netAmount - paidAmount - legacyCredit,
+  );
+
+  return { paidAmount, legacyCredit, remainingAmount };
+}
 
 type ParsedPaymentInput =
   | {
@@ -347,7 +411,8 @@ export async function getStudentOptions(): Promise<StudentOptionDTO[]> {
   const organizationId = await getCurrentOrganizationId();
 
   try {
-    return await prisma.student.findMany({
+    // Données de scolarité de chaque étudiant (coût net + crédit hérité).
+    const students = await prisma.student.findMany({
       where: { organizationId },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
       select: {
@@ -355,7 +420,46 @@ export async function getStudentOptions(): Promise<StudentOptionDTO[]> {
         studentCode: true,
         firstName: true,
         lastName: true,
+        netAmount: true,
+        legacyPaidAmount: true,
+        legacyAmountInCashJournal: true,
       },
+    });
+
+    // Montant encaissé par étudiant en UNE requête groupée (évite le N+1) :
+    // paiements confirmés (COMPLETED) et actifs (non suspendus).
+    const paidByStudent = await prisma.payment.groupBy({
+      by: ["studentId"],
+      where: { organizationId, status: "COMPLETED", isVoided: false },
+      _sum: { amount: true },
+    });
+
+    const paidMap = new Map<string, number>();
+    for (const row of paidByStudent) {
+      if (row.studentId) {
+        paidMap.set(row.studentId, row._sum.amount ?? 0);
+      }
+    }
+
+    return students.map((student) => {
+      const paidAmount = paidMap.get(student.id) ?? 0;
+      const { legacyCredit, remainingAmount } = computeStudentBalance({
+        netAmount: student.netAmount,
+        paidAmount,
+        legacyPaidAmount: student.legacyPaidAmount,
+        legacyAmountInCashJournal: student.legacyAmountInCashJournal,
+      });
+
+      return {
+        id: student.id,
+        studentCode: student.studentCode,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        netAmount: student.netAmount,
+        paidAmount,
+        legacyCredit,
+        remainingAmount,
+      };
     });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -439,10 +543,19 @@ export async function createPaymentAction(
     const actor = await getCurrentSessionActor();
 
     // Vérifie que l'étudiant appartient bien à l'organisation active (isolation multi-tenant).
-    // Les coordonnées sont récupérées pour l'envoi du reçu par e-mail.
+    // Les coordonnées sont récupérées pour l'envoi du reçu par e-mail ; les champs
+    // de scolarité alimentent le contrôle « montant ≤ reste à payer ».
     const student = await prisma.student.findFirst({
       where: { id: parsed.data.studentId, organizationId },
-      select: { id: true, email: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        netAmount: true,
+        legacyPaidAmount: true,
+        legacyAmountInCashJournal: true,
+      },
     });
 
     if (!student) {
@@ -450,6 +563,49 @@ export async function createPaymentAction(
         status: "error",
         message: "Étudiant introuvable dans votre organisation.",
         fieldErrors: { studentId: "Étudiant introuvable." },
+      };
+    }
+
+    // Contrôle du plafond : le montant encaissé ne peut dépasser le reste à
+    // payer de la scolarité (même logique que la modale). Sécurité serveur
+    // indispensable — le client peut être contourné. `remainingAmount === null`
+    // (aucun coût défini) lève le plafond.
+    const paidAggregate = await prisma.payment.aggregate({
+      where: {
+        organizationId,
+        studentId: student.id,
+        status: "COMPLETED",
+        isVoided: false,
+      },
+      _sum: { amount: true },
+    });
+
+    const { remainingAmount } = computeStudentBalance({
+      netAmount: student.netAmount,
+      paidAmount: paidAggregate._sum.amount ?? 0,
+      legacyPaidAmount: student.legacyPaidAmount,
+      legacyAmountInCashJournal: student.legacyAmountInCashJournal,
+    });
+
+    if (
+      remainingAmount !== null &&
+      parsed.data.amount > remainingAmount + AMOUNT_EPSILON
+    ) {
+      const formatted = Math.round(remainingAmount).toLocaleString("fr-FR");
+      if (remainingAmount <= AMOUNT_EPSILON) {
+        return {
+          status: "error",
+          message:
+            "La scolarité de cet étudiant est entièrement réglée : aucun montant ne reste à encaisser.",
+          fieldErrors: { amount: "Aucun reste à payer." },
+        };
+      }
+      return {
+        status: "error",
+        message: `Le montant dépasse le reste à payer (${formatted} FCFA).`,
+        fieldErrors: {
+          amount: `Le montant ne peut pas dépasser le reste à payer (${formatted} FCFA).`,
+        },
       };
     }
 

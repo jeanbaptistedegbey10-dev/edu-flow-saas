@@ -1,5 +1,16 @@
 import type { PaymentMethod, PaymentStatus } from "@prisma/client";
 
+/**
+ * Tolérance de comparaison des montants flottants (FCFA). Les soldes sont
+ * stockés en `DOUBLE PRECISION` : sans epsilon, un encaissement exact du reste
+ * à payer (ex. 200000 − 200000) pourrait laisser un résidu de 1e-11 et faire
+ * échouer à tort le contrôle « montant ≤ reste à payer ».
+ *
+ * Partagée entre la Server Action de création de paiement et la modale client
+ * afin que les DEUX appliquent exactement la même règle de plafonnement.
+ */
+export const PAYMENT_AMOUNT_EPSILON = 0.01;
+
 /** Libellés français des statuts de paiement. */
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   PENDING: "En attente",

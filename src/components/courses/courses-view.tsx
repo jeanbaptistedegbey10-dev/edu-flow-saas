@@ -14,6 +14,7 @@ import type { CourseDTO } from "@/actions/courses";
 import { deleteCourseAction } from "@/actions/courses";
 import { AddCourseDialog } from "@/components/courses/add-course-dialog";
 import { EditCourseDialog } from "@/components/courses/edit-course-dialog";
+import { CourseScheduleButton } from "@/components/courses/course-schedule-button";
 import { EntityActionsMenu } from "@/components/shared/entity-actions-menu";
 import { Input } from "@/components/ui/input";
 
@@ -114,6 +115,14 @@ function CourseCard({
           <LayersIcon className="size-4" />
           Accéder aux classes concernées
         </Link>
+        {/* Personnalisation de l'échéancier de paiement (masquée aux enseignants). */}
+        {!isTeacher ? (
+          <CourseScheduleButton
+            courseId={course.id}
+            courseTitle={course.title}
+            coursePrice={course.price}
+          />
+        ) : null}
       </div>
     </div>
   );
