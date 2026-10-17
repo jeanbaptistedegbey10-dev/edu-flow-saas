@@ -416,9 +416,9 @@ export function DemoDataCard({
     });
   };
   return (
-    <section className="rounded-xl border border-dashed bg-background p-5 shadow-sm">
+    <section className="rounded-xl border border-dashed bg-background p-5 shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md">
       <div className="flex items-center gap-2">
-        <FlaskConicalIcon className="size-4 text-indigo-600" />
+        <FlaskConicalIcon className="size-4 text-indigo-600 dark:text-indigo-400" />
         <h2 className="font-semibold tracking-tight">Données de démonstration</h2>
       </div>
       <p className="mt-1 text-sm text-muted-foreground">

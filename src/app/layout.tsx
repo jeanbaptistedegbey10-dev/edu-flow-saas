@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProgressBar } from "@/components/providers/navigation-progress";
+import { ThemeProvider } from "@/components/providers/theme-provider";
 import { AppShell } from "@/components/layout/app-shell";
 import CookieBanner from "@/components/cookie-banner";
 import "./globals.css";
@@ -51,32 +52,41 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    // Étape 2 — mode sombre PAR DÉFAUT : la classe `dark` posée sur <html>
-    // alimente le variant Tailwind `dark:` (`@custom-variant dark (&:is(.dark *))`
-    // dans globals.css). `suppressHydrationWarning` évite les faux positifs
-    // d'hydratation si un script navigateur ajuste les classes côté client.
+    // Thème dynamique (next-themes) : `ThemeProvider` applique / retire la
+    // classe `dark` sur <html> (`attribute="class"`).
+    // - Premier rendu en mode CLAIR (`defaultTheme="light"`, aucune classe
+    //   `dark` au SSR) : les variables CSS de `:root` (fond blanc / slate très
+    //   clair) de globals.css s'appliquent par défaut.
+    // - Le variant Tailwind `dark:` (`@custom-variant dark (&:is(.dark *))`
+    //   dans globals.css) prend le relais dès que l'utilisateur bascule en
+    //   mode sombre (sélecteur `ThemeToggle`, `enableSystem={true}` pour suivre
+    //   la préférence OS en mode « Système »).
+    // `suppressHydrationWarning` évite les faux positifs d'hydratation lorsque
+    // next-themes ajuste la classe côté client.
     <html
       lang="fr"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full bg-background text-foreground antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
-        {/* Barre de progression globale : s'anime dès qu'un lien interne est
+        <ThemeProvider>
+          {/* Barre de progression globale : s'anime dès qu'un lien interne est
             cliqué (Sidebar, cartes…) ou qu'une Server Action démarre. */}
-        <Suspense fallback={null}>
-          <NavigationProgressBar />
-        </Suspense>
-        {/* Étape 2 — coquille applicative : barre latérale (Sidebar) + zone de
+          <Suspense fallback={null}>
+            <NavigationProgressBar />
+          </Suspense>
+          {/* Étape 2 — coquille applicative : barre latérale (Sidebar) + zone de
             contenu principale aux couleurs du thème. AppShell n'affiche la
             Sidebar que sur les routes applicatives (hub `/`) ; les routes
             publiques et celles possédant déjà leur propre Sidebar
             (/dashboard, /portal-sys-admin-sec) restent intactes. */}
-        <TooltipProvider>
-          <AppShell>{children}</AppShell>
-        </TooltipProvider>
-        {/* Bandeau de consentement RGPD : le choix (accepter / refuser) est
+          <TooltipProvider>
+            <AppShell>{children}</AppShell>
+          </TooltipProvider>
+          {/* Bandeau de consentement RGPD : le choix (accepter / refuser) est
             persisté dans `localStorage`, il ne réapparaît donc plus ensuite. */}
-        <CookieBanner />
+          <CookieBanner />
+        </ThemeProvider>
       </body>
     </html>
   );

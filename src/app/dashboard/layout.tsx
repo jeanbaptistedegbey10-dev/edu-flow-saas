@@ -5,6 +5,7 @@ import { getCurrentOrganizationBranding } from "@/actions/organization";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
 import { DashboardHeaderTitle } from "@/components/dashboard/dashboard-header-title";
 import { HelpAssistant } from "@/components/help/HelpAssistant";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Separator } from "@/components/ui/separator";
 import {
   SidebarInset,
@@ -142,6 +143,7 @@ export default async function DashboardLayout({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <button
               type="button"
               className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

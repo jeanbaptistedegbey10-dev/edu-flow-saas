@@ -69,13 +69,13 @@ export function TeacherDashboardOverview({
         >
           <Button asChild variant="outline" size="sm">
             <Link href="/dashboard/courses">
-              <BookOpenIcon data-icon="inline-start" />
+              <BookOpenIcon data-icon="inline-start" className="text-indigo-600 dark:text-indigo-400" />
               Mes cours
             </Link>
           </Button>
           <Button asChild size="sm">
             <Link href="/dashboard/attendance">
-              <UserCheckIcon data-icon="inline-start" />
+              <UserCheckIcon data-icon="inline-start" className="text-emerald-600 dark:text-emerald-400" />
               Prendre les présences
             </Link>
           </Button>
@@ -149,7 +149,7 @@ export function TeacherDashboardOverview({
 
       {/* Section Mes cours + dernières entrées du cahier de texte */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800">
+        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">Mes cours</h3>
@@ -168,7 +168,7 @@ export function TeacherDashboardOverview({
           {stats.courses.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
               <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-                <BookOpenIcon className="size-5 text-muted-foreground" />
+                <BookOpenIcon className="size-5 text-indigo-600 dark:text-indigo-400" />
               </div>
               <p className="text-sm font-medium">Aucun cours assigné</p>
               <p className="text-sm text-muted-foreground">
@@ -207,7 +207,7 @@ export function TeacherDashboardOverview({
           )}
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800">
+        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">
@@ -228,7 +228,7 @@ export function TeacherDashboardOverview({
           {stats.recentLogs.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
               <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-                <ClipboardListIcon className="size-5 text-muted-foreground" />
+                <ClipboardListIcon className="size-5 text-violet-600 dark:text-violet-400" />
               </div>
               <p className="text-sm font-medium">Cahier de texte vide</p>
               <p className="text-sm text-muted-foreground">
@@ -253,7 +253,7 @@ export function TeacherDashboardOverview({
       </div>
 
       {/* Courbe d'évolution des notes par élève / classe */}
-      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm dark:border-slate-800">
+      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold">
@@ -276,7 +276,7 @@ export function TeacherDashboardOverview({
       </section>
 
       {/* Feuille de présence récente */}
-      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm dark:border-slate-800">
+      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold">Feuille de présence</h3>
@@ -295,7 +295,7 @@ export function TeacherDashboardOverview({
         {stats.attendanceSheet.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
             <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-              <UserCheckIcon className="size-5 text-muted-foreground" />
+              <UserCheckIcon className="size-5 text-emerald-600 dark:text-emerald-400" />
             </div>
             <p className="text-sm font-medium">Aucun émargement</p>
             <p className="text-sm text-muted-foreground">

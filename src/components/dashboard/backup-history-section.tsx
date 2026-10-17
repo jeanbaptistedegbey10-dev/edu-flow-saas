@@ -202,10 +202,10 @@ export function BackupHistory({
   };
 
   return (
-    <div className="mt-4 grid gap-3 rounded-lg border bg-muted/30 p-4">
+    <div className="mt-4 grid gap-3 rounded-lg border bg-muted/30 p-4 transition-all duration-200 hover:border-primary/30 hover:shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <HistoryIcon className="size-4 text-muted-foreground" />
+          <HistoryIcon className="size-4 text-violet-600 dark:text-violet-400" />
           <h3 className="text-sm font-semibold">Historique des sauvegardes</h3>
         </div>
         <Button

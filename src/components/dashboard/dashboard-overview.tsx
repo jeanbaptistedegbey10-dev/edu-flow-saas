@@ -313,7 +313,7 @@ export function DashboardOverview({
 
       {/* Graphique recettes + donut répartition */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm lg:col-span-2 dark:border-slate-800">
+        <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md lg:col-span-2 dark:border-slate-800">
           <div className="border-b px-4 py-3">
             <h3 className="text-sm font-semibold">
               Évolution des recettes mensuelles
@@ -327,7 +327,7 @@ export function DashboardOverview({
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+        <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
           <div className="border-b px-4 py-3">
             <h3 className="text-sm font-semibold">Répartition par niveau</h3>
             <p className="text-xs text-muted-foreground">
@@ -344,7 +344,7 @@ export function DashboardOverview({
       </div>
 
       {/* Graphique assiduité mensuelle */}
-      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
         <div className="border-b px-4 py-3">
           <h3 className="text-sm font-semibold">Assiduité mensuelle globale</h3>
           <p className="text-xs text-muted-foreground">
@@ -358,7 +358,7 @@ export function DashboardOverview({
 
       {/* Listes rapides : versements & impayés prioritaires */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800">
+        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">Derniers versements</h3>
@@ -376,7 +376,7 @@ export function DashboardOverview({
           <RecentPaymentsFeed payments={stats.recentPayments} />
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800">
+        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">Impayés prioritaires</h3>

@@ -8,7 +8,7 @@
    --------------------------------------------------------------------------
    Tailwind v4 n'utilise PLUS de `tailwind.config.ts` : la configuration vit
    dans ce fichier (@import / @custom-variant / @theme).
-   - Mode sombre PAR DÉFAUT : la classe `.dark` est posée sur <html>
+   - Mode clair PAR DEFAUT : aucune classe `.dark` sur <html> (clair par defaut)
      (src/app/layout.tsx) et le variant `dark:` ci-dessus cible `.dark *`.
    - Tons violets / lavande : jetons `--color-violet-*`, `--color-lavande*`
      ci-dessous + états actifs/bordures `--card-border`, `--active-*`,

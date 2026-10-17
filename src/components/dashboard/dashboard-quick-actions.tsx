@@ -50,7 +50,7 @@ export function DashboardQuickActions({
         defaultStatus="ENROLLED"
         trigger={
           <Button variant="outline" size="sm">
-            <UserPlusIcon data-icon="inline-start" />
+            <UserPlusIcon data-icon="inline-start" className="text-emerald-600 dark:text-emerald-400" />
             Nouvel apprenant
           </Button>
         }
@@ -58,14 +58,14 @@ export function DashboardQuickActions({
 
       <Button asChild variant="outline" size="sm">
         <Link href="/dashboard/payments">
-          <WalletCardsIcon data-icon="inline-start" />
+          <WalletCardsIcon data-icon="inline-start" className="text-emerald-600 dark:text-emerald-400" />
           Nouveau paiement
         </Link>
       </Button>
 
       <Button asChild variant="outline" size="sm">
         <Link href="/dashboard/classes">
-          <LayersIcon data-icon="inline-start" />
+          <LayersIcon data-icon="inline-start" className="text-indigo-600 dark:text-indigo-400" />
           Nouvelle classe
         </Link>
       </Button>
@@ -76,7 +76,7 @@ export function DashboardQuickActions({
         defaultStatus="PROSPECT"
         trigger={
           <Button variant="outline" size="sm">
-            <UserRoundPlusIcon data-icon="inline-start" />
+            <UserRoundPlusIcon data-icon="inline-start" className="text-sky-600 dark:text-sky-400" />
             Ajouter un prospect
           </Button>
         }
@@ -84,7 +84,7 @@ export function DashboardQuickActions({
 
       <Button asChild variant="outline" size="sm">
         <Link href="/dashboard/travels">
-          <PlaneIcon data-icon="inline-start" />
+          <PlaneIcon data-icon="inline-start" className="text-violet-600 dark:text-violet-400" />
           Voyages
         </Link>
       </Button>

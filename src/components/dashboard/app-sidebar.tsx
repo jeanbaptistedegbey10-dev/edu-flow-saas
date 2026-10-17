@@ -52,6 +52,8 @@ type MenuItem = {
   title: string
   url: string
   icon: LucideIcon
+  /** Couleur contextuelle de l'icone (compatible clair/sombre). */
+  iconClass?: string
   /**
    * Correspondance stricte de l'URL (sans préfixe) : utilisée pour les
    * entrées racine (ex : « Tableau de bord ») et pour éviter que
@@ -71,8 +73,8 @@ const MANUAL_MENU_ITEM: MenuItem = {
   title: "Manuel d'Utilisation",
   url: "/dashboard/guide",
   icon: BookMarked,
-  exact: true,
-}
+  iconClass: "text-violet-600 dark:text-violet-400",
+  exact: true,}
 
 const mainMenu: MenuItem[] = [
   {
@@ -80,57 +82,68 @@ const mainMenu: MenuItem[] = [
     url: "/dashboard",
     icon: LayoutDashboard,
     exact: true,
+      iconClass: "text-violet-600 dark:text-violet-400",
   },
   {
     title: "Étudiants",
     url: "/dashboard/students",
     icon: UsersRound,
+      iconClass: "text-sky-600 dark:text-sky-400",
   },
   {
     title: "Cours",
     url: "/dashboard/courses",
     icon: BookOpen,
+      iconClass: "text-indigo-600 dark:text-indigo-400",
   },
   {
     title: "Classes",
     url: "/dashboard/classes",
     icon: Layers,
+      iconClass: "text-indigo-600 dark:text-indigo-400",
   },
   {
     title: "Évaluations & Examens",
     url: "/dashboard/evaluations",
     icon: ClipboardCheck,
+      iconClass: "text-emerald-600 dark:text-emerald-400",
   },
   {
     title: "Paiements",
     url: "/dashboard/payments",
     icon: Wallet,
+      iconClass: "text-emerald-600 dark:text-emerald-400",
   },
   {
     title: "Échéances",
     url: "/dashboard/echeances",
     icon: CalendarClock,
+      iconClass: "text-amber-600 dark:text-amber-400",
   },
   {
     title: "Procédures voyage",
     url: "/dashboard/travels",
     icon: PlaneTakeoff,
+      iconClass: "text-sky-600 dark:text-sky-400",
   },
   {
     title: "Caisse / POS",
     url: "/dashboard/pos",
     icon: ShoppingCart,
+      iconClass: "text-emerald-600 dark:text-emerald-400",
   },
   {
     title: "Certificats",
     url: "/dashboard/certificates",
     icon: AwardIcon,
+      iconClass: "text-indigo-600 dark:text-indigo-400",
   },
   {
     title: "Archives",
     url: "/dashboard/archives",
     icon: ArchiveIcon,
     exact: true,
+      iconClass: "text-slate-500 dark:text-slate-400",
   },
   MANUAL_MENU_ITEM,
 ]
@@ -140,6 +153,7 @@ const teacherMenu: MenuItem[] = [
     title: "Mes cours",
     url: "/dashboard/courses",
     icon: BookOpen,
+      iconClass: "text-indigo-600 dark:text-indigo-400",
   },
   {
     title: "Présences & Cahier de texte",
@@ -164,11 +178,13 @@ const managementMenu: MenuItem[] = [
     title: "Tâches",
     url: "/dashboard/tasks",
     icon: ClipboardList,
+      iconClass: "text-amber-600 dark:text-amber-400",
   },
   {
     title: "Dépenses",
     url: "/dashboard/expenses",
     icon: FileText,
+      iconClass: "text-rose-600 dark:text-rose-400",
   },
   {
     title: "Calendrier",
@@ -200,6 +216,7 @@ const financeMenu: MenuItem[] = [
     title: "Trésorerie",
     url: "/dashboard/tresorerie",
     icon: Coins,
+      iconClass: "text-emerald-600 dark:text-emerald-400",
   },
 ]
 
@@ -213,12 +230,14 @@ const organizationMenu: MenuItem[] = [
     title: "Organisation",
     url: "/dashboard/organization",
     icon: Building2,
+      iconClass: "text-violet-600 dark:text-violet-400",
   },
   {
     title: "Paramètres",
     url: "/dashboard/settings",
     icon: Settings,
     exact: true,
+      iconClass: "text-slate-500 dark:text-slate-400",
   },
   {
     title: "Rôles & Permissions",
@@ -258,8 +277,19 @@ function SidebarLink({ item, active }: { item: MenuItem; active: boolean }) {
           active && activeItemClass
         )}
       >
-        <a href={item.url}>
-          <item.icon />
+        <a
+          href={item.url}
+          className="flex w-full items-center gap-2 rounded-md transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          <item.icon
+            className={cn(
+              "size-4 shrink-0 transition-colors",
+              active
+                ? (item.iconClass ?? "text-sidebar-accent-foreground")
+                : (item.iconClass ?? "text-muted-foreground")
+            )}
+            aria-hidden="true"
+          />
           <span>{item.title}</span>
         </a>
       </SidebarMenuButton>
