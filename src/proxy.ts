@@ -12,7 +12,7 @@ import {
 // Protection des routes (ex-middleware, renommé « proxy » en Next.js 16)
 // --------------------------------------
 //
-// Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/:path* et sur la
+// Matcher STRICT :  le proxy ne s'exécute QUE sur /dashboard/:path* et sur la
 // route d'administration obfusquée (par défaut /portal-sys-admin-sec/:path*).
 // Tout le reste (/, /login, /api, /_next, /favicon.ico, assets) est ignoré
 // par le middleware et passe directement en NextResponse.next() — le proxy
