@@ -120,28 +120,138 @@ export type InternalAttestationInput = {
    * utilisé.
    */
   customMessage?: string;
+  /**
+   * Valeurs des variables d'attestation saisies dans la modale par
+   * l'administration (pré-remplies depuis la fiche étudiant quand la donnée
+   * existe en base). Acceptent un `Date` ou une chaîne (valeur d'`<input
+   * type="date">` ou texte libre) ; `null` laisse la variable vide dans le
+   * document généré.
+   */
+  /** Date de naissance de l'étudiant ({{birthDate}}). */
+  birthDate?: string | Date | null;
+  /** Ville / adresse de résidence ({{city}}). */
+  city?: string | null;
+  /** Début du cours suivi ({{startDate}}). */
+  startDate?: string | Date | null;
+  /** Fin prévue du cours ({{expectedEndDate}}). */
+  expectedEndDate?: string | Date | null;
+  /** Date de l'examen officiel de fin de niveau ({{examDate}}). */
+  examDate?: string | Date | null;
 };
 
 /**
- * Message par défaut du corps de l'attestation de formation : phrase
- * d'attestation d'inscription / de suivi, réutilisable telle quelle dans la
- * zone de texte éditable avant impression.
+ * Message par défaut du corps de l'attestation de formation **en cours** :
+ * formulation officielle au présent qui atteste de l'inscription et de la
+ * poursuite du cursus — à distinguer du certificat, réservé aux parcours
+ * achevés.
+ *
+ * Le message est un gabarit à variables `{{studentName}}`, `{{birthDate}}`,
+ * `{{city}}`, `{{startDate}}`, `{{organizationName}}`, `{{courseName}}`,
+ * `{{expectedEndDate}}` et `{{examDate}}`, interprété à la génération du
+ * document par `interpolateAttestationMessage` : chaque valeur est alors
+ * entourée d'une balise `<strong>` pour apparaître en gras. Les valeurs non
+ * renseignées (champs facultatifs de la modale) restent simplement vides.
  */
-export function buildDefaultAttestationMessage(
-  data: Pick<
-    InternalAttestationInput,
-    "studentName" | "studentCode" | "className" | "courseTitle"
-  >,
-  organizationName: string
-): string {
-  const formation = data.courseTitle
-    ? `la formation ${data.courseTitle}`
-    : "sa formation de langues";
-  const cohort = data.className
-    ? ` au sein de la cohorte « ${data.className} »`
-    : "";
+export function buildDefaultAttestationMessage(): string {
+  return `Il est par la présente certifié que M./Mme {{studentName}}, né(e) le {{birthDate}}, résidant à {{city}}, suit depuis le {{startDate}} un cours de langue au sein de notre établissement {{organizationName}}.
 
-  return `La direction de ${organizationName} atteste que ${data.studentName} (code étudiant ${data.studentCode}) est inscrit·e et suit ${formation}${cohort} dispensée par l'établissement.`;
+Le cours prépare systématiquement le participant aux évaluations de fin de niveau. Actuellement, le participant étudie au niveau {{courseName}}.
+
+Il est prévu que le cours s'achève le {{expectedEndDate}}. L'examen officiel pour le niveau {{courseName}} est planifié pour le {{examDate}}.
+
+Cette attestation est délivrée à la demande de l'intéressé(e) pour servir et valoir ce que de droit dans le cadre de ses démarches administratives et candidatures professionnelles.`;
+}
+
+/**
+ * Interprète les variables `{{…}}` du message d'attestation en substituant
+ * chaque valeur **entourée d'une balise `<strong>`** : nom de l'étudiant,
+ * matricule, formation… ressortent donc en gras dans le document imprimé.
+ * Les sauts de ligne du gabarit sont conservés (le paragraphe est rendu en
+ * `white-space: pre-wrap`).
+ *
+ * ⚠️ Sécurité (XSS) — schéma identique à `interpolateCertificateTemplate`
+ * : on échappe d'abord le message ENTIER (tout HTML saisi par
+ * l'administration est neutralisé), puis on remplace les tokens `{{var}}`
+ * (dépourvus de caractères spéciaux) par des valeurs déjà échappées. Les
+ * seules balises introduites sont donc les `<strong>` statiques.
+ */
+export function interpolateAttestationMessage(
+  message: string,
+  values: Record<string, string>
+): string {
+  const boldValue = (value: string): string =>
+    value === "" ? "" : `<strong>${escapeHtml(value)}</strong>`;
+
+  return escapeHtml(message).replace(
+    /\{\{\s*(\w+)\s*\}\}/g,
+    (match, key: string) =>
+      Object.prototype.hasOwnProperty.call(values, key)
+        ? boldValue(values[key])
+        : ""
+  );
+}
+
+/**
+ * Normalise une valeur de variable d'attestation en texte affichable :
+ * `Date` ou chaîne ISO `yyyy-mm-dd` (valeur d'`<input type="date">`) → date
+ * française longue (« 15 mars 2000 ») ; texte libre → tel quel ; vide → "".
+ */
+function formatAttestationDate(
+  value: string | Date | null | undefined
+): string {
+  if (value == null) return "";
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? "" : dateFormatter.format(value);
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const parsed = new Date(`${trimmed}T00:00:00Z`);
+    return Number.isNaN(parsed.getTime())
+      ? trimmed
+      : dateFormatter.format(parsed);
+  }
+  return trimmed;
+}
+
+// --------------------------------------
+// Champs éditorisables des modales d'attestation
+// --------------------------------------
+
+/** Valeurs brutes (formulaire) des variables d'attestation. */
+export type AttestationFieldValues = {
+  /** Date de naissance — `yyyy-mm-dd` (input date) ou vide. */
+  birthDate: string;
+  /** Ville / adresse de résidence. */
+  city: string;
+  /** Début du cours suivi — `yyyy-mm-dd` ou vide. */
+  startDate: string;
+  /** Fin prévue du cours — `yyyy-mm-dd` ou vide. */
+  expectedEndDate: string;
+  /** Date de l'examen officiel — `yyyy-mm-dd` ou vide. */
+  examDate: string;
+};
+
+/** Tous les champs vides (réinitialisation de la modale). */
+export const EMPTY_ATTESTATION_FIELDS: AttestationFieldValues = {
+  birthDate: "",
+  city: "",
+  startDate: "",
+  expectedEndDate: "",
+  examDate: "",
+};
+
+/**
+ * Convertit une date (objet `Date` ou chaîne) en valeur `yyyy-mm-dd`
+ * attendue par `<input type="date">` ; vide si la valeur est absente ou
+ * invalide.
+ */
+export function toAttestationDateInputValue(
+  value: Date | string | null | undefined
+): string {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
 // --------------------------------------
@@ -571,13 +681,23 @@ function buildLegalFooter(organization: OrganizationProfileDTO): string {
     </footer>`;
 }
 
-/** Identité étudiante commune aux deux documents. */
+/**
+ * Identité étudiante commune aux deux documents.
+ *
+ * La ligne « Classe / Cohorte » n'est rendue que sur le BULLETIN
+ * (`includeClassRow`, défaut `true`) : l'attestation de suivi en cours ne
+ * doit plus l'afficher (consigne produit) — le niveau/formation reste
+ * porté par le corps du texte.
+ */
 function buildStudentDetails(
   data: Pick<
     ReportCardInput,
     "studentName" | "studentCode" | "className" | "courseTitle"
-  >
+  >,
+  options: { includeClassRow?: boolean } = {}
 ): string {
+  const includeClassRow = options.includeClassRow ?? true;
+
   return `<table class="details">
       <tbody>
         <tr>
@@ -592,10 +712,14 @@ function buildStudentDetails(
           <th scope="row">Formation</th>
           <td>${data.courseTitle ? escapeHtml(data.courseTitle) : "-"}</td>
         </tr>
-        <tr>
+        ${
+          includeClassRow
+            ? `<tr>
           <th scope="row">Classe / Cohorte</th>
           <td>${data.className ? escapeHtml(data.className) : "-"}</td>
-        </tr>
+        </tr>`
+            : ""
+        }
       </tbody>
     </table>`;
 }
@@ -805,12 +929,29 @@ export function buildInternalAttestationDocument(
   const docNumber = formatAttestationNumber(data.studentCode, new Date());
 
   // Message principal : texte rédigé par l'administration si fourni, sinon
-  // la formulation par défaut. Rendu avec `white-space: pre-wrap` pour
-  // conserver les sauts de ligne saisis dans la zone d'édition.
+  // la formulation par défaut (cursus en cours) — laquelle intègre déjà sa
+  // phrase de clôture. Les variables `{{…}}` sont remplacées par leurs
+  // valeurs entourées d'une balise <strong> (gras) ; rendu avec
+  // `white-space: pre-wrap` pour conserver les sauts de ligne.
   const mainMessage =
     data.customMessage && data.customMessage.trim().length > 0
       ? data.customMessage.trim()
-      : buildDefaultAttestationMessage(data, organization.name);
+      : buildDefaultAttestationMessage();
+  const mainMessageHtml = interpolateAttestationMessage(mainMessage, {
+    studentName: data.studentName,
+    matricule: data.studentCode,
+    studentCode: data.studentCode,
+    courseName: data.courseTitle ?? "",
+    courseTitle: data.courseTitle ?? "",
+    className: data.className ?? "",
+    organizationName: organization.name,
+    date: dateFormatter.format(new Date()),
+    birthDate: formatAttestationDate(data.birthDate),
+    city: data.city?.trim() ?? "",
+    startDate: formatAttestationDate(data.startDate),
+    expectedEndDate: formatAttestationDate(data.expectedEndDate),
+    examDate: formatAttestationDate(data.examDate),
+  });
 
   const resultsParagraph =
     data.overallAverage !== null
@@ -829,12 +970,11 @@ export function buildInternalAttestationDocument(
   <main class="sheet">
     ${buildOrganizationHeader(organization, "Attestation interne", docNumber)}
 
-    ${buildStudentDetails(data)}
+    ${buildStudentDetails(data, { includeClassRow: false })}
 
     <div class="attestation-body">
-      <p style="white-space: pre-wrap;">${escapeHtml(mainMessage)}</p>
+      <p style="white-space: pre-wrap;">${mainMessageHtml}</p>
       ${resultsParagraph}
-      <p>La présente attestation est délivrée à l'intéressé·e pour servir et valoir ce que de droit, à la demande de celui-ci / celle-ci, afin de justifier de son parcours pédagogique auprès de tout organisme compétent.</p>
     </div>
 
     <section class="attestation-highlight">

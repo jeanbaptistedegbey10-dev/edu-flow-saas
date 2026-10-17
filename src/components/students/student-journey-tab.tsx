@@ -80,6 +80,10 @@ const DECISION_BADGES: Record<
     label: "Abandon",
     classes: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400",
   },
+  COMPLETED: {
+    label: "Clôturée (sans décision)",
+    classes: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400",
+  },
 };
 
 /** Badge de statut d'un module dans le tableau du parcours. */

@@ -27,6 +27,8 @@ const organization: OrganizationProfileDTO = {
   logoUrl: null,
   rccm: "RB/COT/24 A 12345",
   ifu: "3202412345678",
+  certificateTemplate: "TEMPLATE_1",
+  certificateTextTemplate: null,
 };
 
 // Variante avec logo importé (data URL PNG 1×1) : permet de vérifier le

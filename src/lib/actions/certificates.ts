@@ -29,6 +29,11 @@ export type CertificateDTO = {
   studentName: string;
   /** Numéro matricule de l'étudiant (ex : STU-2026-001). */
   studentCode: string;
+  /**
+   * Date de naissance de l'étudiant — alimente la variable `{{birthDate}}`
+   * du texte du certificat (HTML + PDF). `null` si non renseignée.
+   */
+  studentBirthDate: Date | null;
   courseId: string | null;
   courseTitle: string | null;
   level: string;
@@ -115,6 +120,7 @@ export async function generateCertificate(
         firstName: true,
         lastName: true,
         studentCode: true,
+        dateOfBirth: true,
       },
     });
 
@@ -176,6 +182,7 @@ export async function generateCertificate(
       studentId: certificate.studentId,
       studentName: `${student.firstName} ${student.lastName}`,
       studentCode: student.studentCode,
+      studentBirthDate: student.dateOfBirth ?? null,
       courseId: certificate.courseId,
       courseTitle: null,
       level: certificate.level,
@@ -302,6 +309,7 @@ export async function getCertificates(): Promise<CertificateDTO[]> {
               firstName: true,
               lastName: true,
               studentCode: true,
+              dateOfBirth: true,
               currentClass: {
                 select: { id: true, name: true, status: true, courseId: true },
               },
@@ -352,6 +360,7 @@ export async function getCertificates(): Promise<CertificateDTO[]> {
         studentId: cert.studentId,
         studentName: `${cert.student.firstName} ${cert.student.lastName}`,
         studentCode: cert.student.studentCode,
+        studentBirthDate: cert.student.dateOfBirth ?? null,
         courseId: cert.courseId,
         courseTitle: cert.course?.title ?? null,
         level: cert.level,
@@ -469,6 +478,7 @@ export async function getCertificateById(
             firstName: true,
             lastName: true,
             studentCode: true,
+            dateOfBirth: true,
           },
         },
         course: {
@@ -493,6 +503,7 @@ export async function getCertificateById(
       studentId: certificate.studentId,
       studentName: `${certificate.student.firstName} ${certificate.student.lastName}`,
       studentCode: certificate.student.studentCode,
+      studentBirthDate: certificate.student.dateOfBirth ?? null,
       courseId: certificate.courseId,
       courseTitle: certificate.course?.title ?? null,
       level: certificate.level,

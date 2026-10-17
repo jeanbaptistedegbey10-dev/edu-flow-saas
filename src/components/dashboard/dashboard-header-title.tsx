@@ -32,6 +32,8 @@ const DASHBOARD_ROUTE_TITLES: ReadonlyArray<{ path: string; title: string }> = [
   { path: "/dashboard/payments", title: "Paiements & Facturation" },
   { path: "/dashboard/travels", title: "Procédures voyage" },
   { path: "/dashboard/pos", title: "Caisse / POS" },
+  { path: "/dashboard/certificates", title: "Certificats" },
+  { path: "/dashboard/archives", title: "Archives" },
   { path: "/dashboard/tasks", title: "Tâches" },
   { path: "/dashboard/expenses", title: "Dépenses" },
   { path: "/dashboard/calendar", title: "Calendrier" },

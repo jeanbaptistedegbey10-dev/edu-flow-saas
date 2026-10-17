@@ -498,6 +498,9 @@ export default async function StudentDetailPage({
             studentCode={student.studentCode}
             className={student.currentClassName}
             courseTitle={student.currentCourseTitle}
+            birthDate={student.dateOfBirth}
+            city={student.address}
+            startDate={student.createdAt}
             organization={organization}
           />
         </TabsContent>

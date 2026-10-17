@@ -3,14 +3,13 @@
 import { Prisma, type DiscountType, type LeadSource, type StudentStatus } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { after } from "next/server";
 
-import { sendWelcomeEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, getCurrentSessionActor, getCurrentSessionUser, isNextRedirectError } from "@/lib/session";
 import { getCurrentAcademicYear } from "@/lib/class-status";
 import { assertCanMutate } from "@/lib/license-check";
-import { activateScheduleForStudentInClass } from "@/lib/actions/schedules";
+import { ensurePaymentScheduleForStudentClass } from "@/lib/actions/schedules";
+import { resolveEnrollmentIdForStudent } from "@/lib/enrollment-scope";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
 import { logAuditEvent } from "@/lib/actions/audit";
 
@@ -61,6 +60,13 @@ export type StudentDTO = {
   leadStage: string | null;
   /** Source d'acquisition du prospect. */
   leadSource: string | null;
+  /**
+   * Date de naissance — sert notamment au pré-remplissage des attestations
+   * de formation en cours (variable `{{birthDate}}`).
+   */
+  dateOfBirth: Date | null;
+  /** Adresse / ville de résidence (variable `{{city}}` des attestations). */
+  address: string | null;
   createdAt: Date;
 };
 
@@ -69,6 +75,7 @@ export type StudentFormField =
   | "lastName"
   | "email"
   | "phone"
+  | "dateOfBirth"
   | "status"
   | "totalCost"
   | "discount"
@@ -86,6 +93,15 @@ export type StudentFormState = {
   status: "idle" | "success" | "error";
   message?: string;
   fieldErrors?: Partial<Record<StudentFormField, string>>;
+  /**
+   * Partage WhatsApp post-inscription : résumé pré-rempli + URL `wa.me`
+   * (`https://wa.me/?text=...`) permettant à l'entreprise d'envoyer le reçu
+   * ou le message de confirmation directement au candidat. Renseigné
+   * uniquement en cas de succès.
+   */
+  whatsappShareUrl?: string;
+  /** Texte pré-rempli du message WhatsApp (résumé d'inscription). */
+  whatsappShareText?: string;
 };
 
 /** Résultat des mutations rapides (suppression) côté client. */
@@ -266,6 +282,12 @@ type ParsedStudentInput =
         lastName: string;
         email: string | null;
         phone: string;
+        /**
+         * Date de naissance — champ facultatif du formulaire
+         * (`<input type="date">`). Sert au pré-remplissage des attestations
+         * (`{{birthDate}}`) et à la variable `{{birthDate}}` des certificats.
+         */
+        dateOfBirth: Date | null;
         status: StudentStatus;
         totalCost: number | null;
         discount: number | null;
@@ -287,6 +309,7 @@ function parseStudentForm(formData: FormData): ParsedStudentInput {
   const lastName = String(formData.get("lastName") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();
+  const rawDateOfBirth = String(formData.get("dateOfBirth") ?? "").trim();
   const status = String(formData.get("status") ?? "").trim();
   const isSelfFinanced = formData.get("isSelfFinanced") === "on";
   const parentName = String(formData.get("parentName") ?? "").trim();
@@ -316,6 +339,21 @@ function parseStudentForm(formData: FormData): ParsedStudentInput {
     fieldErrors.phone = "Le téléphone est requis.";
   } else if (phone.replace(/\D/g, "").length < 8) {
     fieldErrors.phone = "Le numéro de téléphone semble invalide.";
+  }
+
+  // Date de naissance (facultative) : `yyyy-mm-dd` attendu par
+  // `<input type="date">`. Toute valeur non vide doit être une date valide.
+  let dateOfBirth: Date | null = null;
+  if (rawDateOfBirth) {
+    const parsedDate = new Date(rawDateOfBirth);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(rawDateOfBirth) ||
+      Number.isNaN(parsedDate.getTime())
+    ) {
+      fieldErrors.dateOfBirth = "La date de naissance est invalide.";
+    } else {
+      dateOfBirth = parsedDate;
+    }
   }
 
   if (!STUDENT_STATUSES.includes(status as StudentStatus)) {
@@ -348,6 +386,7 @@ function parseStudentForm(formData: FormData): ParsedStudentInput {
       lastName,
       email: email || null,
       phone,
+      dateOfBirth,
       status: status as StudentStatus,
       isSelfFinanced,
       parentName: parentName || null,
@@ -391,6 +430,42 @@ function buildRegistrationReference(studentCode: string): string {
   return `REG-${studentCode}-${Date.now().toString(36).toUpperCase()}`;
 }
 
+/**
+ * Construit le résumé d'inscription partageable via WhatsApp
+ * (`https://wa.me/?text=...`) : identité, code étudiant, classe, montants.
+ * Le serveur ne peut pas émettre de message WhatsApp (aucune API WhatsApp
+ * Business configurée) : on renvoie une URL préremplie que l'interface ouvre
+ * dans un nouvel onglet — même logique que les relances d'échéances
+ * (`src/lib/actions/reminders.ts`).
+ */
+function buildEnrollmentWhatsAppShare(input: {
+  studentCode: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  className?: string | null;
+  classSchedule?: string | null;
+  netAmount?: number | null;
+  registrationFeeNote?: string;
+}): { shareText: string; shareUrl: string } {
+  const lines = [
+    `✅ Inscription confirmée — ${input.firstName} ${input.lastName} (${input.studentCode})`,
+    input.className
+      ? `📚 Classe : ${input.className}${input.classSchedule ? ` (${input.classSchedule})` : ""}`
+      : "📚 Classe : —",
+    input.netAmount !== null && input.netAmount !== undefined
+      ? `💰 Net à payer : ${formatFcfa(input.netAmount)}`
+      : null,
+    input.registrationFeeNote ? `🧾 ${input.registrationFeeNote}` : null,
+    "Merci de votre confiance !",
+  ].filter((line): line is string => line !== null);
+
+  const shareText = lines.join("\n");
+  const shareUrl = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+
+  return { shareText, shareUrl };
+}
+
 /** Formate un montant en FCFA (messages utilisateur). */
 function formatFcfa(amount: number): string {
   return `${amount.toLocaleString("fr-FR")} FCFA`;
@@ -401,6 +476,10 @@ type TargetClass = {
   courseId: string;
   /** Frais de scolarité effectifs de la classe (frais de classe, sinon prix du cours). */
   tuitionFee: number | null;
+  /** Nom de la classe (résumé WhatsApp post-inscription). */
+  name: string;
+  /** Créneau d'affichage de la classe (résumé WhatsApp). */
+  schedule: string;
 };
 
 /**
@@ -422,6 +501,8 @@ async function resolveTargetClass(
       id: true,
       courseId: true,
       tuitionFee: true,
+      name: true,
+      schedule: true,
       course: { select: { price: true } },
     },
   });
@@ -434,6 +515,8 @@ async function resolveTargetClass(
     id: klass.id,
     courseId: klass.courseId,
     tuitionFee: klass.tuitionFee ?? klass.course.price,
+    name: klass.name,
+    schedule: klass.schedule,
   };
 }
 
@@ -548,6 +631,13 @@ export type StudentDetailDTO = {
   phone: string;
   status: StudentStatus;
   createdAt: Date;
+  /**
+   * Date de naissance — pré-remplissage des attestations de formation en
+   * cours (variable `{{birthDate}}`).
+   */
+  dateOfBirth: Date | null;
+  /** Adresse / ville de résidence (variable `{{city}}` des attestations). */
+  address: string | null;
   /** Coût initial de la formation (avant réduction). */
   totalCost: number | null;
   /** Réduction accordée (pourcentage ou montant fixe). */
@@ -622,6 +712,8 @@ export async function getStudentDetail(
         phone: true,
         status: true,
         createdAt: true,
+        dateOfBirth: true,
+        address: true,
         totalCost: true,
         discount: true,
         discountType: true,
@@ -712,6 +804,8 @@ export async function getStudentDetail(
       phone: student.phone,
       status: student.status,
       createdAt: student.createdAt,
+      dateOfBirth: student.dateOfBirth,
+      address: student.address,
       totalCost: student.totalCost,
       discount: student.discount,
       discountType: student.discountType,
@@ -752,19 +846,28 @@ export type ReEnrollmentResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
+/** Longueur maximale admise pour une année académique saisie. */
+const ACADEMIC_YEAR_MAX_LENGTH = 20;
+
 /**
- * Réinscrit un étudiant dans une nouvelle classe (bouton « Inscrire dans une
- * nouvelle classe » de la fiche étudiant).
+ * Réinscrit un étudiant dans une nouvelle classe (boutons « Inscrire dans une
+ * nouvelle classe » de la fiche étudiant et « Réinscription » du module
+ * Inscription).
  *
  * Comportement garanti :
  * - l'inscription (`ClassEnrollment`) ACTIVE courante de l'élève passe au
- *   statut `PROMOTED_MANUALLY` — équivalent sémantique du « COMPLETED »
- *   demandé, l'enum métier ne comportant pas de valeur COMPLETED — et son
- *   historique est PRÉSERVÉ (jamais écrasé ni supprimé) ;
- * - une nouvelle `ClassEnrollment` ACTIVE est créée pour la classe cible,
- *   horodatée sur l'année académique courante ;
+ *   statut `COMPLETED` (inscription terminée sans décision pédagogique de
+ *   clôture) et son historique est PRÉSERVÉ (jamais écrasé ni supprimé) ;
+ * - une nouvelle `ClassEnrollment` ACTIVE est créée pour la classe cible sur
+ *   l'ANNÉE ACADÉMIQUE fournie (par défaut : année courante) — la clé
+ *   d'unicité (étudiant, classe, année) garantit qu'une réinscription sur une
+ *   NOUVELLE année crée TOUJOURS une nouvelle ligne sans toucher aux années
+ *   précédentes ;
  * - l'inscription au cours porteur (`Enrollment`) est créée si absente ;
- * - `currentClassId` de l'étudiant pointe vers la nouvelle classe.
+ * - `currentClassId` de l'étudiant pointe vers la nouvelle classe ;
+ * - un ÉCHÉANCIER DÉDIÉ et propre à la NOUVELLE classe est généré (activé si
+ *   la classe est déjà démarrée, en attente de démarrage sinon) — l'échéancier
+ *   des classes antérieures n'est jamais modifié.
  *
  * Les décisions de passage « officielles » (PASSED / FAILED) restent du
  * ressort de la clôture de classe (`class-closure.ts`) : cette action couvre
@@ -773,8 +876,19 @@ export type ReEnrollmentResult =
 export async function reEnrollStudentAction(input: {
   studentId: string;
   newClassId: string;
+  /** Année académique de la NOUVELLE inscription (défaut : année courante). */
+  academicYear?: string;
 }): Promise<ReEnrollmentResult> {
   await assertCanMutate();
+
+  const academicYear = (input.academicYear ?? "").trim();
+  if (academicYear.length > ACADEMIC_YEAR_MAX_LENGTH) {
+    return {
+      ok: false,
+      message: `L'année académique ne doit pas dépasser ${ACADEMIC_YEAR_MAX_LENGTH} caractères.`,
+    };
+  }
+  const targetAcademicYear = academicYear || getCurrentAcademicYear();
 
   try {
     const organizationId = await getCurrentOrganizationId();
@@ -815,22 +929,29 @@ export async function reEnrollStudentAction(input: {
     await prisma.$transaction(async (tx) => {
       // 1) Clôture des inscriptions ACTIVE : historique conservé, jamais
       //    écrasé (les lignes passées restent en base avec leur statut).
+      //    Statut final COMPLETED (« inscription terminée ») : le transfert
+      //    n'est PAS une décision pédagogique de passage (PASSED / FAILED /
+      //    PROMOTED_MANUALLY restent le ressort de la clôture de classe).
       await tx.classEnrollment.updateMany({
         where: {
           studentId: student.id,
           organizationId,
           status: "ACTIVE",
         },
-        data: { status: "PROMOTED_MANUALLY" },
+        data: { status: "COMPLETED" },
       });
 
-      // 2) Nouvelle inscription ACTIVE dans la classe cible (upsert : si le
-      //    dossier pédagogique existe déjà, il est simplement réactivé).
+      // 2) Nouvelle inscription ACTIVE dans la classe cible (upsert sur la
+      //    clé (étudiant, classe, année académique) : si le dossier
+      //    pédagogique existe déjà pour l'année COURANTE, il est simplement
+      //    réactivé ; une réinscription sur une nouvelle année crée une
+      //    nouvelle ligne d'historique sans écraser les précédentes.
       await tx.classEnrollment.upsert({
         where: {
-          studentId_classId: {
+          studentId_classId_academicYear: {
             studentId: student.id,
             classId: targetClass.id,
+            academicYear: targetAcademicYear,
           },
         },
         create: {
@@ -838,7 +959,7 @@ export async function reEnrollStudentAction(input: {
           studentId: student.id,
           classId: targetClass.id,
           status: "ACTIVE",
-          academicYear: getCurrentAcademicYear(),
+          academicYear: targetAcademicYear,
         },
         update: {
           status: "ACTIVE",
@@ -874,12 +995,14 @@ export async function reEnrollStudentAction(input: {
         action: "RE_ENROLLMENT",
         newClassId: targetClass.id,
         newClassName: targetClass.name,
+        academicYear: targetAcademicYear,
       },
     });
 
-    // Si la classe cible est déjà démarrée, active immédiatement l'échéancier
-    // de l'étudiant (règle « inscrit + classe démarrée »). Sans effet sinon.
-    await activateScheduleForStudentInClass(student.id, targetClass.id);
+    // ÉCHÉANCIER DÉDIÉ à la nouvelle classe : créé (et activé si la classe est
+    // déjà démarrée) — un échéancier en attente sera activé au démarrage de la
+    // classe. Les échéanciers des classes antérieures restent intacts.
+    await ensurePaymentScheduleForStudentClass(student.id, targetClass.id);
 
     revalidatePath("/dashboard/students");
     revalidatePath(`/dashboard/students/${student.id}`);
@@ -977,6 +1100,8 @@ export async function getStudents(): Promise<StudentDTO[]> {
         parentPhone2: true,
         leadStage: true,
         leadSource: true,
+        dateOfBirth: true,
+        address: true,
         currentClass: { select: { name: true } },
         createdAt: true,
       },
@@ -1005,6 +1130,8 @@ export async function getStudents(): Promise<StudentDTO[]> {
       parentPhone2: student.parentPhone2,
       leadStage: student.leadStage,
       leadSource: student.leadSource,
+      dateOfBirth: student.dateOfBirth,
+      address: student.address,
       currentClassName: student.currentClass?.name ?? null,
       createdAt: student.createdAt,
     }));
@@ -1361,6 +1488,7 @@ export async function createStudentAction(
             lastName: parsed.data.lastName,
             email: parsed.data.email,
             phone: parsed.data.phone,
+            dateOfBirth: parsed.data.dateOfBirth,
             status: parsed.data.status,
             totalCost: financials.totalCost,
             discount: financials.discount,
@@ -1378,36 +1506,23 @@ export async function createStudentAction(
           },
         });
 
-        // Recette « LEGACY » : uniquement si l'utilisateur a décoché la case
-        // « Ne pas inclure dans le journal de caisse actuel » — sinon le
-        // montant hérité reste strictement informatif (aucune écriture).
-        if (legacyInJournal) {
-          await tx.payment.create({
-            data: {
-              organizationId,
-              studentId: student.id,
-              createdById: actor.id,
-              createdByName: actor.name,
-              amount: financials.legacyPaidAmount,
-              paymentMethod: "CASH",
-              status: "COMPLETED",
-              reference: buildLegacyPaymentReference(studentCode),
-              description: LEGACY_PAYMENT_DESCRIPTION,
-            },
-          });
-        }
-
         // Historique d'affectation à la classe + inscription au cours porteur.
-        if (targetClass) {
-          await tx.classEnrollment.create({
-            data: {
-              organizationId,
-              studentId: student.id,
-              classId: targetClass.id,
-              academicYear: getCurrentAcademicYear(),
-            },
-          });
+        // L'inscription est créée AVANT les écritures financières afin de
+        // rattacher chaque règlement à l'inscription (classe + année
+        // académique) de l'étudiant — séparation stricte Étudiant /
+        // Inscription.
+        const classEnrollment = targetClass
+          ? await tx.classEnrollment.create({
+              data: {
+                organizationId,
+                studentId: student.id,
+                classId: targetClass.id,
+                academicYear: getCurrentAcademicYear(),
+              },
+            })
+          : null;
 
+        if (targetClass) {
           await tx.enrollment.upsert({
             where: {
               studentId_courseId: {
@@ -1420,12 +1535,33 @@ export async function createStudentAction(
           });
         }
 
+        // Recette « LEGACY » : uniquement si l'utilisateur a décoché la case
+        // « Ne pas inclure dans le journal de caisse actuel » — sinon le
+        // montant hérité reste strictement informatif (aucune écriture).
+        if (legacyInJournal) {
+          await tx.payment.create({
+            data: {
+              organizationId,
+              studentId: student.id,
+              enrollmentId: classEnrollment?.id ?? null,
+              createdById: actor.id,
+              createdByName: actor.name,
+              amount: financials.legacyPaidAmount,
+              paymentMethod: "CASH",
+              status: "COMPLETED",
+              reference: buildLegacyPaymentReference(studentCode),
+              description: LEGACY_PAYMENT_DESCRIPTION,
+            },
+          });
+        }
+
         // Recette dédiée aux frais d'inscription (transaction financière).
         if (appliesRegistrationFee) {
           await tx.payment.create({
             data: {
               organizationId,
               studentId: student.id,
+              enrollmentId: classEnrollment?.id ?? null,
               createdById: actor.id,
               createdByName: actor.name,
               amount: registrationFee,
@@ -1458,21 +1594,10 @@ export async function createStudentAction(
         },
       });
 
-      // E-mail de bienvenue en arrière-plan (après la réponse) si l'étudiant
-      // a une adresse e-mail valide. L'échec d'envoi ne bloque jamais la création.
-      if (parsed.data.email) {
-        const recipientEmail = parsed.data.email;
-        const recipientName = `${parsed.data.firstName} ${parsed.data.lastName}`;
-
-        after(async () => {
-          await sendWelcomeEmail({
-            studentEmail: recipientEmail,
-            studentName: recipientName,
-            studentCode,
-          });
-        });
-      }
-
+      // AUCUN e-mail automatique d'inscription : l'envoi Resend / React-Email
+      // est volontairement supprimé (erreurs + ressources inutiles). À la
+      // place, on prépare un résumé partageable via WhatsApp
+      // (`https://wa.me/?text=...`) pour l'envoi manuel du reçu au candidat.
       const feeNote =
         registrationFee > 0 && registrationFeeMode === "SYSTEM"
           ? ` Frais d'inscription (${formatFcfa(registrationFee)}) encaissés.`
@@ -1491,9 +1616,29 @@ export async function createStudentAction(
               )}) inclus dans le journal de caisse.`
           : "";
 
+      const registrationFeeShareNote =
+        registrationFee > 0 && registrationFeeMode === "SYSTEM"
+          ? `Frais d'inscription ${formatFcfa(registrationFee)} encaissés`
+          : registrationFee > 0 && registrationFeeMode === "OFF_SYSTEM"
+            ? `Frais d'inscription ${formatFcfa(registrationFee)} réglés hors système`
+            : undefined;
+
+      const { shareText, shareUrl } = buildEnrollmentWhatsAppShare({
+        studentCode: createdStudent.studentCode,
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName,
+        phone: parsed.data.phone,
+        className: targetClass?.name ?? null,
+        classSchedule: targetClass?.schedule ?? null,
+        netAmount: financials.netAmount,
+        registrationFeeNote: registrationFeeShareNote,
+      });
+
       return {
         status: "success",
         message: `Étudiant créé avec succès (${createdStudent.studentCode}).${feeNote}${legacyNote}`,
+        whatsappShareUrl: shareUrl,
+        whatsappShareText: shareText,
       };
     } catch (error) {
       lastError = error;
@@ -1716,6 +1861,7 @@ export async function updateStudentAction(
           lastName: parsed.data.lastName,
           email: parsed.data.email,
           phone: parsed.data.phone,
+          dateOfBirth: parsed.data.dateOfBirth,
           status: parsed.data.status,
           totalCost: financials.totalCost,
           discount: financials.discount,
@@ -1736,6 +1882,15 @@ export async function updateStudentAction(
         },
       });
 
+      // Rattachement des écritures financières à l'inscription (classe +
+      // année académique) — séparation stricte Étudiant / Inscription. En
+      // l'absence de changement de classe, l'inscription courante (la plus
+      // récente) fait foi.
+      const existingEnrollmentId = await resolveEnrollmentIdForStudent(tx, {
+        organizationId,
+        studentId,
+      });
+
       // Journal de caisse : synchronise la recette « LEGACY-* » avec l'état
       // de la case (aucune écriture si le montant reste exclu du journal).
       if (legacyChanged) {
@@ -1745,6 +1900,7 @@ export async function updateStudentAction(
             create: {
               organizationId,
               studentId,
+              enrollmentId: existingEnrollmentId,
               amount: financials.legacyPaidAmount,
               paymentMethod: "CASH",
               status: "COMPLETED",
@@ -1761,12 +1917,18 @@ export async function updateStudentAction(
       }
 
       // Nouvelle affectation : historique + inscription au cours porteur.
+      // Clé d'unicité (étudiant, classe, année) : une réinscription dans la
+      // même classe sur une nouvelle année crée une NOUVELLE ligne sans
+      // écraser l'historique des années précédentes.
+      let classEnrollmentId: string | null = existingEnrollmentId;
+
       if (targetClass && classChanged) {
-        await tx.classEnrollment.upsert({
+        const classEnrollment = await tx.classEnrollment.upsert({
           where: {
-            studentId_classId: {
+            studentId_classId_academicYear: {
               studentId,
               classId: targetClass.id,
+              academicYear: getCurrentAcademicYear(),
             },
           },
           create: {
@@ -1777,6 +1939,7 @@ export async function updateStudentAction(
           },
           update: {},
         });
+        classEnrollmentId = classEnrollment.id;
 
         await tx.enrollment.upsert({
           where: {
@@ -1803,6 +1966,7 @@ export async function updateStudentAction(
           data: {
             organizationId,
             studentId,
+            enrollmentId: classEnrollmentId,
             createdById: actor.id,
             createdByName: actor.name,
             amount: registrationFee,

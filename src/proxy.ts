@@ -54,8 +54,17 @@ const DASHBOARD_PATH = "/dashboard";
 const REFERRAL_COOKIE_NAME = "eduflow_ref";
 /** Durée de vie du cookie de parrainage : 90 jours (en secondes). */
 const REFERRAL_COOKIE_MAX_AGE = 60 * 60 * 24 * 90;
+/**
+ * Landing publique : déplacée de `/` vers `/accueil` à l'Étape 2 (la racine
+ * affiche désormais le hub modulaire du tableau de bord).
+ */
+const LANDING_PATH = "/accueil";
 /** Chemins sur lesquels le paramètre `?ref=` est capturé par le proxy. */
-const REFERRAL_TRACKED_PATHS: readonly string[] = [HOME_PATH, "/register"];
+const REFERRAL_TRACKED_PATHS: readonly string[] = [
+  HOME_PATH,
+  LANDING_PATH,
+  "/register",
+];
 
 /**
  * Route d'administration obfusquée (NEXT_PUBLIC_SUPER_ADMIN_ROUTE,
@@ -131,6 +140,7 @@ async function resolveSessionToken(request: NextRequest) {
 const TEACHER_FORBIDDEN_PREFIXES: readonly string[] = [
   "/dashboard/payments",
   "/dashboard/echeances",
+  "/dashboard/archives",
   "/dashboard/travels",
   "/dashboard/expenses",
   "/dashboard/pos",
@@ -173,7 +183,7 @@ function clearInvalidSessionCookies(
 async function handleProxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  let token = await resolveSessionToken(request);
+  const token = await resolveSessionToken(request);
 
   // --------------------------------------
   // Sessions inexistantes ou invalides
@@ -340,8 +350,8 @@ export const config = {
   // Matcher STRICT : le proxy ne s'exécute QUE sur /dashboard/* et sur la
   // route d'administration obfusquée (par défaut /portal-sys-admin-sec/*),
   // plus l'accueil `/` (intercepté uniquement pour la redirection
-  // Super-Admin → back-office ; les non-connectés y sont laissés tels quels,
-  // la page / les renvoie ensuite vers /dashboard).
+  // Super-Admin → back-office ; les non-connectés y sont laissés tels quels)
+  // et la landing `/accueil` (capture du cookie de parrainage `?ref=`).
   //
   // Le matcher doit être une CONSTANTE statique (analyse au build) : si
   // NEXT_PUBLIC_SUPER_ADMIN_ROUTE est personnalisé, ajoutez le chemin
@@ -359,5 +369,5 @@ export const config = {
   // /dashboard → /login → /dashboard → … (ERR_TOO_MANY_REDIRECTS), liée à un
   // désaccord entre getToken() (proxy) et auth() (page /login). La page /login
   // n'effectue plus, elle-même, aucune redirection serveur → /dashboard.
-  matcher: ["/", "/register", "/dashboard/:path*", "/portal-sys-admin-sec/:path*"],
+  matcher: ["/", "/accueil", "/register", "/dashboard/:path*", "/portal-sys-admin-sec/:path*"],
 };

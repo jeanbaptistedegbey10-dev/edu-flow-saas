@@ -96,6 +96,7 @@ export const ENROLLMENT_STATUS_LABELS: Record<ClassEnrollmentStatus, string> = {
   FAILED: "Redoublement",
   PROMOTED_MANUALLY: "Passage manuel",
   DROPPED: "Abandon",
+  COMPLETED: "Clôturée (sans décision)",
 };
 
 /** Badge compact du récapitulatif de modules d'un étudiant. */

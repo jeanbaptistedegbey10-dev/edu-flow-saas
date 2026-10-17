@@ -38,11 +38,10 @@ if (html.includes('data="1"')) {
 
 // Chaque valeur doit apparaitre sous forme echappee dans le rendu.
 const checks: Array<[string, RegExp]> = [
-  ["studentName", /<h2 class="student-name">([^<]*)<\/h2>/],
+  ["studentName", /l'étudiant\(e\) <strong class="cert-var">([^<]*)<\/strong>/],
   ["organizationName", /<div class="org-name">([^<]*)</],
   ["verificationCode", /<div class="verify-code">([^<]*)</],
-  ["level", /<p class="level-value">([^<]*)</],
-  ["studentCode", /<p class="student-code">Matricule : ([^<]*)</],
+  ["studentCode", /matricule <strong class="cert-var">([^<]*)<\/strong>/],
   ["courseTitle", /<strong>([^<]*)<\/strong>/],
 ];
 

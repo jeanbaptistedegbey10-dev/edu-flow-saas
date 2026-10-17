@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavigationProgressBar } from "@/components/providers/navigation-progress";
+import { AppShell } from "@/components/layout/app-shell";
 import CookieBanner from "@/components/cookie-banner";
 import "./globals.css";
 
@@ -50,9 +51,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
+    // Étape 2 — mode sombre PAR DÉFAUT : la classe `dark` posée sur <html>
+    // alimente le variant Tailwind `dark:` (`@custom-variant dark (&:is(.dark *))`
+    // dans globals.css). `suppressHydrationWarning` évite les faux positifs
+    // d'hydratation si un script navigateur ajuste les classes côté client.
     <html
       lang="fr"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
         {/* Barre de progression globale : s'anime dès qu'un lien interne est
@@ -60,7 +66,14 @@ export default function RootLayout({
         <Suspense fallback={null}>
           <NavigationProgressBar />
         </Suspense>
-        <TooltipProvider>{children}</TooltipProvider>
+        {/* Étape 2 — coquille applicative : barre latérale (Sidebar) + zone de
+            contenu principale aux couleurs du thème. AppShell n'affiche la
+            Sidebar que sur les routes applicatives (hub `/`) ; les routes
+            publiques et celles possédant déjà leur propre Sidebar
+            (/dashboard, /portal-sys-admin-sec) restent intactes. */}
+        <TooltipProvider>
+          <AppShell>{children}</AppShell>
+        </TooltipProvider>
         {/* Bandeau de consentement RGPD : le choix (accepter / refuser) est
             persisté dans `localStorage`, il ne réapparaît donc plus ensuite. */}
         <CookieBanner />

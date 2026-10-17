@@ -7,6 +7,7 @@ import {
   InfoIcon,
   Loader2Icon,
   LockKeyholeIcon,
+  MessageCircleIcon,
   PlusIcon,
   UserPlusIcon,
 } from "lucide-react";
@@ -37,6 +38,9 @@ import {
 // Les statuts sont strictement limités à trois options produit :
 // Prospect, Inscrit, Abandonné (voir src/lib/student-status.ts).
 import { CANONICAL_STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
+// Cycle de vie des classes : seules les classes encore ouvertes
+// (PLANIFIED / ACTIVE / IN_PROGRESS) reçoivent de nouvelles inscriptions.
+import { filterSelectableClasses } from "@/lib/class-status";
 import { cn } from "@/lib/utils";
 
 /** Valeur sentinelle pour les champs Select optionnels (Radix interdit ""). */
@@ -79,6 +83,10 @@ export function AddStudentDialog({
   trigger?: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
+  // Clé de session du dialogue : incrémentée à chaque fermeture pour
+  // remonter un contenu frais à la prochaine ouverture (réinitialise
+  // `useActionState` + tous les champs, y compris le panneau WhatsApp).
+  const [dialogKey, setDialogKey] = React.useState(0);
 
   // Champs financiers : le Net à Payer est recalculé en direct, sans jamais
   // être saisissable. La sélection d'une classe verrouille le coût total sur
@@ -110,6 +118,9 @@ export function AddStudentDialog({
   // le système) ou « Payé hors système » (aucune écriture comptable).
   const [registrationFeePayment, setRegistrationFeePayment] =
     React.useState<RegistrationFeePaymentChoice>("");
+  // Panneau de confirmation WhatsApp post-inscription : masqué après clic
+  // « Passer » pour retrouver le formulaire (sans fermer la modale).
+  const [shareDismissed, setShareDismissed] = React.useState(false);
 
     // useActionState conserve l'état du formulaire (y compris les saisies
   // utilisateur) entre les re-renders : les inputs non contrôlés conservent
@@ -130,19 +141,13 @@ export function AddStudentDialog({
 
       const result = await createStudentAction(_prevState, formData);
 
-      // Fermeture de la modale et remise à zéro des champs financiers uniquement
-      // sur succès — en cas d'erreur, la modale reste ouverte et les saisies
-      // utilisateur sont préservées (inputs non contrôlés + state React stable).
-      if (result.status === "success") {
-        setOpen(false);
-        setSelectedClassId(NONE_VALUE);
-        setDiscountType("FIXED");
-        setTotalCost("");
-        setDiscount("");
-        setLegacyExcluded(true);
-        setLegacyPaidAmountInput("");
-        setStatusValue(defaultStatus);
-        setRegistrationFeePayment("");
+      // En cas d'erreur, la modale reste ouverte et les saisies utilisateur
+      // sont préservées (inputs non contrôlés + state React stable). En cas
+      // de succès, la modale reste OUVERTE sur le panneau de confirmation
+      // WhatsApp (aucune fermeture auto) : l'utilisateur partage le reçu puis
+      // ferme manuellement.
+      if (result.status === "error") {
+        setShareDismissed(false);
       }
 
       return result;
@@ -154,8 +159,57 @@ export function AddStudentDialog({
   const errorMessage =
     state.status === "error" && state.message ? state.message : undefined;
 
+  // Confirmation post-inscription : résumé + partage WhatsApp rapide
+  // (`https://wa.me/?text=...`). Remplace l'ancien e-mail automatique
+  // (Resend / React-Email supprimé) : l'entreprise envoie le reçu au candidat
+  // en un clic, sans quitter le parcours d'inscription.
+  const whatsappShareUrl =
+    state.status === "success" ? state.whatsappShareUrl : undefined;
+  const whatsappShareText =
+    state.status === "success" ? state.whatsappShareText : undefined;
+  const successMessage =
+    state.status === "success" && state.message ? state.message : undefined;
+  const showSharePanel = Boolean(
+    state.status === "success" && whatsappShareUrl && !shareDismissed
+  );
+
+  const resetFormFields = React.useCallback(() => {
+    setSelectedClassId(NONE_VALUE);
+    setDiscountType("FIXED");
+    setTotalCost("");
+    setDiscount("");
+    setLegacyExcluded(true);
+    setLegacyPaidAmountInput("");
+    setStatusValue(defaultStatus);
+    setRegistrationFeePayment("");
+    setIsSelfFinanced(false);
+    setShareDismissed(false);
+  }, [defaultStatus]);
+
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      resetFormFields();
+      setDialogKey((k) => k + 1);
+    }
+  };
+
+  const handleCloseAfterShare = () => {
+    setOpen(false);
+    resetFormFields();
+  };
+
   const selectedClass = classes.find((klass) => klass.id === selectedClassId);
   const classFeeLocked = selectedClass !== null;
+
+  // Classes éligibles à une nouvelle inscription : on exclut les classes
+  // clôturées (COMPLETED) et archivées (ARCHIVED) — seules les classes
+  // planifiées ou en cours (PLANIFIED / ACTIVE / IN_PROGRESS) restent
+  // ouvertes aux inscriptions (voir `SELECTABLE_CLASS_STATUSES`).
+  const selectableClasses = React.useMemo(
+    () => filterSelectableClasses(classes),
+    [classes]
+  );
 
   /** Réaction à la sélection d'une classe : pré-remplit et verrouille les frais. */
   const handleClassChange = (value: string) => {
@@ -192,7 +246,7 @@ export function AddStudentDialog({
     statusValue === "ENROLLED" && registrationFee > 0;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogTrigger asChild>
         {trigger ?? (
           <Button>
@@ -211,7 +265,62 @@ export function AddStudentDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {showSharePanel && whatsappShareUrl ? (
+          <div className="grid gap-4 py-2" role="status">
+            <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-500/30 dark:bg-emerald-500/10">
+              <BadgeCheckIcon
+                className="mt-0.5 size-5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                aria-hidden="true"
+              />
+              <div className="grid gap-1">
+                <p className="font-medium text-emerald-900 dark:text-emerald-100">
+                  {successMessage ?? "Étudiant créé avec succès."}
+                </p>
+                <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80">
+                  Aucun e-mail automatique n&apos;est envoyé. Partagez le reçu
+                  ou le message de confirmation directement au candidat via
+                  WhatsApp.
+                </p>
+              </div>
+            </div>
+
+            {whatsappShareText ? (
+              <div className="grid gap-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Résumé de l&apos;inscription
+                </p>
+                <p className="rounded-lg border bg-muted/50 p-3 text-sm whitespace-pre-line">
+                  {whatsappShareText}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShareDismissed(true)}
+              >
+                Passer
+              </Button>
+              <Button type="button" variant="outline" onClick={handleCloseAfterShare}>
+                Fermer
+              </Button>
+              <Button type="button" asChild>
+                <a
+                  href={whatsappShareUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <MessageCircleIcon data-icon="inline-start" />
+                  Partager via WhatsApp
+                </a>
+              </Button>
+            </div>
+          </div>
+        ) : (
         <form
+          key={dialogKey}
           action={formAction}
           className="grid max-h-[70vh] gap-4 overflow-y-auto pr-2"
         >
@@ -302,6 +411,19 @@ export function AddStudentDialog({
             </div>
           </div>
 
+          {/* Date de naissance (facultative) — pré-remplit la variable
+              {{birthDate}} des attestations et des certificats. */}
+          <div className="grid gap-2">
+            <Label htmlFor="dateOfBirth">Date de naissance</Label>
+            <Input
+              id="dateOfBirth"
+              name="dateOfBirth"
+              type="date"
+              aria-invalid={Boolean(fieldErrors.dateOfBirth)}
+            />
+            <FieldError message={fieldErrors.dateOfBirth} />
+          </div>
+
           {/* Affectation à une classe / cohorte */}
           <fieldset className="rounded-lg border p-3">
             <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -320,7 +442,7 @@ export function AddStudentDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE_VALUE}>— Aucune classe —</SelectItem>
-                  {classes.map((klass) => (
+                  {selectableClasses.map((klass) => (
                     <SelectItem key={klass.id} value={klass.id}>
                       {klass.name} · {klass.schedule} ({klass.courseCode})
                     </SelectItem>
@@ -338,11 +460,22 @@ export function AddStudentDialog({
                   (coût total verrouillé sur cette classe).
                 </p>
               ) : null}
-              {classes.length === 0 ? (
+              {selectableClasses.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  Aucune classe disponible : créez-en une depuis la page
-                  « Classes » pour regrouper vos étudiants par cohorte et
-                  créneau horaire.
+                  {classes.length === 0 ? (
+                    <>
+                      Aucune classe disponible : créez-en une depuis la page
+                      « Classes » pour regrouper vos étudiants par cohorte et
+                      créneau horaire.
+                    </>
+                  ) : (
+                    <>
+                      Aucune classe ouverte : seules les classes planifiées ou
+                      en cours reçoivent de nouvelles inscriptions.
+                      Réactivez ou recréez une classe depuis la page
+                      « Classes ».
+                    </>
+                  )}
                 </p>
               ) : null}
             </div>
@@ -669,6 +802,7 @@ export function AddStudentDialog({
             </Button>
           </DialogFooter>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   );

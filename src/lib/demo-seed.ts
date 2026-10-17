@@ -632,6 +632,20 @@ async function runDemoSeedTransaction(
     }),
   ]);
 
+  // Correspondance étudiant → inscription (classe + année) : toutes les
+  // données financières et pédagogiques du seed sont rattachées à
+  // l'inscription (séparation stricte Étudiant / Inscription).
+  const demoEnrollments = await tx.classEnrollment.findMany({
+    where: {
+      organizationId,
+      studentId: { in: createdStudents.map((student) => student.id) },
+    },
+    select: { id: true, studentId: true },
+  });
+  const enrollmentIdByStudent = new Map(
+    demoEnrollments.map((row) => [row.studentId, row.id])
+  );
+
   // Recettes : frais d'inscription + acomptes de scolarité (mois courant pour
   // alimenter le journal de caisse) + paiements antérieurs « legacy ».
   const today = new Date();
@@ -643,6 +657,7 @@ async function runDemoSeedTransaction(
     studentPaymentRows.push({
       organizationId,
       studentId: student.id,
+      enrollmentId: enrollmentIdByStudent.get(student.id) ?? null,
       amount: registrationFee,
       paymentMethod: "CASH",
       status: "COMPLETED",
@@ -653,6 +668,7 @@ async function runDemoSeedTransaction(
     studentPaymentRows.push({
       organizationId,
       studentId: student.id,
+      enrollmentId: enrollmentIdByStudent.get(student.id) ?? null,
       amount: Math.round(student.netAmount / 2),
       paymentMethod: index % 2 === 0 ? "CASH" : "MOBILE_MONEY",
       status: index === 5 ? "PARTIAL" : "COMPLETED",
@@ -665,6 +681,7 @@ async function runDemoSeedTransaction(
       studentPaymentRows.push({
         organizationId,
         studentId: student.id,
+        enrollmentId: enrollmentIdByStudent.get(student.id) ?? null,
         amount: legacy.amount,
         paymentMethod: "CASH",
         status: "COMPLETED",
@@ -803,6 +820,7 @@ async function runDemoSeedTransaction(
           sessionId: session.id,
           classId: group.classId,
           studentId,
+          enrollmentId: enrollmentIdByStudent.get(studentId) ?? null,
           status,
           arrivalTime:
             status === "LATE" ? utcAt(session.sessionDate, group.startHour, 20) : null,
@@ -1179,6 +1197,7 @@ async function runDemoSeedTransaction(
       gradeRows.push({
         evaluationModuleId: module.id,
         studentId: student.id,
+        enrollmentId: enrollmentIdByStudent.get(student.id) ?? null,
         score: Math.min(100, 55 + ((sIndex + mIndex * 3) % 40)),
       });
     });
@@ -1188,6 +1207,7 @@ async function runDemoSeedTransaction(
       gradeRows.push({
         evaluationModuleId: module.id,
         studentId: student.id,
+        enrollmentId: enrollmentIdByStudent.get(student.id) ?? null,
         score: Math.min(100, 58 + ((sIndex * 2 + mIndex * 4) % 38)),
       });
     });

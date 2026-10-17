@@ -23,6 +23,7 @@ import {
   ScrollTextIcon,
   BookMarked,
   CalendarClock,
+  ArchiveIcon,
   type LucideIcon,
 } from "lucide-react"
 import { usePathname } from "next/navigation"
@@ -124,6 +125,12 @@ const mainMenu: MenuItem[] = [
     title: "Certificats",
     url: "/dashboard/certificates",
     icon: AwardIcon,
+  },
+  {
+    title: "Archives",
+    url: "/dashboard/archives",
+    icon: ArchiveIcon,
+    exact: true,
   },
   MANUAL_MENU_ITEM,
 ]

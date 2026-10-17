@@ -64,6 +64,11 @@ export type ClassOptionDTO = {
   courseTitle: string;
   courseCode: string;
   /**
+   * Statut de la classe — permet aux sélecteurs d'exclure les classes
+   * ARCHIVED (réinscription, affectation…) sans charger le modèle complet.
+   */
+  status: ClassStatus;
+  /**
    * Montant effectif appliqué au coût total de scolarité de l'étudiant :
    * frais de la classe si configurés, sinon prix du cours porteur.
    */
@@ -154,7 +159,7 @@ function parseSchedulesJson(raw: string): Array<{
   }
 }
 
-function parseClassForm(formData: FormData): ParsedClassInput {
+function parseClassForm(formData: FormData, options?: { lockTuitionFee?: boolean }): ParsedClassInput {
   const name = String(formData.get("name") ?? "").trim();
   const schedule = String(formData.get("schedule") ?? "").trim();
   const courseId = String(formData.get("courseId") ?? "").trim();
@@ -180,10 +185,17 @@ function parseClassForm(formData: FormData): ParsedClassInput {
     fieldErrors.courseId = "Veuillez sélectionner un cours.";
   }
 
-  // Frais de scolarité de la classe : optionnel. Absent ⇒ héritage du prix
-  // du cours porteur au moment de l'affectation d'un étudiant.
+  // Frais de scolarité de la classe : optionnel à la création. Absent ⇒
+  // héritage du prix du cours porteur au moment de l'affectation d'un
+  // étudiant. En édition, le montant est VERROUILLÉ (lecture seule) : la
+  // valeur existante est conservée et toute soumission est ignorée afin de
+  // garantir la cohérence financière.
   let tuitionFee: number | null = null;
-  if (rawTuitionFee) {
+  if (options?.lockTuitionFee) {
+    // Champ désactivé côté client (non soumis) : on ignore la valeur reçue,
+    // la conservation est assurée par `updateClassAction`.
+    tuitionFee = null;
+  } else if (rawTuitionFee) {
     const value = Number(rawTuitionFee.replace(",", "."));
     if (Number.isNaN(value)) {
       fieldErrors.tuitionFee = "Les frais doivent être un nombre.";
@@ -341,6 +353,7 @@ export async function getClassOptions(): Promise<ClassOptionDTO[]> {
         name: true,
         schedule: true,
         tuitionFee: true,
+        status: true,
         course: {
           select: { title: true, code: true, price: true },
         },
@@ -361,6 +374,7 @@ export async function getClassOptions(): Promise<ClassOptionDTO[]> {
       id: klass.id,
       name: klass.name,
       schedule: klass.schedule,
+      status: klass.status,
       courseTitle: klass.course.title,
       courseCode: klass.course.code,
       // Montant effectif : frais de classe si configurés, sinon prix du cours.
@@ -551,6 +565,10 @@ export async function startClassAction(
 /**
  * Met à jour une classe existante de l'organisation active.
  * Conçue pour être utilisée avec `useActionState` (champ caché `id` inclus).
+ *
+ * Les frais de scolarité (`tuitionFee`) sont VERROUILLÉS en édition
+ * (rattachés au cours porteur, configurés à la création) : la valeur
+ * existante est conservée telle quelle, toute soumission est ignorée.
  */
 export async function updateClassAction(
   _prevState: ClassFormState,
@@ -566,7 +584,7 @@ export async function updateClassAction(
     };
   }
 
-  const parsed = parseClassForm(formData);
+  const parsed = parseClassForm(formData, { lockTuitionFee: true });
 
   if (!parsed.ok) {
     return {
@@ -580,9 +598,10 @@ export async function updateClassAction(
 
   try {
     // Isolation multi-tenant : la classe doit appartenir à l'organisation active.
+    // Les frais existants sont lus pour être conservés (verrouillage édition).
     const existing = await prisma.class.findFirst({
       where: { id: classId, organizationId },
-      select: { id: true },
+      select: { id: true, tuitionFee: true },
     });
 
     if (!existing) {
@@ -618,7 +637,9 @@ export async function updateClassAction(
         data: {
           name: parsed.data.name,
           schedule: parsed.data.schedule,
-          tuitionFee: parsed.data.tuitionFee,
+          // Frais de scolarité VERROUILLÉS en édition : on conserve la valeur
+          // existante (le champ est désactivé côté client et ignoré au parse).
+          tuitionFee: existing.tuitionFee,
           courseId: parsed.data.courseId,
           teacherId: parsed.data.teacherId,
           schedules: {

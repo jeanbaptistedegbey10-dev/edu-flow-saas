@@ -15,6 +15,8 @@ import {
 import { assertCanMutate } from "@/lib/license-check";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "@/lib/audit-constants";
 import { logAuditEvent } from "@/lib/actions/audit";
+import { resolveEnrollmentIdForStudent } from "@/lib/enrollment-scope";
+import { allocatePaymentToClassSchedule } from "@/lib/actions/schedules";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -42,6 +44,13 @@ export type PaymentDTO = {
   description: string | null;
   paidAt: Date;
   createdAt: Date;
+  /**
+   * Classe créditée par ce règlement — libellé « Nom de classe — Année »
+   * déduit de l'inscription (`ClassEnrollment`) rattachée. Renseigné lorsque
+   * le règlement est imputé sur une classe précise ; `null` pour les
+   * écritures héritées / règlements sans cohorte.
+   */
+  classLabel?: string | null;
   student: {
     id: string;
     studentCode: string;
@@ -59,6 +68,40 @@ export type FinancialStatsDTO = {
   monthlyExpenses: number;
   /** Nombre total de transactions enregistrées. */
   transactionCount: number;
+};
+
+/**
+ * Classe imputable pour un règlement (imputation sélective).
+ *
+ * RÈGLES DE FILTRAGE STRICTES appliquées à l'affichage (cf. AddPaymentDialog) :
+ * - la classe ACTUELLE / active de l'étudiant est TOUJOURS proposée ;
+ * - une ANCIENNE classe n'est proposée que si son reste à payer est
+ *   strictement supérieur à 0 FCFA (dette / arriéré non soldé) ;
+ * - toutes les anciennes classes entièrement soldées (reste = 0 FCFA) sont
+ *   MASQUÉES automatiquement.
+ */
+export type StudentClassImputationDTO = {
+  /** Inscription (classe + année) sur laquelle le règlement est imputé. */
+  enrollmentId: string;
+  classId: string;
+  className: string;
+  /** Année académique de l'inscription (ex : « 2025-2026 »). */
+  academicYear: string;
+  /** Classe actuelle / active de l'étudiant (`Student.currentClassId`). */
+  isCurrent: boolean;
+  /**
+   * Total dû de CETTE classe : échéancier s'il existe, sinon frais de
+   * scolarité de la classe / prix du cours. `null` si le montant dû est
+   * inconnu (aucun plafond applicable).
+   */
+  totalDue: number | null;
+  /** Montant déjà encaissé au profit de cette classe (paiements COMPLETED). */
+  paidAmount: number;
+  /**
+   * Reste à payer de cette classe = `max(0, totalDue − encaissé)` ;
+   * `null` lorsque le total dû est inconnu.
+   */
+  remainingAmount: number | null;
 };
 
 export type StudentOptionDTO = {
@@ -83,6 +126,11 @@ export type StudentOptionDTO = {
    * soldes cohérents entre la fiche étudiant et la modale de paiement.
    */
   remainingAmount: number | null;
+  /**
+   * Classes imputables pour ce règlement (déjà filtrées : classe actuelle +
+   * anciennes classes non soldées). Vide pour un étudiant sans inscription.
+   */
+  classes: StudentClassImputationDTO[];
 };
 
 export type OrganizationProfileDTO = {
@@ -101,10 +149,22 @@ export type OrganizationProfileDTO = {
   rccm: string | null;
   /** Numéro IFU / NIF (mention légale en pied de reçu). */
   ifu: string | null;
+  /**
+   * Modèle graphique par défaut des certificats (affichage + impression A4
+   * paysage). Voir `certificate-template.ts`.
+   */
+  certificateTemplate: string;
+  /**
+   * Gabarit de texte personnalisé du corps des certificats (`null` = texte
+   * standard). Variables dynamiques `{{studentName}}`, `{{matricule}}`,
+   * `{{courseName}}`, `{{level}}`, `{{date}}`… Voir `certificate-shared.ts`.
+   */
+  certificateTextTemplate: string | null;
 };
 
 export type PaymentFormField =
   | "studentId"
+  | "classId"
   | "amount"
   | "paymentMethod"
   | "status"
@@ -191,11 +251,133 @@ function computeStudentBalance(params: {
   return { paidAmount, legacyCredit, remainingAmount };
 }
 
+// ----------------------------------------------------------------------------
+// Imputation sélective : soldes par classe (module Paiements)
+// ----------------------------------------------------------------------------
+
+/** Une inscription (classe + année) de l'étudiant, avec sa classe porteuse. */
+type StudentEnrollmentRow = {
+  id: string;
+  studentId: string;
+  classId: string;
+  academicYear: string;
+  class: {
+    name: string;
+    /** Frais de scolarité de la classe ; `null` = hériter du prix du cours. */
+    tuitionFee: number | null;
+    course: { price: number };
+  };
+};
+
+/**
+ * Construit les classes imputables d'un étudiant à partir de ses inscriptions,
+ * en appliquant les RÈGLES DE FILTRAGE STRICTES du module :
+ * - la classe ACTUELLE (`Student.currentClassId`) est TOUJOURS proposée, ses
+ *   soldes étant ceux du récapitulatif global de l'étudiant (cohérence totale
+ *   entre le bloc « Récapitulatif de scolarité » et le sélecteur) ;
+ * - une ANCIENNE classe n'est proposée que si son reste à payer est STRICTEMENT
+ *   supérieur à 0 FCFA (dette / arriéré non soldé) ;
+ * - toutes les anciennes classes entièrement soldées (reste = 0 FCFA) sont
+ *   MASQUÉES automatiquement — ainsi que celles au solde indéterminé.
+ *
+ * @param enrollments inscriptions de l'étudiant triées `enrolledAt` décroissant.
+ */
+function buildClassImputations(
+  student: {
+    currentClassId: string | null;
+    netAmount: number | null;
+    paidAmount: number;
+    legacyCredit: number;
+    remainingAmount: number | null;
+  },
+  enrollments: StudentEnrollmentRow[],
+  ctx: {
+    /** Montant encaissé (COMPLETED, actif) rattaché à chaque inscription. */
+    paidByEnrollment: Map<string, number>;
+    /**
+     * Total dû par couple (étudiant, classe) : échéancier s'il en existe un,
+     * sinon frais de scolarité de la classe / prix du cours. Clé
+     * `« studentId:classId »`.
+     */
+    totalDueByKey: Map<string, number>;
+    epsilon: number;
+  }
+): StudentClassImputationDTO[] {
+  if (enrollments.length === 0) return [];
+
+  // Une entrée par classe (la plus récente d'abord), mais le montant encaissé
+  // cumule TOUTES les inscriptions de cette classe (réinscriptions antérieures
+  // sur d'autres années académiques).
+  const representativeByClass = new Map<string, StudentEnrollmentRow>();
+  const paidByClass = new Map<string, number>();
+  for (const enrollment of enrollments) {
+    const paid = ctx.paidByEnrollment.get(enrollment.id) ?? 0;
+    paidByClass.set(enrollment.classId, (paidByClass.get(enrollment.classId) ?? 0) + paid);
+    if (!representativeByClass.has(enrollment.classId)) {
+      representativeByClass.set(enrollment.classId, enrollment);
+    }
+  }
+
+  const current: StudentClassImputationDTO[] = [];
+  const previous: StudentClassImputationDTO[] = [];
+
+  for (const [classId, enrollment] of representativeByClass) {
+    const isCurrent = classId === student.currentClassId;
+
+    let totalDue: number | null;
+    let paidAmount: number;
+    let remainingAmount: number | null;
+
+    if (isCurrent) {
+      // Classe courante : soldes IDENTIQUES au récapitulatif global de
+      // l'étudiant (évite toute divergence entre le récap affiché et le
+      // plafond applicable).
+      totalDue = student.netAmount;
+      paidAmount = student.paidAmount;
+      remainingAmount = student.remainingAmount;
+    } else {
+      const key = `${enrollment.studentId}:${classId}`;
+      totalDue =
+        ctx.totalDueByKey.get(key) ??
+        enrollment.class.tuitionFee ??
+        enrollment.class.course.price ??
+        null;
+      paidAmount = paidByClass.get(classId) ?? 0;
+      remainingAmount =
+        totalDue === null ? null : Math.max(0, totalDue - paidAmount);
+
+      // FILTRAGE STRICT : ancienne classe visible uniquement si reste > 0.
+      if (remainingAmount === null || remainingAmount <= ctx.epsilon) {
+        continue;
+      }
+    }
+
+    const dto: StudentClassImputationDTO = {
+      enrollmentId: enrollment.id,
+      classId,
+      className: enrollment.class.name,
+      academicYear: enrollment.academicYear,
+      isCurrent,
+      totalDue,
+      paidAmount,
+      remainingAmount,
+    };
+    if (isCurrent) current.push(dto);
+    else previous.push(dto);
+  }
+
+  // Classe courante en tête, puis les anciennes dettes par inscription la plus
+  // récente (`enrollments` est déjà trié `enrolledAt` décroissant).
+  return [...current, ...previous];
+}
+
 type ParsedPaymentInput =
   | {
       ok: true;
       data: {
         studentId: string;
+        /** Classe ciblée par l'imputation (champ « Imputer sur la classe »). */
+        classId: string | null;
         amount: number;
         paymentMethod: PaymentMethod;
         status: PaymentStatus;
@@ -211,6 +393,8 @@ type ParsedPaymentInput =
 
 function parsePaymentForm(formData: FormData): ParsedPaymentInput {
   const studentId = String(formData.get("studentId") ?? "").trim();
+  // Classe ciblée par l'imputation : optionnelle (étudiant sans inscription).
+  const classId = String(formData.get("classId") ?? "").trim();
   const rawAmount = String(formData.get("amount") ?? "").trim();
   const paymentMethod = String(formData.get("paymentMethod") ?? "").trim();
   const status = String(formData.get("status") ?? "").trim();
@@ -279,6 +463,7 @@ function parsePaymentForm(formData: FormData): ParsedPaymentInput {
     ok: true,
     data: {
       studentId,
+      classId: classId || null,
       amount,
       paymentMethod: paymentMethod as PaymentMethod,
       status: status as PaymentStatus,
@@ -293,6 +478,17 @@ function parsePaymentForm(formData: FormData): ParsedPaymentInput {
 // --------------------------------------
 // Server Actions
 // --------------------------------------
+
+/**
+ * Libellé de la classe créditée affiché sur les listes / reçus :
+ * « Nom de la classe — 2025-2026 ».
+ */
+function formatClassLabel(
+  enrollment: { academicYear: string; class: { name: string } } | null
+): string | null {
+  if (!enrollment) return null;
+  return `${enrollment.class.name} — ${enrollment.academicYear}`;
+}
 
 /**
  * Récupère l'historique des règlements de l'organisation active,
@@ -328,12 +524,28 @@ export async function getPayments(): Promise<PaymentDTO[]> {
             lastName: true,
           },
         },
+        // Classe créditée (imputation sélective) — relation n-to-one.
+        enrollment: {
+          select: {
+            academicYear: true,
+            class: { select: { name: true } },
+          },
+        },
       },
     });
 
-    return rows.flatMap((row) =>
-      row.student ? [{ ...row, student: row.student }] : [],
-    );
+    return rows.flatMap((row) => {
+      if (!row.student) return [];
+
+      const { enrollment, student, ...rest } = row;
+      return [
+        {
+          ...rest,
+          student,
+          classLabel: formatClassLabel(enrollment),
+        },
+      ];
+    });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
 
@@ -423,6 +635,7 @@ export async function getStudentOptions(): Promise<StudentOptionDTO[]> {
         netAmount: true,
         legacyPaidAmount: true,
         legacyAmountInCashJournal: true,
+        currentClassId: true,
       },
     });
 
@@ -439,6 +652,89 @@ export async function getStudentOptions(): Promise<StudentOptionDTO[]> {
       if (row.studentId) {
         paidMap.set(row.studentId, row._sum.amount ?? 0);
       }
+    }
+
+    const studentIds = students.map((student) => student.id);
+
+    // --- Imputation sélective : inscriptions, encaissements et échéanciers ---
+    // Trois lectures batch (jamais de N+1) pour construire les classes
+    // imputables de chaque étudiant avec leurs soldes par classe.
+    const [enrollments, paidByEnrollmentRows, scheduleRows] = await Promise.all([
+      // Toutes les inscriptions (classe + année) des étudiants listés, de la
+      // plus récente à la plus ancienne — une réinscription crée une ligne par
+      // année académique, l'historique n'est jamais écrasé.
+      studentIds.length > 0
+        ? prisma.classEnrollment.findMany({
+            where: { organizationId, studentId: { in: studentIds } },
+            orderBy: { enrolledAt: "desc" },
+            select: {
+              id: true,
+              studentId: true,
+              classId: true,
+              academicYear: true,
+              class: {
+                select: {
+                  name: true,
+                  tuitionFee: true,
+                  course: { select: { price: true } },
+                },
+              },
+            },
+          })
+        : Promise.resolve([] as StudentEnrollmentRow[]),
+      // Encaissements par inscription (pour les soldes des anciennes classes).
+      studentIds.length > 0
+        ? prisma.payment.groupBy({
+            by: ["enrollmentId"],
+            where: {
+              organizationId,
+              studentId: { in: studentIds },
+              status: "COMPLETED",
+              isVoided: false,
+              enrollmentId: { not: null },
+            },
+            _sum: { amount: true },
+          })
+        : Promise.resolve([]),
+      // Total dû par couple (étudiant, classe) : échéancier le plus récent.
+      studentIds.length > 0
+        ? prisma.paymentSchedule.findMany({
+            where: {
+              organizationId,
+              studentId: { in: studentIds },
+              classId: { not: null },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { studentId: true, classId: true, totalAmount: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const paidByEnrollment = new Map<string, number>();
+    for (const row of paidByEnrollmentRows) {
+      if (row.enrollmentId) {
+        paidByEnrollment.set(
+          row.enrollmentId,
+          (row._sum.amount ?? 0) + (paidByEnrollment.get(row.enrollmentId) ?? 0),
+        );
+      }
+    }
+
+    // `scheduleRows` est trié `createdAt` décroissant : le premier échéancier
+    // rencontré pour un couple est le plus récent (celui de la classe en cours).
+    const totalDueByKey = new Map<string, number>();
+    for (const row of scheduleRows) {
+      const key = `${row.studentId}:${row.classId}`;
+      if (!totalDueByKey.has(key)) {
+        totalDueByKey.set(key, row.totalAmount);
+      }
+    }
+
+    const enrollmentsByStudent = new Map<string, StudentEnrollmentRow[]>();
+    for (const enrollment of enrollments) {
+      const list = enrollmentsByStudent.get(enrollment.studentId);
+      if (list) list.push(enrollment);
+      else enrollmentsByStudent.set(enrollment.studentId, [enrollment]);
     }
 
     return students.map((student) => {
@@ -459,6 +755,17 @@ export async function getStudentOptions(): Promise<StudentOptionDTO[]> {
         paidAmount,
         legacyCredit,
         remainingAmount,
+        classes: buildClassImputations(
+          {
+            currentClassId: student.currentClassId,
+            netAmount: student.netAmount,
+            paidAmount,
+            legacyCredit,
+            remainingAmount,
+          },
+          enrollmentsByStudent.get(student.id) ?? [],
+          { paidByEnrollment, totalDueByKey, epsilon: AMOUNT_EPSILON },
+        ),
       };
     });
   } catch (error) {
@@ -494,6 +801,8 @@ export async function getCurrentOrganizationProfile(): Promise<OrganizationProfi
         logoUrl: true,
         rccm: true,
         ifu: true,
+        certificateTemplate: true,
+        certificateTextTemplate: true,
       },
     });
 
@@ -555,6 +864,7 @@ export async function createPaymentAction(
         netAmount: true,
         legacyPaidAmount: true,
         legacyAmountInCashJournal: true,
+        currentClassId: true,
       },
     });
 
@@ -580,31 +890,146 @@ export async function createPaymentAction(
       _sum: { amount: true },
     });
 
-    const { remainingAmount } = computeStudentBalance({
+    const { remainingAmount: globalRemaining } = computeStudentBalance({
       netAmount: student.netAmount,
       paidAmount: paidAggregate._sum.amount ?? 0,
       legacyPaidAmount: student.legacyPaidAmount,
       legacyAmountInCashJournal: student.legacyAmountInCashJournal,
     });
 
+    // --- IMPUTATION SÉLECTIVE : le règlement est rattaché à UNE classe ---
+    // Le champ « Imputer le paiement sur la classe » (AddPaymentDialog)
+    // transporte l'identifiant d'une classe existante pour l'étudiant. À
+    // défaut (champ vide / étudiant sans classe), le rattachement historique
+    // sur la classe courante du profil est conservé.
+    const targetClassId = parsed.data.classId;
+    let targetEnrollmentId: string | null = null;
+    // Reste à payer du périmètre ciblé. `undefined` = aucune classe ciblée ou
+    // classe courante (contrôle global historique) ; `null` = solde de
+    // l'ancienne classe inconnu (aucun plafond applicable).
+    let classRemaining: number | null | undefined = undefined;
+    let isCurrentClassTarget = true;
+
+    if (targetClassId) {
+      // Inscription de l'étudiant dans la classe ciblée (la plus récente —
+      // réinscription sur plusieurs années). Toute classe sans inscription
+      // correspondante est rejetée (sécurité contre les saisies forgées).
+      const enrollment = await prisma.classEnrollment.findFirst({
+        where: {
+          organizationId,
+          studentId: student.id,
+          classId: targetClassId,
+        },
+        orderBy: { enrolledAt: "desc" },
+        select: {
+          id: true,
+          class: {
+            select: {
+              name: true,
+              tuitionFee: true,
+              course: { select: { price: true } },
+            },
+          },
+        },
+      });
+
+      if (!enrollment) {
+        return {
+          status: "error",
+          message: "Cette classe n'est pas ouverte à l'étudiant sélectionné.",
+          fieldErrors: {
+            classId: "Inscription introuvable pour cette classe.",
+          },
+        };
+      }
+
+      targetEnrollmentId = enrollment.id;
+      isCurrentClassTarget = targetClassId === student.currentClassId;
+
+      if (!isCurrentClassTarget) {
+        // ANCIENNE CLASSE : le plafond est le reste à payer de CETTE classe —
+        // un arriéré non soldé reste encaissable même si le solde global est
+        // à zéro, et l'excédent d'une classe soldée ne peut pas y fuiter.
+        const [scheduleRow, paidOnClass] = await Promise.all([
+          // Total dû : échéancier le plus récent du couple, sinon frais de
+          // scolarité de la classe / prix du cours.
+          prisma.paymentSchedule.findFirst({
+            where: {
+              organizationId,
+              studentId: student.id,
+              classId: targetClassId,
+            },
+            orderBy: { createdAt: "desc" },
+            select: { totalAmount: true },
+          }),
+          // Encaissements déjà rattachés aux inscriptions de cette classe.
+          prisma.payment.aggregate({
+            where: {
+              organizationId,
+              studentId: student.id,
+              status: "COMPLETED",
+              isVoided: false,
+              enrollment: { classId: targetClassId },
+            },
+            _sum: { amount: true },
+          }),
+        ]);
+
+        const totalDue =
+          scheduleRow?.totalAmount ??
+          enrollment.class.tuitionFee ??
+          enrollment.class.course.price ??
+          null;
+        const paidAmount = paidOnClass._sum.amount ?? 0;
+        classRemaining =
+          totalDue === null ? null : Math.max(0, totalDue - paidAmount);
+
+        // RÈGLE STRICTE (miroir du filtrage UI) : une ancienne classe
+        // entièrement soldée n'est jamais imputable — saisie forgée bloquée.
+        if (classRemaining !== null && classRemaining <= AMOUNT_EPSILON) {
+          return {
+            status: "error",
+            message: `La classe « ${enrollment.class.name} » est entièrement réglée : aucun montant n'y est imputable.`,
+            fieldErrors: {
+              classId: "Cette classe est entièrement réglée.",
+            },
+          };
+        }
+      }
+    }
+
+    // Périmètre du plafond : SOLDE DE LA CLASSE ciblée lors d'une imputation
+    // sur ancienne classe, solde global de l'étudiant sinon (classe courante
+    // ou champ non renseigné — comportement historique inchangé).
+    // `undefined` (aucune classe ciblée / classe courante) → solde global ;
+    // `null` (ancienne classe sans montant dû connu) → aucun plafond.
+    const rawCapRemaining =
+      targetClassId && !isCurrentClassTarget ? classRemaining : globalRemaining;
+    const capRemaining: number | null =
+      rawCapRemaining === undefined ? globalRemaining : rawCapRemaining;
+
     if (
-      remainingAmount !== null &&
-      parsed.data.amount > remainingAmount + AMOUNT_EPSILON
+      capRemaining !== null &&
+      parsed.data.amount > capRemaining + AMOUNT_EPSILON
     ) {
-      const formatted = Math.round(remainingAmount).toLocaleString("fr-FR");
-      if (remainingAmount <= AMOUNT_EPSILON) {
+      const formatted = Math.round(capRemaining).toLocaleString("fr-FR");
+      if (capRemaining <= AMOUNT_EPSILON) {
         return {
           status: "error",
           message:
-            "La scolarité de cet étudiant est entièrement réglée : aucun montant ne reste à encaisser.",
+            targetClassId && !isCurrentClassTarget
+              ? "Cette classe est entièrement réglée : aucun montant ne reste à encaisser."
+              : "La scolarité de cet étudiant est entièrement réglée : aucun montant ne reste à encaisser.",
           fieldErrors: { amount: "Aucun reste à payer." },
         };
       }
+      const scope =
+        targetClassId && !isCurrentClassTarget ? " de cette classe" : "";
       return {
         status: "error",
-        message: `Le montant dépasse le reste à payer (${formatted} FCFA).`,
+        message: `Le montant dépasse le reste à payer${scope} (${formatted} FCFA).`,
         fieldErrors: {
-          amount: `Le montant ne peut pas dépasser le reste à payer (${formatted} FCFA).`,
+          amount: `Le montant ne peut pas dépasser le reste à payer${scope} (${formatted} FCFA).`,
         },
       };
     }
@@ -612,10 +1037,22 @@ export async function createPaymentAction(
     // La date effective provient du formulaire (defaut : instant courant).
     const paidAt = parsed.data.paidAt;
 
+    // Rattachement du règlement à l'inscription (classe + année académique)
+    // CIBLÉE par l'imputation : l'historique financier suit la classe créditée,
+    // pas le seul profil (séparation stricte Étudiant / Inscription). Sans
+    // classe ciblée, la classe courante reste la cible (héritage).
+    const enrollmentId =
+      targetEnrollmentId ??
+      (await resolveEnrollmentIdForStudent(prisma, {
+        organizationId,
+        studentId: parsed.data.studentId,
+      }));
+
     const payment = await prisma.payment.create({
       data: {
         organizationId,
         studentId: parsed.data.studentId,
+        enrollmentId,
         createdById: actor.id,
         createdByName: actor.name,
         amount: parsed.data.amount,
@@ -627,6 +1064,26 @@ export async function createPaymentAction(
         paidAt,
       },
     });
+
+    // VENTILATION sur l'échéancier de LA SEULE classe créditée : les tranches
+    // de la classe ciblée sont soldées à concurrence du règlement ; celles des
+    // autres classes (nouvelle classe / nouvelle année) restent TOTALEMENT
+    // intactes. Seuls les règlements confirmés (COMPLETED) soldent des
+    // tranches. L'échec de la ventilation n'annule jamais la recette déjà
+    // enregistrée (trésorerie globale à la date du jour).
+    if (targetClassId && parsed.data.status === "COMPLETED") {
+      const allocation = await allocatePaymentToClassSchedule({
+        studentId: parsed.data.studentId,
+        classId: targetClassId,
+        amount: parsed.data.amount,
+      });
+      if (!allocation.ok) {
+        console.error(
+          "[createPaymentAction] Échec de la ventilation d'échéancier :",
+          allocation.message,
+        );
+      }
+    }
 
     revalidatePath("/dashboard/payments");
 
@@ -742,7 +1199,7 @@ export async function updatePaymentAction(
     // Isolation multi-tenant : le règlement doit appartenir à l'organisation active.
     const existing = await prisma.payment.findFirst({
       where: { id: paymentId, organizationId },
-      select: { id: true },
+      select: { id: true, studentId: true, enrollmentId: true },
     });
 
     if (!existing) {
@@ -766,10 +1223,27 @@ export async function updatePaymentAction(
       };
     }
 
+    // IMPUTATION PRÉSERVÉE : l'édition d'un règlement (montant, référence,
+    // statut…) conserve sa classe créditée — le sélecteur d'imputation
+    // n'existe que sur la création et une réédition ne doit jamais basculer
+    // silencieusement l'écriture d'une ancienne classe vers la classe
+    // courante. Seul un CHANGEMENT D'ÉTUDIENT déclenche une nouvelle
+    // résolution (sur la classe du nouvel étudiant). Les corrections
+    // « hors système » (isOutOfSystem) restent le mécanisme qui protège la
+    // trésorerie active sur les écritures d'historique.
+    const enrollmentId =
+      existing.studentId === parsed.data.studentId && existing.enrollmentId
+        ? existing.enrollmentId
+        : await resolveEnrollmentIdForStudent(prisma, {
+            organizationId,
+            studentId: parsed.data.studentId,
+          });
+
     await prisma.payment.update({
       where: { id: paymentId },
       data: {
         studentId: parsed.data.studentId,
+        enrollmentId,
         amount: parsed.data.amount,
         paymentMethod: parsed.data.paymentMethod,
         status: parsed.data.status,

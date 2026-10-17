@@ -17,6 +17,7 @@ import {
 import {
   createPaymentAction,
   type PaymentFormState,
+  type StudentClassImputationDTO,
   type StudentOptionDTO,
 } from "@/actions/payments";
 import { Button } from "@/components/ui/button";
@@ -79,9 +80,26 @@ function FieldError({ message }: { message?: string }) {
  * payer. La ligne « Paiements antérieurs » n'apparaît que si un héritage hors
  * système est déduit, afin que l'égalité Total dû − Réglé − Hérité = Reste
  * demeure exacte.
+ *
+ * Lorsqu'une ANCIENNE classe est ciblée par le sélecteur d'imputation, le
+ * récap bascule sur les soldes PROPRES de cette classe (l'héritage hors
+ * système reste rattaché à la scolarité courante et n'est donc pas repris).
  */
-function StudentFinanceSummary({ student }: { student: StudentOptionDTO }) {
-  const remaining = student.remainingAmount;
+function StudentFinanceSummary({
+  student,
+  scope,
+}: {
+  student: StudentOptionDTO;
+  /** Classe ciblée par l'imputation (écartée sur la classe courante). */
+  scope?: StudentClassImputationDTO | null;
+}) {
+  const scoped = scope != null && !scope.isCurrent ? scope : null;
+  const totalDue = scoped ? scoped.totalDue : student.netAmount;
+  const paidAmount = scoped ? scoped.paidAmount : student.paidAmount;
+  const legacyCredit = scoped ? 0 : student.legacyCredit;
+  const remaining = scoped
+    ? scoped.remainingAmount
+    : student.remainingAmount;
   const isFullyPaid = remaining !== null && remaining <= PAYMENT_AMOUNT_EPSILON;
 
   return (
@@ -89,26 +107,27 @@ function StudentFinanceSummary({ student }: { student: StudentOptionDTO }) {
       <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
         <WalletIcon className="size-3.5 text-primary" />
         Récapitulatif de scolarité
+        {scoped ? ` — ${scoped.className}` : ""}
       </div>
 
       <dl className="grid gap-1 text-sm">
         <div className="flex items-center justify-between gap-3">
           <dt className="text-muted-foreground">Total dû</dt>
           <dd className="font-medium tabular-nums">
-            {student.netAmount !== null ? formatAmount(student.netAmount) : "—"}
+            {totalDue !== null ? formatAmount(totalDue) : "—"}
           </dd>
         </div>
         <div className="flex items-center justify-between gap-3">
           <dt className="text-muted-foreground">Déjà réglé</dt>
           <dd className="font-medium tabular-nums text-emerald-600 dark:text-emerald-400">
-            {formatAmount(student.paidAmount)}
+            {formatAmount(paidAmount)}
           </dd>
         </div>
-        {student.legacyCredit > 0 ? (
+        {legacyCredit > 0 ? (
           <div className="flex items-center justify-between gap-3">
             <dt className="text-muted-foreground">Paiements antérieurs</dt>
             <dd className="font-medium tabular-nums">
-              {formatAmount(student.legacyCredit)}
+              {formatAmount(legacyCredit)}
             </dd>
           </div>
         ) : null}
@@ -136,10 +155,11 @@ function StudentFinanceSummary({ student }: { student: StudentOptionDTO }) {
         </div>
       </dl>
 
-      {student.netAmount === null ? (
+      {totalDue === null ? (
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
-          Aucun coût de scolarité n’est défini pour cet étudiant : le montant
+          Aucun coût de scolarité n’est défini pour{" "}
+          {scoped ? "cette classe" : "cet étudiant"} : le montant
           n’est pas plafonné.
         </p>
       ) : null}
@@ -157,6 +177,9 @@ export function AddPaymentDialog({
   // Étudiant sélectionné (piloté) : conditionne l'affichage du récap et le
   // plafonnement du montant saisi.
   const [selectedStudentId, setSelectedStudentId] = React.useState("");
+  // Classe cible de l'imputation (« Imputer le paiement sur la classe ») :
+  // présélectionnée sur la classe ACTUELLE de l'étudiant à sa sélection.
+  const [selectedClassId, setSelectedClassId] = React.useState("");
   // Montant contrôlé pour valider en temps réel « montant ≤ reste à payer ».
   const [amount, setAmount] = React.useState("");
 
@@ -185,7 +208,22 @@ export function AddPaymentDialog({
     [students, selectedStudentId],
   );
 
-  const remaining = selectedStudent?.remainingAmount ?? null;
+  // Classe ciblée par l'imputation (sélecteur « Imputer sur la classe »).
+  // `null` si l'étudiant n'a aucune inscription (comportement historique :
+  // plafond global).
+  const selectedClass = React.useMemo(
+    () =>
+      selectedStudent?.classes.find((c) => c.classId === selectedClassId) ??
+      null,
+    [selectedStudent, selectedClassId],
+  );
+
+  // Plafond du montant : reste à payer de la CLASSE CIBLÉE lorsqu'on s'impute
+  // sur une ancienne classe (arriéré propre), solde global de l'étudiant sinon
+  // (classe courante — les deux soldes coïncident par construction).
+  const remaining = selectedClass
+    ? selectedClass.remainingAmount
+    : (selectedStudent?.remainingAmount ?? null);
   const isFullyPaid = remaining !== null && remaining <= PAYMENT_AMOUNT_EPSILON;
 
   const parsedAmount = Number(amount.replace(",", "."));
@@ -210,6 +248,7 @@ export function AddPaymentDialog({
     setOpen(next);
     if (!next) {
       setSelectedStudentId("");
+      setSelectedClassId("");
       setAmount("");
     }
   };
@@ -260,6 +299,14 @@ export function AddPaymentDialog({
                 onValueChange={(value) => {
                   setSelectedStudentId(value);
                   setAmount("");
+                  // Imputation par défaut : classe ACTUELLE de l'étudiant (la
+                  // seule toujours visible — les anciennes soldées sont masquées),
+                  // à défaut la première classe encore endettée.
+                  const next = students.find((s) => s.id === value);
+                  const preferred =
+                    next?.classes.find((c) => c.isCurrent) ??
+                    next?.classes[0];
+                  setSelectedClassId(preferred?.classId ?? "");
                 }}
               >
                 <SelectTrigger
@@ -281,9 +328,54 @@ export function AddPaymentDialog({
               <FieldError message={fieldErrors.studentId} />
             </div>
 
-            {/* Récapitulatif financier — affiché dès qu'un étudiant est choisi. */}
+            {/* IMPUTATION SÉLECTIVE : classe créditée par le règlement.
+                Seules les classes renvoyées par le serveur sont listées :
+                classe actuelle + anciennes classes encore endettées (les
+                anciennes entièrement soldées sont masquées côté serveur). */}
+            {selectedStudent && selectedStudent.classes.length > 0 ? (
+              <div className="grid gap-2">
+                <Label htmlFor="classId">Imputer le paiement sur la classe *</Label>
+                <Select
+                  name="classId"
+                  value={selectedClassId}
+                  onValueChange={setSelectedClassId}
+                >
+                  <SelectTrigger
+                    id="classId"
+                    className="w-full"
+                    aria-invalid={Boolean(fieldErrors.classId)}
+                  >
+                    <SelectValue placeholder="Sélectionner une classe" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedStudent.classes.map((option) => (
+                      <SelectItem key={option.classId} value={option.classId}>
+                        {option.className} — {option.academicYear}
+                        {option.isCurrent ? " (actuelle)" : ""}
+                        {option.remainingAmount !== null
+                          ? ` · reste ${formatAmount(option.remainingAmount)}`
+                          : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldError message={fieldErrors.classId} />
+                <p className="text-xs text-muted-foreground">
+                  Le règlement ne sera ventilé que sur la classe choisie :
+                  les soldes et échéanciers des autres classes restent
+                  intacts.
+                </p>
+              </div>
+            ) : null}
+
+            {/* Récapitulatif financier — affiché dès qu'un étudiant est choisi,
+                scopé sur la classe ciblée lors d'une imputation sur ancienne
+                classe. */}
             {selectedStudent ? (
-              <StudentFinanceSummary student={selectedStudent} />
+              <StudentFinanceSummary
+                student={selectedStudent}
+                scope={selectedClass}
+              />
             ) : null}
 
             {/* Scolarité entièrement réglée : aucune saisie possible. */}

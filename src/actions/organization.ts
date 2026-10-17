@@ -6,6 +6,10 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentOrganizationId, isNextRedirectError } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import {
+  normalizeCertificateTemplate,
+  type CertificateTemplateKey,
+} from "@/lib/certificate-template";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -39,6 +43,18 @@ export type OrganizationInfoDTO = {
   /** Numéro IFU / NIF (mention légale des reçus). */
   ifu: string | null;
   /**
+   * Modèle graphique par défaut des certificats émis par l'organisation
+   * (affichage + impression A4 paysage). Voir `certificate-template.ts`.
+   */
+  certificateTemplate: CertificateTemplateKey;
+  /**
+   * Gabarit de texte personnalisé du corps des certificats (`null` = texte
+   * standard). Supporte les variables dynamiques `{{studentName}}`,
+   * `{{matricule}}`, `{{courseName}}`, `{{level}}`, `{{date}}`… Voir
+   * `certificate-shared.ts`.
+   */
+  certificateTextTemplate: string | null;
+  /**
    * Frais d'inscription par défaut (FCFA), facturés une seule fois à
    * l'inscription d'un étudiant qui ne les a pas encore réglés.
    */
@@ -65,6 +81,8 @@ export type OrganizationFormField =
   | "logoUrl"
   | "rccm"
   | "ifu"
+  | "certificateTemplate"
+  | "certificateTextTemplate"
   | "defaultRegistrationFee"
   | "initialCashBalance"
   | "registrationFeePolicy";
@@ -80,6 +98,9 @@ const MAX_REGISTRATION_FEE = 10_000_000;
 
 /** Plafond de sécurité pour les montants financiers saisis (FCFA). */
 const MAX_AMOUNT_LIMIT = 1_000_000_000;
+
+/** Plafond de taille du gabarit de texte de certificat (caractères). */
+const MAX_CERTIFICATE_TEXT_TEMPLATE = 2000;
 
 // --------------------------------------
 // Server Actions
@@ -109,6 +130,8 @@ export async function getOrganizationInfo(): Promise<OrganizationInfoDTO> {
         logoUrl: true,
         rccm: true,
         ifu: true,
+        certificateTemplate: true,
+        certificateTextTemplate: true,
         defaultRegistrationFee: true,
         registrationFeePolicy: true,
         initialCashBalance: true,
@@ -137,6 +160,10 @@ export async function getOrganizationInfo(): Promise<OrganizationInfoDTO> {
       logoUrl: organization.logoUrl,
       rccm: organization.rccm,
       ifu: organization.ifu,
+      certificateTemplate: normalizeCertificateTemplate(
+        organization.certificateTemplate
+      ),
+      certificateTextTemplate: organization.certificateTextTemplate,
       defaultRegistrationFee: organization.defaultRegistrationFee,
       registrationFeePolicy: organization.registrationFeePolicy,
       initialCashBalance: organization.initialCashBalance,
@@ -271,6 +298,19 @@ export async function updateOrganizationAction(
   const rccm = String(formData.get("rccm") ?? "").trim();
   const ifu = String(formData.get("ifu") ?? "").trim();
 
+  // Modèle de certificat par défaut : restreint aux 4 valeurs connues
+  // (`normalizeCertificateTemplate` retombe sur le défaut sinon).
+  const certificateTemplate = normalizeCertificateTemplate(
+    formData.get("certificateTemplate")
+  );
+
+  // Gabarit de texte personnalisé du certificat : texte long libre (les
+  // variables `{{…}}` sont interprétées à la génération). Vide ⇒ texte
+  // standard. La longueur est plafonnée pour éviter les abus.
+  const certificateTextTemplate = String(
+    formData.get("certificateTextTemplate") ?? ""
+  ).trim();
+
   // Frais d'inscription par défaut : montant positif ; vide ⇒ 0 (aucun frais).
   const rawDefaultRegistrationFee = String(
     formData.get("defaultRegistrationFee") ?? ""
@@ -362,6 +402,11 @@ export async function updateOrganizationAction(
       "Le numéro IFU / NIF ne doit pas dépasser 60 caractères.";
   }
 
+  if (certificateTextTemplate.length > MAX_CERTIFICATE_TEXT_TEMPLATE) {
+    fieldErrors.certificateTextTemplate =
+      `Le texte du certificat ne doit pas dépasser ${MAX_CERTIFICATE_TEXT_TEMPLATE} caractères.`;
+  }
+
   if (Number.isNaN(defaultRegistrationFee)) {
     fieldErrors.defaultRegistrationFee =
       "Les frais d'inscription doivent être un nombre.";
@@ -408,6 +453,8 @@ export async function updateOrganizationAction(
         logoUrl: logoUrl || null,
         rccm: rccm || null,
         ifu: ifu || null,
+        certificateTemplate,
+        certificateTextTemplate: certificateTextTemplate || null,
         defaultRegistrationFee,
         registrationFeePolicy,
         initialCashBalance,

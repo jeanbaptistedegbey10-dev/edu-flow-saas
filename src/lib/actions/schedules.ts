@@ -9,6 +9,7 @@ import {
   isNextRedirectError,
 } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
+import { resolveEnrollmentIdForStudent } from "@/lib/enrollment-scope";
 
 // --------------------------------------
 // Types publics
@@ -206,7 +207,12 @@ async function refreshOverdueStatus(): Promise<number> {
   const now = new Date();
   const result = await prisma.paymentScheduleItem.updateMany({
     where: {
-      schedule: { organizationId, activatedAt: { not: null } },
+      // Échéanciers ACTIVÉS et NON SCELLÉS : la clôture de classe pose un
+      // scellement comptable (`sealedAt`) qui fige le décompte — les tranches
+      // d'une classe clôturée ne basculent plus en retard automatique. Les
+      // corrections administratives d'historique restent possibles hors
+      // décompte actif (règlements « hors système »).
+      schedule: { organizationId, activatedAt: { not: null }, sealedAt: null },
       status: { in: ["PENDING", "PARTIAL"] },
       dueDate: { lt: now },
     },
@@ -268,10 +274,20 @@ export async function generatePaymentSchedule(
       return { installmentNumber, amount, dueDate, status: "PENDING" as ScheduleItemStatus };
     });
 
+    // Rattachement à l'inscription de l'étudiant (classe + année académique) :
+    // l'échéancier autonome n'a pas de classe explicite, mais suit
+    // l'inscription courante du profil (séparation stricte Étudiant /
+    // Inscription).
+    const enrollmentId = await resolveEnrollmentIdForStudent(prisma, {
+      organizationId,
+      studentId,
+    });
+
     const schedule = await prisma.paymentSchedule.create({
       data: {
         organizationId,
         studentId,
+        enrollmentId,
         totalAmount,
         installmentsCount,
         startDate,
@@ -1002,7 +1018,7 @@ export async function activateSchedulesForClass(classId: string): Promise<number
         },
         enrollments: {
           where: { status: "ACTIVE" },
-          select: { studentId: true },
+          select: { id: true, studentId: true },
         },
       },
     });
@@ -1021,15 +1037,48 @@ export async function activateSchedulesForClass(classId: string): Promise<number
       // Un seul échéancier actif par étudiant et par classe.
       const already = await prisma.paymentSchedule.findFirst({
         where: { organizationId, studentId: enrollment.studentId, classId },
-        select: { id: true },
+        select: {
+          id: true,
+          activatedAt: true,
+          startDate: true,
+          items: { select: { id: true, dueDate: true, status: true } },
+        },
       });
-      if (already) continue;
+
+      if (already) {
+        // Échéancier pré-créé avant le démarrage (réinscription dans une
+        // classe « qui va démarrer ») : on l'active et on recale ses échéances
+        // sur la date de démarrage EFFECTIVE afin que le décompte des tranches
+        // parte du premier jour de la classe, pas de celui de la réinscription.
+        if (already.activatedAt) continue;
+
+        const shiftMs = now.getTime() - already.startDate.getTime();
+
+        await prisma.paymentSchedule.update({
+          where: { id: already.id },
+          data: { activatedAt: now, startDate: now },
+        });
+
+        for (const item of already.items) {
+          // Les tranches déjà soldées conservent leur échéance d'origine.
+          if (item.status === "PAID") continue;
+          await prisma.paymentScheduleItem.update({
+            where: { id: item.id },
+            data: { dueDate: new Date(item.dueDate.getTime() + shiftMs) },
+          });
+        }
+
+        activated += 1;
+        continue;
+      }
 
       await prisma.paymentSchedule.create({
         data: {
           organizationId,
           studentId: enrollment.studentId,
           classId,
+          // Rattachement strict à l'inscription (classe + année) de l'étudiant.
+          enrollmentId: enrollment.id,
           activatedAt: now,
           totalAmount,
           installmentsCount: template.installmentsCount,
@@ -1064,19 +1113,36 @@ export async function activateSchedulesForClass(classId: string): Promise<number
   }
 }
 
+/** Résultat de la garantie d'échéancier étudiant/classe. */
+export type EnsureScheduleResult = {
+  /** Un échéancier vient d'être CRÉÉ pour ce couple étudiant/classe. */
+  created: boolean;
+  /** Identifiant de l'échéancier existant ou créé, `null` si aucun modèle. */
+  scheduleId: string | null;
+};
+
 /**
- * Active l'échéancier d'un étudiant réinscrit dans une classe DÉJÀ démarrée
- * (cas de la réinscription administrative, hors démarrage initial).
+ * Garantit l'existence d'un échéancier DÉDIÉ et PROPRE à une classe pour un
+ * étudiant (réinscription vers une nouvelle classe / une nouvelle année).
  *
- * Idempotent : sans effet si un échéancier existe déjà pour ce couple
- * étudiant/classe, ou si la classe n'est pas démarrée / n'a pas de modèle.
+ * L'échéancier est copié depuis le modèle du cours porteur :
+ * - classe DÉMARRÉE (IN_PROGRESS / ACTIVE) : créé ACTIVÉ (`activatedAt = now`),
+ *   le décompte des tranches part immédiatement ;
+ * - classe pas encore démarrée (« nouvelle classe qui va démarrer ») : créé en
+ *   ATTENTE (`activatedAt = null`), aucun retard produit tant que la classe
+ *   n'a pas démarré. `activateSchedulesForClass` l'activera au démarrage en
+ *   re-calant les échéances sur la date effective de démarrage.
  *
- * @returns `true` si un échéancier a été créé.
+ * Idempotent : un échéancier déjà existant pour ce couple étudiant/classe est
+ * retourné tel quel (jamais dupliqué, jamais réinitialisé).
+ *
+ * @returns l'issue de la garantie (`created = false` si rien à créer).
  */
-export async function activateScheduleForStudentInClass(
+export async function ensurePaymentScheduleForStudentClass(
   studentId: string,
-  classId: string
-): Promise<boolean> {
+  classId: string,
+  options: { requireStarted?: boolean } = {}
+): Promise<EnsureScheduleResult> {
   const organizationId = await getCurrentOrganizationId();
 
   try {
@@ -1090,7 +1156,6 @@ export async function activateScheduleForStudentInClass(
             paymentSchedule: {
               select: {
                 installmentsCount: true,
-                intervalDays: true,
                 items: {
                   orderBy: { installmentNumber: "asc" },
                   select: { amount: true, offsetDays: true },
@@ -1102,28 +1167,48 @@ export async function activateScheduleForStudentInClass(
       },
     });
 
-    if (!klass) return false;
-    // La classe doit être démarrée pour activer le décompte.
-    if (klass.status !== "IN_PROGRESS" && klass.status !== "ACTIVE") return false;
+    if (!klass) return { created: false, scheduleId: null };
+
+    const isStarted =
+      klass.status === "IN_PROGRESS" || klass.status === "ACTIVE";
+
+    // Compatibilité avec l'ancien contrat « activation au démarrage » :
+    // `requireStarted` interdit la création sur une classe non démarrée.
+    if (options.requireStarted && !isStarted) {
+      return { created: false, scheduleId: null };
+    }
 
     const template = klass.course.paymentSchedule;
-    if (!template || template.items.length === 0) return false;
+    // Pas de modèle paramétré : rien à facturer automatiquement (l'échéancier
+    // reste manuel — cf. CreateScheduleDialog).
+    if (!template || template.items.length === 0) {
+      return { created: false, scheduleId: null };
+    }
 
-    const already = await prisma.paymentSchedule.findFirst({
+    // Idempotence : un échéancier existe déjà pour CE couple étudiant/classe.
+    const existing = await prisma.paymentSchedule.findFirst({
       where: { organizationId, studentId, classId },
       select: { id: true },
     });
-    if (already) return false;
+    if (existing) return { created: false, scheduleId: existing.id };
 
     const now = new Date();
     const totalAmount = template.items.reduce((s, i) => s + i.amount, 0);
 
-    await prisma.paymentSchedule.create({
+    // Rattachement strict à l'inscription (classe + année) de l'étudiant.
+    const enrollmentId = await resolveEnrollmentIdForStudent(prisma, {
+      organizationId,
+      studentId,
+      classId,
+    });
+
+    const schedule = await prisma.paymentSchedule.create({
       data: {
         organizationId,
         studentId,
         classId,
-        activatedAt: now,
+        enrollmentId,
+        activatedAt: isStarted ? now : null,
         totalAmount,
         installmentsCount: template.installmentsCount,
         startDate: now,
@@ -1141,14 +1226,159 @@ export async function activateScheduleForStudentInClass(
           }),
         },
       },
+      select: { id: true },
     });
 
     revalidatePath("/dashboard/echeances");
-    return true;
+    return { created: true, scheduleId: schedule.id };
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    console.error("[activateScheduleForStudentInClass] Échec :", error);
-    return false;
+    console.error("[ensurePaymentScheduleForStudentClass] Échec :", error);
+    return { created: false, scheduleId: null };
+  }
+}
+
+
+/**
+ * Active l'échéancier d'un étudiant réinscrit dans une classe DÉJÀ démarrée
+ * (cas de la réinscription administrative, hors démarrage initial).
+ *
+ * Idempotent : sans effet si un échéancier existe déjà pour ce couple
+ * étudiant/classe, ou si la classe n'est pas démarrée / n'a pas de modèle.
+ *
+ * @returns `true` si un échéancier a été créé.
+ */
+export async function activateScheduleForStudentInClass(
+  studentId: string,
+  classId: string
+): Promise<boolean> {
+  const result = await ensurePaymentScheduleForStudentClass(studentId, classId, {
+    requireStarted: true,
+  });
+  return result.created;
+}
+
+// ============================================================================
+// IMPUTATION D'UN RÈGLEMENT À UNE CLASSE (filtrage intelligent)
+// ============================================================================
+
+/** Résultat de la ventilation d'un règlement sur UN échéancier de classe. */
+export type ClassScheduleAllocationResult =
+  | { ok: true; allocatedAmount: number; remainingAmount: number }
+  | { ok: false; message: string };
+
+/**
+ * Ventile un règlement sur l'échéancier d'UNE SEULE classe (imputation
+ * sélective du module Paiements).
+ *
+ * RÈGLE DE SÉCURITÉ — seules les tranches de l'échéancier rattaché au couple
+ * (étudiant, classe) sont mises à jour : les échéanciers des autres classes du
+ * même étudiant (nouvelle classe / nouvelle année) restent TOTALEMENT INTACTS.
+ *
+ * Exemple : 20 000 FCFA imputés sur A1 (30 000 FCFA dus) → échéancier A1
+ * soldé à hauteur de 20 000 FCFA (reste 10 000), échéancier A2 inchangé.
+ *
+ * @returns la ventilation réalisée (`allocatedAmount = 0` si la classe n'a pas
+ * encore d'échéancier : le règlement reste acquis à la trésorerie globale et au
+ * solde de la classe via son rattachement `enrollmentId`).
+ */
+export async function allocatePaymentToClassSchedule(input: {
+  studentId: string;
+  classId: string;
+  amount: number;
+}): Promise<ClassScheduleAllocationResult> {
+  const organizationId = await getCurrentOrganizationId();
+
+  try {
+    const schedule = await prisma.paymentSchedule.findFirst({
+      where: {
+        organizationId,
+        studentId: input.studentId,
+        classId: input.classId,
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+
+    // Aucun échéancier pour cette classe : rien à ventiler.
+    if (!schedule) {
+      return {
+        ok: true,
+        allocatedAmount: 0,
+        remainingAmount: Math.max(input.amount, 0),
+      };
+    }
+
+    // Tranches impayées de CET échéancier uniquement (les plus anciennes).
+    const unpaidItems = await prisma.paymentScheduleItem.findMany({
+      where: {
+        scheduleId: schedule.id,
+        status: { in: ["PENDING", "PARTIAL", "OVERDUE"] },
+      },
+      orderBy: [{ dueDate: "asc" }, { installmentNumber: "asc" }],
+    });
+
+    if (unpaidItems.length === 0) {
+      return {
+        ok: true,
+        allocatedAmount: 0,
+        remainingAmount: Math.max(input.amount, 0),
+      };
+    }
+
+    let remainingAmount = input.amount;
+    let allocatedAmount = 0;
+
+    await prisma.$transaction(async (tx) => {
+      for (const item of unpaidItems) {
+        if (remainingAmount <= 0) break;
+
+        const due = item.amount;
+        const balance = due - item.paidAmount;
+        const toAllocate = Math.min(balance, remainingAmount);
+        if (toAllocate <= 0) continue;
+
+        const newPaidAmount = item.paidAmount + toAllocate;
+        const newStatus: ScheduleItemStatus =
+          newPaidAmount >= due ? "PAID" : "PARTIAL";
+
+        await tx.paymentScheduleItem.update({
+          where: { id: item.id },
+          data: {
+            paidAmount: newPaidAmount,
+            status: newStatus,
+            paidAt: newStatus === "PAID" ? new Date() : item.paidAt,
+          },
+        });
+
+        remainingAmount -= toAllocate;
+        allocatedAmount += toAllocate;
+      }
+
+      // Statut global de l'échéancier IMPUTÉ (uniquement celui-ci).
+      const allItems = await tx.paymentScheduleItem.findMany({
+        where: { scheduleId: schedule.id },
+        select: { status: true },
+      });
+      const allPaid = allItems.every((item) => item.status === "PAID");
+
+      await tx.paymentSchedule.update({
+        where: { id: schedule.id },
+        data: { status: allPaid ? "COMPLETED" : "PARTIAL" },
+      });
+    });
+
+    revalidatePath("/dashboard/echeances");
+    revalidatePath(`/dashboard/students/${input.studentId}`);
+
+    return { ok: true, allocatedAmount, remainingAmount };
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    console.error("[allocatePaymentToClassSchedule] Échec :", error);
+    return {
+      ok: false,
+      message: "Une erreur est survenue lors de la ventilation du règlement.",
+    };
   }
 }
 

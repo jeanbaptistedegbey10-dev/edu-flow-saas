@@ -10,12 +10,12 @@ export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const pathname = usePathname();
-  /** Vrai lorsque la Navbar est affichée sur la page d'accueil. */
-  const isHome = pathname === "/";
+  /** Vrai lorsque la Navbar est affichée sur la landing (déplacée à /accueil). */
+  const isHome = pathname === "/accueil";
 
   /**
-   * Clic sur le logo : sur la page d'accueil, retour fluide en haut du Hero ;
-   * sur les autres pages, navigation classique vers « / ».
+   * Clic sur le logo : sur la landing, retour fluide en haut du Hero ;
+   * sur les autres pages, navigation classique vers « /accueil ».
    */
   const handleLogoClick = (e: MouseEvent) => {
     setIsMobileOpen(false);
@@ -44,7 +44,7 @@ export default function Navbar() {
       <nav className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
-          <Link href="/" onClick={handleLogoClick} className="flex items-center gap-2 group">
+          <Link href="/accueil" onClick={handleLogoClick} className="flex items-center gap-2 group">
             <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-brand/20 border border-brand/30 group-hover:bg-brand/30 transition-colors">
               <GraduationCap className="w-5 h-5 text-brand-light" />
             </div>
@@ -58,7 +58,7 @@ export default function Navbar() {
             {NAV_LINKS.map((link) => (
               <Link
                 key={link.href}
-                href={isHome ? link.href : `/${link.href}`}
+                href={isHome ? link.href : `/accueil${link.href}`}
                 className="text-sm text-gray-300 hover:text-white transition-colors relative after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-brand after:transition-all hover:after:w-full"
               >
                 {link.label}
@@ -126,7 +126,7 @@ export default function Navbar() {
             {NAV_LINKS.map((link) => (
               <Link
                 key={link.href}
-                href={isHome ? link.href : `/${link.href}`}
+                href={isHome ? link.href : `/accueil${link.href}`}
                 onClick={() => setIsMobileOpen(false)}
                 className="block py-2 text-base text-gray-300 hover:text-white transition-colors"
               >

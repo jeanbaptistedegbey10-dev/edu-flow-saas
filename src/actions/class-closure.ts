@@ -120,6 +120,14 @@ export type CloseClassInput = {
    * comptabilité de l'élève.
    */
   chargeReRegistrationFee: boolean;
+  /**
+   * Archivage immédiat : `true` ⇒ la classe clôturée passe directement au
+   * statut ARCHIVED (lecture seule) au lieu de COMPLETED (clôturée — le
+   * « CLOSED » du cycle de vie). Dans les deux cas, les inscriptions sont
+   * finalisées (PASSED / FAILED / DROPPED / PROMOTED_MANUALLY selon la
+   * décision, COMPLETED sinon) et la comptabilité est scellée.
+   */
+  archive?: boolean;
 };
 
 /** Résultat de l'exécution de la clôture. */
@@ -136,6 +144,13 @@ export type CloseClassResult =
       certificatesGenerated: number;
       /** Bulletins finalisés (statuts de modules figés pour l'impression). */
       bulletinsFinalized: number;
+      /**
+       * Inscriptions sans décision explicite passées au statut final
+       * COMPLETED — aucune inscription ne reste ACTIVE après la clôture.
+       */
+      completedEnrollments: number;
+      /** Échéanciers de la classe scellés (décompte figé) à la clôture. */
+      sealedSchedules: number;
     }
   | {
       ok: false;
@@ -641,9 +656,19 @@ export async function getClassClosureReadiness(
  *   basculés au statut RETAKE (à reprendre) ;
  * - `DROPPED` : inscription marquée DROPPED (abandon).
  *
- * La classe clôturée passe au statut `COMPLETED` : son historique (inscriptions,
- * notes, bulletins) reste consultable sans altérer les données des nouvelles
- * cohortes.
+ * Effets sur la classe et la comptabilité :
+ * - la classe passe à COMPLETED (« clôturée » / CLOSED du cycle de vie), ou
+ *   directement à ARCHIVED si `input.archive` est demandé ;
+ * - TOUTES les inscriptions de la classe sortent du statut ACTIVE : celles
+ *   sans décision explicite passent au statut final COMPLETED ;
+ * - la comptabilité de la classe est SCELLÉE : les échéanciers
+ *   (`PaymentSchedule.sealedAt`) sont figés — plus de retard automatique. Les
+ *   corrections administratives d'historique restent possibles, mais les
+ *   règlements qui en découlent doivent être saisis « hors système »
+ *   (`isOutOfSystem`) pour ne jamais impacter la trésorerie active.
+ *
+ * La classe clôturée conserve son historique (inscriptions, notes, bulletins)
+ * consultable sans altérer les données des nouvelles cohortes.
  */
 export async function closeClassAction(
   input: CloseClassInput
@@ -964,14 +989,23 @@ export async function closeClassAction(
             data: { status: enrollmentStatus, finalDecisionNote: finalNote },
           });
 
+          // Inscription dans la classe cible (si passation) : capturée pour
+          // rattacher le cas échéant les frais de réinscription à la NOUVELLE
+          // inscription. Sans classe cible, le frais reste rattaché à
+          // l'inscription de la classe clôturée (cas « admis sans transfert »).
+          let newEnrollmentId: string | null = null;
+
           if (targetClass) {
             // Dossier pédagogique dans la classe cible — AUCUN frais généré par
-            // défaut (la comptabilité de l'élève n'est pas impactée).
-            await tx.classEnrollment.upsert({
+            // défaut (la comptabilité de l'élève n'est pas impactée). Clé
+            // (étudiant, classe, année) : la réinscription crée une nouvelle
+            // ligne sans écraser l'historique de la classe clôturée.
+            const newEnrollment = await tx.classEnrollment.upsert({
               where: {
-                studentId_classId: {
+                studentId_classId_academicYear: {
                   studentId: decision.studentId,
                   classId: targetClass.id,
+                  academicYear: getCurrentAcademicYear(),
                 },
               },
               create: {
@@ -987,6 +1021,7 @@ export async function closeClassAction(
                 enrolledAt: new Date(),
               },
             });
+            newEnrollmentId = newEnrollment.id;
 
             await tx.student.update({
               where: { id: decision.studentId },
@@ -1048,6 +1083,10 @@ export async function closeClassAction(
               data: {
                 organizationId,
                 studentId: decision.studentId,
+                // Le frais de réinscription appartient à la NOUVELLE
+                // inscription (classe cible + année courante) si un transfert
+                // est acté — sinon à l'inscription de la classe clôturée.
+                enrollmentId: newEnrollmentId ?? enrollment.id,
                 createdById: user.id,
                 createdByName: user.name,
                 amount: reRegistrationFee,
@@ -1090,11 +1129,14 @@ export async function closeClassAction(
           // même niveau (même cours porteur) : nouvelle inscription ACTIVE
           // sans écraser l'historique de la classe clôturée.
           if (repeatTargetClass) {
-            await tx.classEnrollment.upsert({
+            // Clé (étudiant, classe, année) : la réinscription du redoublant
+            // crée une NOUVELLE ligne sans écraser la classe clôturée.
+            const repeatEnrollment = await tx.classEnrollment.upsert({
               where: {
-                studentId_classId: {
+                studentId_classId_academicYear: {
                   studentId: decision.studentId,
                   classId: repeatTargetClass.id,
+                  academicYear: getCurrentAcademicYear(),
                 },
               },
               create: {
@@ -1137,6 +1179,9 @@ export async function closeClassAction(
                 data: {
                   organizationId,
                   studentId: decision.studentId,
+                  // Le frais appartient à la NOUVELLE inscription (nouvelle
+                  // session du même niveau), pas à l'inscription clôturée.
+                  enrollmentId: repeatEnrollment.id,
                   createdById: user.id,
                   createdByName: user.name,
                   amount: reRegistrationFee,
@@ -1164,6 +1209,27 @@ export async function closeClassAction(
           dropped += 1;
         }
       }
+
+      // Séparation stricte + clôture intégrale : AUCUNE inscription ne reste
+      // ACTIVE dans la classe clôturée. Les étudiants sans décision
+      // individuelle explicite passent au statut final COMPLETED (inscription
+      // terminée — historique consultable, jamais re-comptabilisé comme
+      // « en cours »).
+      const completedEnrollments = await tx.classEnrollment.updateMany({
+        where: { classId: klass.id, status: "ACTIVE" },
+        data: { status: "COMPLETED" },
+      });
+
+      // Scellement comptable : les échéanciers de la classe sont figés
+      // (aucune tranche ne basculera plus en retard automatique — voir
+      // `refreshOverdueStatus`). Les règlements déjà enregistrés restent
+      // l'historique vrai de la trésorerie ; toute correction administrative
+      // ultérieure doit être saisie « hors système » (`isOutOfSystem`) pour
+      // ne jamais impacter la trésorerie active.
+      const sealedSchedules = await tx.paymentSchedule.updateMany({
+        where: { classId: klass.id, sealedAt: null },
+        data: { sealedAt: new Date() },
+      });
 
       // Génération / finalisation automatique des bulletins : les notes
       // encore sans statut sont figées (VALIDATED / FAILED selon le seuil),
@@ -1213,10 +1279,12 @@ export async function closeClassAction(
       }
       const bulletinsFinalized = finalizedStudents.size;
 
-      // La classe clôturée est archivée pédagogiquement (COMPLETED).
+      // La classe clôturée est archivée pédagogiquement (COMPLETED — le
+      // « CLOSED » du cycle de vie), ou directement passée en lecture seule
+      // (ARCHIVED) si l'archivage immédiat est demandé.
       await tx.class.update({
         where: { id: klass.id },
-        data: { status: "COMPLETED" },
+        data: { status: input.archive ? "ARCHIVED" : "COMPLETED" },
       });
 
       return {
@@ -1227,6 +1295,8 @@ export async function closeClassAction(
         reassigned,
         certificatesGenerated,
         bulletinsFinalized,
+        completedEnrollments: completedEnrollments.count,
+        sealedSchedules: sealedSchedules.count,
       };
     });
 
@@ -1248,6 +1318,9 @@ export async function closeClassAction(
         certificatesGenerated: result.certificatesGenerated,
         bulletinsFinalized: result.bulletinsFinalized,
         chargedReRegistrationFee: result.billedCount > 0 ? reRegistrationFee : 0,
+        completedEnrollments: result.completedEnrollments,
+        sealedSchedules: result.sealedSchedules,
+        finalClassStatus: input.archive ? "ARCHIVED" : "COMPLETED",
       },
     });
 
@@ -1272,6 +1345,8 @@ export async function closeClassAction(
       reassigned: result.reassigned,
       certificatesGenerated: result.certificatesGenerated,
       bulletinsFinalized: result.bulletinsFinalized,
+      completedEnrollments: result.completedEnrollments,
+      sealedSchedules: result.sealedSchedules,
     };
   } catch (error) {
     if (isNextRedirectError(error)) throw error;

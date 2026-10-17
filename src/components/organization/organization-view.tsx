@@ -31,8 +31,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { getRoleBadgeClass, getRoleLabel } from "@/lib/role";
+import { CERTIFICATE_TEMPLATE_VARIABLES } from "@/lib/certificate-shared";
+import {
+  CERTIFICATE_TEMPLATES,
+  CERTIFICATE_TEMPLATE_DESCRIPTIONS,
+  CERTIFICATE_TEMPLATE_LABELS,
+  normalizeCertificateTemplate,
+} from "@/lib/certificate-template";
 
 // Formatage déterministe (locale + fuseau fixes) pour éviter tout écart
 // d'hydratation.
@@ -557,6 +565,79 @@ function OrganizationEditForm({ organization }: { organization: OrganizationInfo
           </label>
         </div>
       </div>
+
+      {/* Modèle graphique par défaut des certificats (Étape 3/3) */}
+      <fieldset className="rounded-lg border p-4">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Certificats
+        </legend>
+        <div className="grid gap-2 sm:max-w-md">
+          <Label htmlFor="certificateTemplate">Modèle de certificat par défaut</Label>
+          <select
+            id="certificateTemplate"
+            name="certificateTemplate"
+            defaultValue={normalizeCertificateTemplate(
+              organization.certificateTemplate
+            )}
+            className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+          >
+            {CERTIFICATE_TEMPLATES.map((key) => (
+              <option key={key} value={key}>
+                {CERTIFICATE_TEMPLATE_LABELS[key]}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            {
+              CERTIFICATE_TEMPLATE_DESCRIPTIONS[
+                normalizeCertificateTemplate(organization.certificateTemplate)
+              ]
+            }
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Appliqué à l&apos;aperçu et à l&apos;impression des certificats
+            (format A4 paysage, une seule page). Le logo, les mentions légales
+            et le QR code de vérification y figurent automatiquement.
+          </p>
+        </div>
+
+        <div className="mt-4 grid gap-2">
+          <Label htmlFor="certificateTextTemplate">
+            Texte personnalisé du certificat (optionnel)
+          </Label>
+          <Textarea
+            id="certificateTextTemplate"
+            name="certificateTextTemplate"
+            rows={5}
+            maxLength={2000}
+            defaultValue={organization.certificateTextTemplate ?? ""}
+            placeholder="Laissez vide pour utiliser le texte standard, ou rédigez le vôtre en insérant des variables, par exemple :
+« Nous certifions que {{studentName}} (matricule {{matricule}}) a validé la formation {{courseName}} et atteint le niveau {{level}} ce {{date}}. »"
+            aria-invalid={Boolean(fieldErrors.certificateTextTemplate)}
+          />
+          <FieldError message={fieldErrors.certificateTextTemplate} />
+          <p className="text-xs text-muted-foreground">
+            Laissez ce champ vide pour conserver la mise en page standard. En
+            le remplissant, votre texte remplace le corps du certificat. Vous
+            pouvez insérer les variables suivantes, remplacées automatiquement
+            à la génération et automatiquement mises en gras pour bien
+            ressortir au milieu du paragraphe :
+          </p>
+          <ul className="flex flex-wrap gap-1.5">
+            {CERTIFICATE_TEMPLATE_VARIABLES.map((variable) => (
+              <li key={variable.token}>
+                <code
+                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+                  title={variable.label}
+                >
+                  {`{{${variable.token}}}`}
+                </code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </fieldset>
+
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>
           {pending ? (

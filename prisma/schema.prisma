@@ -127,6 +127,17 @@ enum RegistrationFeePolicy {
   EVERY_NEW_ENROLLMENT
 }
 
+/// Modèle graphique par défaut des certificats / attestations de compétence.
+/// Choisi dans les paramètres de l'organisation, appliqué au rendu HTML
+/// (affichage + impression A4 paysage 1 page). Aligné sur
+/// `src/lib/certificate-template.ts`.
+enum CertificateTemplate {
+  TEMPLATE_1
+  TEMPLATE_2
+  TEMPLATE_3
+  TEMPLATE_4
+}
+
 /// Statut pédagogique d'une classe / cohorte.
 /// Une classe clôturée (fin d'année / de session) devient `COMPLETED` — son
 /// historique (inscriptions, notes, décisions de passage) reste consultable.
@@ -147,13 +158,17 @@ enum ClassStatus {
 /// - `PASSED` : passage en classe supérieure validé automatiquement ;
 /// - `PROMOTED_MANUALLY` : passage accordé manuellement par l'administrateur ;
 /// - `FAILED` : redoublement / non-passage de l'étudiant ;
-/// - `DROPPED` : abandon de l'étudiant au moment de la clôture.
+/// - `DROPPED` : abandon de l'étudiant au moment de la clôture ;
+/// - `COMPLETED` : inscription terminée sans décision pédagogique explicite
+///   (clôture de classe pour un étudiant sans choix de décision — état final
+///   non actif, l'historique reste consultable).
 enum ClassEnrollmentStatus {
   ACTIVE
   PASSED
   FAILED
   PROMOTED_MANUALLY
   DROPPED
+  COMPLETED
 }
 
 /// Statut de validation d'un module pour un étudiant :
@@ -289,6 +304,14 @@ model Organization {
   logoUrl                String?
   rccm                   String?
   ifu                    String?
+  /// Modèle graphique par défaut des certificats émis par l'organisation
+  /// (voir enum `CertificateTemplate` et `src/lib/certificate-template.ts`).
+  certificateTemplate    CertificateTemplate @default(TEMPLATE_1)
+  /// Gabarit de texte personnalisable du corps des certificats. Supporte les
+  /// variables dynamiques `{{studentName}}`, `{{matricule}}`, `{{courseName}}`,
+  /// `{{level}}`, `{{date}}`, `{{organizationName}}`, `{{verificationCode}}`,
+  /// `{{score}}` (voir `certificate-shared.ts`). `null` = texte standard.
+  certificateTextTemplate String?
   /// Frais d'inscription uniques facturés une seule fois par étudiant (FCFA).
   defaultRegistrationFee Float    @default(15000)
   /// Politique de frais d'inscription : une seule fois par étudiant ou à chaque nouvelle inscription.
@@ -595,7 +618,8 @@ model ClassEnrollment {
   /// nouvelle année, l'historique des années précédentes reste intact.
   academicYear      String
   /// Statut de fin de session : ACTIVE tant que la classe n'est pas clôturée,
-  /// puis PASSED / PROMOTED_MANUALLY / FAILED / DROPPED selon la décision.
+  /// puis PASSED / PROMOTED_MANUALLY / FAILED / DROPPED selon la décision —
+  /// ou COMPLETED lorsque la clôture n'a pas acté de décision individuelle.
   status            ClassEnrollmentStatus @default(ACTIVE)
   /// Appréciation / note de décision laissée par l'administrateur lors de la
   /// clôture (ex : « Excellente année, passage accordé. »).
@@ -606,7 +630,18 @@ model ClassEnrollment {
   student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
   class        Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
 
-  @@unique([studentId, classId])
+  // Données rattachées à l'inscription (et non plus au seul profil étudiant) :
+  // notes, présences, échéanciers et règlements portent leur cohorte via
+  // `enrollmentId` — une réinscription (nouvelle année) crée une NOUVELLE
+  // inscription sans contaminer l'historique des années précédentes.
+  grades         Grade[]
+  attendances    Attendance[]
+  paymentSchedules PaymentSchedule[]
+  payments       Payment[]
+
+  // Unicité par (étudiant, classe, année académique) : la réinscription dans
+  // une même classe sur une nouvelle année crée une nouvelle ligne d'histoire.
+  @@unique([studentId, classId, academicYear])
   @@index([classId])
   @@index([studentId, status])
   @@index([organizationId])
@@ -672,6 +707,10 @@ model Attendance {
   /// Classe / cohorte concernée (traceabilité du créneau émargé).
   classId        String?
   studentId      String
+  /// Inscription (classe + année académique) rattachant la présence — source
+  /// de vérité du classement par cohorte (séparation stricte Étudiant /
+  /// Inscription). Nullable pour les écritures antérieures.
+  enrollmentId   String?
   status         AttendanceStatus @default(PRESENT)
   /// Heure d'arrivée effective — renseignée pour le statut `LATE`.
   arrivalTime    DateTime?
@@ -681,16 +720,18 @@ model Attendance {
   notes          String?
   createdAt      DateTime         @default(now())
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  session      ClassSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  class        Class?       @relation(fields: [classId], references: [id], onDelete: SetNull)
-  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  session      ClassSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  class        Class?              @relation(fields: [classId], references: [id], onDelete: SetNull)
+  student      Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment   ClassEnrollment?    @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
 
   @@unique([sessionId, studentId])
   @@index([sessionId])
   @@index([sessionId, date])
   @@index([classId])
   @@index([studentId, date])
+  @@index([enrollmentId])
 }
 
 model CourseLog {
@@ -764,10 +805,18 @@ model EvaluationModule {
 /// Note obtenue par un étudiant sur un module d'une évaluation interne.
 /// L'unicité [moduleId, studentId] permet un upsert idempotent lors de la
 /// saisie / re-saisie de la grille de notes.
+///
+/// Séparation stricte Étudiant / Inscription : la note est rattachée à
+/// l'inscription (`enrollmentId` — classe + année académique) qui fait foi
+/// pour le classement par cohorte. `studentId` est conservé comme clé
+/// d'unicité / navigation directe vers le profil.
 model Grade {
   id                 String       @id @default(cuid())
   evaluationModuleId String
   studentId          String
+  /// Inscription (classe + année académique) rattachant la note. Nullable
+  /// uniquement pour les écritures antérieures à la séparation stricte.
+  enrollmentId       String?
   score              Float
   /// Seuil de validation (passMark) appliqué au moment de la saisie — snapshot
   /// historique : un bulletin d'une classe passée reste exact même si le
@@ -779,10 +828,12 @@ model Grade {
 
   evaluationModule EvaluationModule @relation(fields: [evaluationModuleId], references: [id], onDelete: Cascade)
   student          Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment       ClassEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
 
   @@unique([evaluationModuleId, studentId])
   @@index([studentId])
   @@index([studentId, status])
+  @@index([enrollmentId])
 }
 
 /// Appréciation PERSONNALISÉE d'un bulletin, rédigée par l'enseignant ou
@@ -897,6 +948,11 @@ model Payment {
   id                String        @id @default(cuid())
   organizationId    String
   studentId         String?
+  /// Inscription (classe + année académique) du bénéficiaire au moment du
+  /// règlement — rattache l'historique financier à une cohorte précise
+  /// (séparation stricte Étudiant / Inscription). Nullable pour les écritures
+  /// antérieures et les règlements sans étudiant (procédures voyage).
+  enrollmentId      String?
   travelProcedureId String?
   /// Auteur du règlement : identifiant de l'utilisateur connecté au moment de
   /// la saisie. NULLABLE pour préserver les règlements antérieurs (seed, imports,
@@ -927,10 +983,12 @@ model Payment {
 
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   student         Student?         @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  enrollment      ClassEnrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
   travelProcedure TravelProcedure? @relation(fields: [travelProcedureId], references: [id], onDelete: SetNull)
   createdBy       User?            @relation("PaymentCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdById])
+  @@index([enrollmentId])
 }
 
 // --------------------------------------
@@ -989,9 +1047,20 @@ model PaymentSchedule {
   /// Classe ayant déclenché l'activation de l'échéancier (null = échéancier
   /// autonome / manuel, non rattaché à une cohorte).
   classId           String?
+  /// Inscription (classe + année académique) rattachant l'échéancier — source
+  /// de vérité du rattachement par cohorte (séparation stricte Étudiant /
+  /// Inscription). Nullable pour les écritures antérieures / échéanciers
+  /// hérités non rattachés.
+  enrollmentId      String?
   /// Horodatage d'activation du décompte (démarrage effectif de la classe).
   /// `null` = en attente d'activation : aucune échéance n'est « en retard ».
   activatedAt       DateTime?
+  /// Scellement comptable posé à la clôture de la classe : fige le décompte
+  /// (aucun retard supplémentaire — voir `refreshOverdueStatus`). Les
+  /// corrections administratives d'historique restent possibles, mais les
+  /// règlements qui en découlent sont saisis « hors système » et
+  /// n'alimentent jamais la trésorerie active.
+  sealedAt          DateTime?
   totalAmount       Float
   installmentsCount Int
   startDate         DateTime
@@ -1002,12 +1071,14 @@ model PaymentSchedule {
   organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   student      Student                @relation(fields: [studentId], references: [id], onDelete: Cascade)
   class        Class?                 @relation("ClassPaymentSchedules", fields: [classId], references: [id], onDelete: SetNull)
+  enrollment   ClassEnrollment?       @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
   items        PaymentScheduleItem[]
 
   @@index([organizationId, studentId])
   @@index([status])
   @@index([classId])
   @@index([activatedAt])
+  @@index([enrollmentId])
 }
 
 // --------------------------------------

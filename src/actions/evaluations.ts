@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 import { computeModuleStatus } from "@/lib/module-status";
+import { buildEnrollmentIdMapForClass } from "@/lib/enrollment-scope";
 import {
   getCurrentOrganizationId,
   getCurrentSessionUser,
@@ -847,23 +848,22 @@ export async function saveGradesAction(
       };
     }
 
-    // Les étudiants ciblés doivent être membres actuels de la cohorte
-    // (protection contre la falsification des identifiants côté client).
-    const memberIds = new Set(
-      (
-        await prisma.student.findMany({
-          where: { currentClassId: evaluation.classId },
-          select: { id: true },
-        })
-      ).map((student) => student.id)
-    );
+    // Les étudiants ciblés doivent être rattachés à la cohorte via une
+    // INSCRIPTION (ClassEnrollment) — séparation stricte Étudiant /
+    // Inscription : la note appartient à la classe + année académique de
+    // l'inscription, pas au seul profil. La correspondance sert aussi de
+    // protection contre la falsification des identifiants côté client.
+    const enrollmentIdByStudent = await buildEnrollmentIdMapForClass(prisma, {
+      organizationId: user.organizationId,
+      classId: evaluation.classId,
+    });
 
     for (const entry of entries) {
-      if (!memberIds.has(entry.studentId)) {
+      if (!enrollmentIdByStudent.has(entry.studentId)) {
         return {
           ok: false,
           message:
-            "Un des étudiants ciblés n'appartient pas à la classe de cette évaluation.",
+            "Un des étudiants ciblés n'est pas inscrit dans la classe de cette évaluation.",
         };
       }
     }
@@ -894,11 +894,16 @@ export async function saveGradesAction(
           create: {
             evaluationModuleId: entry.moduleId,
             studentId: entry.studentId,
+            // Rattachement strict à l'inscription (classe + année).
+            enrollmentId: enrollmentIdByStudent.get(entry.studentId) ?? null,
             score: entry.score,
             passMark,
             status: computeModuleStatus(entry.score, passMark),
           },
           update: {
+            // Le rattachement est aussi re-synchronisé à chaque ré-saisie
+            // (hérite des lignes créées avant la séparation stricte).
+            enrollmentId: enrollmentIdByStudent.get(entry.studentId) ?? null,
             score: entry.score,
             passMark,
             status: computeModuleStatus(entry.score, passMark),

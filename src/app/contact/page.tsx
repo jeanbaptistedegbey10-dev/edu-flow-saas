@@ -101,7 +101,7 @@ export default function ContactPage() {
               <p className="text-sm text-gray-400">
                 La réponse à votre question se trouve peut-être déjà dans{" "}
                 <Link
-                  href="/#faq"
+                  href="/accueil#faq"
                   className="text-brand-light hover:underline"
                 >
                   la FAQ

@@ -1,7 +1,7 @@
+import "dotenv/config";
 import bcrypt from "bcryptjs";
-import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+import { prisma } from "../src/lib/prisma";
 
 /** Mot de passe commun à tous les comptes de démonstration. */
 const DEMO_PASSWORD = "password123";

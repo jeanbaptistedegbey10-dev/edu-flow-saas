@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useActionState } from "react";
-import { Loader2Icon, SaveIcon, ClockIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { Loader2Icon, SaveIcon, ClockIcon, PlusIcon, Trash2Icon, LockKeyholeIcon } from "lucide-react";
 
 import type { CourseDTO, TeacherDTO } from "@/actions/courses";
 import {
@@ -144,7 +144,7 @@ function EditClassForm({
         </DialogDescription>
       </DialogHeader>
 
-      <form action={formAction} className="grid gap-4">
+      <form action={formAction} className="grid max-h-[70vh] gap-4 overflow-y-auto pr-2">
         <input type="hidden" name="id" value={klass.id} />
         <input type="hidden" name="schedulesJson" value={JSON.stringify(schedules.map(({ dayOfWeek, startTime, endTime, room }) => ({ dayOfWeek, startTime, endTime, room })))} />
 
@@ -214,8 +214,9 @@ function EditClassForm({
         </div>
 
         <div className="grid gap-2">
-          <Label htmlFor="edit-class-tuition-fee">
+          <Label htmlFor="edit-class-tuition-fee" className="flex items-center gap-1.5">
             Frais de scolarité (FCFA)
+            <LockKeyholeIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
           </Label>
           <Input
             id="edit-class-tuition-fee"
@@ -227,11 +228,17 @@ function EditClassForm({
             defaultValue={klass.tuitionFee !== null ? String(klass.tuitionFee) : ""}
             placeholder="Vide = prix du cours porteur"
             aria-invalid={Boolean(fieldErrors.tuitionFee)}
+            readOnly
+            disabled
+            className="cursor-not-allowed bg-muted/50"
+            title="Montant verrouillé : défini à la création du cours porteur."
           />
           <FieldError message={fieldErrors.tuitionFee} />
-          <p className="text-xs text-muted-foreground">
-            Si laissé vide, le prix configuré sur le cours porteur sera
-            appliqué automatiquement aux étudiants de cette classe.
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            <LockKeyholeIcon className="size-3 shrink-0" />
+            Montant verrouillé à titre indicatif — défini à la création du
+            cours porteur, non modifiable ici pour garantir la cohérence
+            financière.
           </p>
         </div>
 
@@ -273,7 +280,7 @@ function EditClassForm({
           <FieldError message={fieldErrors.teacherId} />
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="sticky bottom-0 z-20 -mx-4 -mb-4 border-t bg-background pt-3">
           <DialogClose asChild>
             <Button type="button" variant="outline" disabled={pending}>
               Annuler

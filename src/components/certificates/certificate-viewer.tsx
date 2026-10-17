@@ -37,6 +37,7 @@ export function CertificateViewer({ certificate, organization }: CertificateView
       buildCertificateHtml({
         studentName: certificate.studentName,
         studentCode: certificate.studentCode,
+        birthDate: certificate.studentBirthDate,
         level: certificate.level,
         score: certificate.score,
         issueDate: new Date(certificate.issueDate),
@@ -47,8 +48,20 @@ export function CertificateViewer({ certificate, organization }: CertificateView
             : `/verify/${certificate.verificationCode}`,
         organizationName: organization.name,
         courseTitle: certificate.courseTitle,
+        // Modèle graphique + identité visuelle et mentions légales de
+        // l'organisation (logo, filigrane, pied de page, QR code).
+        template: organization.certificateTemplate,
+        certificateTextTemplate: organization.certificateTextTemplate,
+        logoUrl: organization.logoUrl,
+        organizationEmail: organization.email,
+        organizationPhone: organization.phone,
+        organizationAddress: organization.address,
+        organizationCity: organization.city,
+        organizationWebsite: organization.website,
+        organizationRccm: organization.rccm,
+        organizationIfu: organization.ifu,
       }),
-    [certificate, organization.name]
+    [certificate, organization]
   );
 
   const handlePrint = () => {

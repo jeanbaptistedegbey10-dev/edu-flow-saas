@@ -30,6 +30,7 @@ export async function GET(
           firstName: true,
           lastName: true,
           studentCode: true,
+          dateOfBirth: true,
         },
       },
       course: {
@@ -43,6 +44,13 @@ export async function GET(
           address: true,
           city: true,
           phone: true,
+          email: true,
+          website: true,
+          logoUrl: true,
+          rccm: true,
+          ifu: true,
+          certificateTemplate: true,
+          certificateTextTemplate: true,
         },
       },
     },
@@ -69,6 +77,7 @@ export async function GET(
     generateCertificatePDF({
       studentName: `${certificate.student.firstName} ${certificate.student.lastName}`,
       studentCode: certificate.student.studentCode,
+      birthDate: certificate.student.dateOfBirth,
       level: certificate.level,
       score: certificate.score,
       issueDate: certificate.issueDate,
@@ -78,6 +87,13 @@ export async function GET(
       organizationAddress: certificate.organization.address,
       organizationCity: certificate.organization.city,
       organizationPhone: certificate.organization.phone,
+      organizationEmail: certificate.organization.email,
+      organizationWebsite: certificate.organization.website,
+      organizationLogoUrl: certificate.organization.logoUrl,
+      organizationRccm: certificate.organization.rccm,
+      organizationIfu: certificate.organization.ifu,
+      courseTitle: certificate.course?.title ?? null,
+      certificateTextTemplate: certificate.organization.certificateTextTemplate,
     })
   );
 

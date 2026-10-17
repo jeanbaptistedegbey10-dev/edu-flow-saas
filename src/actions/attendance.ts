@@ -11,6 +11,7 @@ import {
 } from "@/lib/session";
 import { assertCanMutate } from "@/lib/license-check";
 import { SELECTABLE_CLASS_STATUSES } from "@/lib/class-status";
+import { buildEnrollmentIdMapForClass } from "@/lib/enrollment-scope";
 
 // --------------------------------------
 // Types publics (contrat avec les composants clients)
@@ -677,19 +678,18 @@ export async function saveAttendanceAction(
       };
     }
 
-    // Vérifie que tous les étudiants ciblés sont bien membres actuels de la
-    // cohorte (protection contre la falsification des identifiants côté client).
-    const memberIds = new Set(
-      (
-        await prisma.student.findMany({
-          where: { currentClassId: classId },
-          select: { id: true },
-        })
-      ).map((student) => student.id)
-    );
+    // Vérifie que tous les étudiants ciblés sont bien rattachés à la cohorte
+    // via une INSCRIPTION (ClassEnrollment) — protection contre la
+    // falsification des identifiants côté client. La correspondance sert
+    // ensuite au rattachement strict des présences à l'inscription
+    // (classe + année académique — séparation stricte Étudiant / Inscription).
+    const enrollmentIdByStudent = await buildEnrollmentIdMapForClass(prisma, {
+      organizationId: user.organizationId,
+      classId,
+    });
 
     for (const entry of entries) {
-      if (!memberIds.has(entry.studentId)) {
+      if (!enrollmentIdByStudent.has(entry.studentId)) {
         return {
           ok: false,
           message:
@@ -735,12 +735,17 @@ export async function saveAttendanceAction(
             sessionId: session.id,
             classId,
             studentId: entry.studentId,
+            // Rattachement strict à l'inscription (classe + année).
+            enrollmentId: enrollmentIdByStudent.get(entry.studentId) ?? null,
             status: entry.status,
             arrivalTime: entry.arrivalTime,
             date,
             notes: entry.notes,
           },
           update: {
+            // Rattachement aussi re-synchronisé à chaque ré-saisie (lignes
+            // héritées créées avant la séparation stricte).
+            enrollmentId: enrollmentIdByStudent.get(entry.studentId) ?? null,
             status: entry.status,
             arrivalTime: entry.arrivalTime,
             notes: entry.notes,
@@ -1912,6 +1917,13 @@ export async function saveClassSessionWithAttendance(
       return { ok: false, message: "Aucun étudiant valide pour cette classe." };
     }
 
+    // Rattachement strict des présences à l'inscription (classe + année —
+    // séparation stricte Étudiant / Inscription).
+    const enrollmentIdByStudent = await buildEnrollmentIdMapForClass(prisma, {
+      organizationId: user.organizationId,
+      classId,
+    });
+
     // Calcule les heures de début/fin par défaut (créneau de 2h)
     const startTime = new Date(sessionDate);
     startTime.setUTCHours(8, 0, 0, 0);
@@ -1992,6 +2004,8 @@ export async function saveClassSessionWithAttendance(
               sessionId: session.id,
               classId,
               studentId: entry.studentId,
+              // Rattachement strict à l'inscription (classe + année).
+              enrollmentId: enrollmentIdByStudent.get(entry.studentId) ?? null,
               status: entry.status,
               notes: entry.notes || null,
               date: sessionDate,
@@ -2195,6 +2209,13 @@ export async function saveSessionAttendance(
       };
     }
 
+    // Rattachement strict des présences à l'inscription (classe + année —
+    // séparation stricte Étudiant / Inscription).
+    const enrollmentIdByStudent = await buildEnrollmentIdMapForClass(prisma, {
+      organizationId: user.organizationId,
+      classId: session.classId,
+    });
+
     // Transaction : upsert de chaque présence sur [sessionId, studentId]
     await prisma.$transaction(
       filteredAttendances.map((entry) => {
@@ -2231,6 +2252,8 @@ export async function saveSessionAttendance(
             sessionId,
             classId: session.classId,
             studentId: entry.studentId,
+            // Rattachement strict à l'inscription (classe + année).
+            enrollmentId: enrollmentIdByStudent.get(entry.studentId) ?? null,
             status: entry.status,
             notes: entry.notes || null,
             arrivalTime: entry.status === "LATE" ? arrivalDate : null,

@@ -28,16 +28,16 @@ const socialIcons: Record<string, React.ComponentType<{ className?: string }>> =
 
 export default function Footer() {
   const pathname = usePathname();
-  /** Vrai lorsque le Footer est affiché sur la page d'accueil. */
-  const isHome = pathname === "/";
+  /** Vrai lorsque le Footer est affiché sur la landing (déplacée à /accueil). */
+  const isHome = pathname === "/accueil";
 
   /**
    * Résout les liens du footer : les ancres du landing (« #features »,
-   * « #tarifs »…) doivent pointer vers « /#features » depuis les autres
-   * pages (mentions légales, contact…).
+   * « #tarifs »…) doivent pointer vers « /accueil#features » depuis les
+   * autres pages (mentions légales, contact…).
    */
   const resolveHref = (href: string) =>
-    href.startsWith("#") && !isHome ? `/${href}` : href;
+    href.startsWith("#") && !isHome ? `/accueil${href}` : href;
 
   /** Clic logo : retour fluide en haut de page lorsqu'on est déjà sur l'accueil. */
   const handleLogoClick = (e: MouseEvent) => {
@@ -57,7 +57,7 @@ export default function Footer() {
         <div className="py-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10">
           {/* Brand Column */}
           <div className="lg:col-span-2">
-            <Link href="/" onClick={handleLogoClick} className="flex items-center gap-2 mb-4">
+            <Link href="/accueil" onClick={handleLogoClick} className="flex items-center gap-2 mb-4">
               <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-brand/20 border border-brand/30">
                 <GraduationCap className="w-5 h-5 text-brand-light" />
               </div>

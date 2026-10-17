@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/table";
 import { ToastNotification } from "@/components/ui/toast";
 import { GenerateCertificateDialog } from "@/components/certificates/generate-certificate-dialog";
+import { GenerateAttestationDialog } from "@/components/certificates/generate-attestation-dialog";
 
 const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
   day: "2-digit",
@@ -51,6 +52,9 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", {
 
 /** Valeur sentinelle des filtres déroulants « tout afficher ». */
 const ALL_VALUE = "ALL";
+
+/** Statuts de classe qualifiés d'« officiels » pour les certificats de fin. */
+const OFFICIAL_CERT_STATUSES = ["ARCHIVED", "COMPLETED"];
 
 /** Base commune des badges de statut (les couleurs viennent de class-status). */
 const badgeBase =
@@ -85,6 +89,7 @@ export function CertificatesView({
   const [courseFilter, setCourseFilter] = React.useState(ALL_VALUE);
   const [classFilter, setClassFilter] = React.useState(ALL_VALUE);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [attestationDialogOpen, setAttestationDialogOpen] = React.useState(false);
   const [toast, setToast] = React.useState<string | null>(null);
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
 
@@ -170,6 +175,13 @@ export function CertificatesView({
           <PlusIcon className="size-4" />
           Générer un certificat
         </Button>
+        <Button
+          onClick={() => setAttestationDialogOpen(true)}
+          className="bg-emerald-600 hover:bg-emerald-700"
+        >
+          <FileTextIcon className="size-4" />
+          Générer une attestation de formation en cours
+        </Button>
       </div>
 
       {/* Ruban de filtres — se combine (ET logique) avec la recherche textuelle */}
@@ -220,11 +232,13 @@ export function CertificatesView({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_VALUE}>Toutes les classes</SelectItem>
-            {classes.map((klass) => (
-              <SelectItem key={klass.id} value={klass.id}>
-                {klass.name} — {klass.courseTitle}
-              </SelectItem>
-            ))}
+            {classes
+              .filter((klass) => OFFICIAL_CERT_STATUSES.includes(klass.status))
+              .map((klass) => (
+                <SelectItem key={klass.id} value={klass.id}>
+                  {klass.name} — {klass.courseTitle}
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
 
@@ -383,6 +397,14 @@ export function CertificatesView({
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         onGenerated={() => router.refresh()}
+      />
+
+      <GenerateAttestationDialog
+        classes={classes}
+        students={students}
+        enrollmentLinks={enrollmentLinks}
+        open={attestationDialogOpen}
+        onOpenChange={setAttestationDialogOpen}
       />
 
       <ToastNotification message={toast} onClose={() => setToast(null)} />

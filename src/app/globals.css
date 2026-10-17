@@ -3,6 +3,18 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ==========================================================================
+   Design System EduFlow — configuration Tailwind CSS v4 (CSS-first)
+   --------------------------------------------------------------------------
+   Tailwind v4 n'utilise PLUS de `tailwind.config.ts` : la configuration vit
+   dans ce fichier (@import / @custom-variant / @theme).
+   - Mode sombre PAR DÉFAUT : la classe `.dark` est posée sur <html>
+     (src/app/layout.tsx) et le variant `dark:` ci-dessus cible `.dark *`.
+   - Tons violets / lavande : jetons `--color-violet-*`, `--color-lavande*`
+     ci-dessous + états actifs/bordures `--card-border`, `--active-*`,
+     `--lavande-strong` définis dans `:root` (clair) et `.dark` (sombre).
+   ========================================================================== */
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -62,6 +74,18 @@
   --color-silver: #718096;
   --color-cream: #faf8f3;
   --color-light-gold: #fdf6e3;
+  /* Étape 2 — Design System « Violets & Lavande » : utilitaires
+     `bg-violet-core`, `text-lavande`, `border-card-border`,
+     `bg-active-soft`, `text-active-fg`… Les valeurs finales sont définies
+     dans `:root` (clair) et `.dark` (sombre) plus bas. */
+  --color-violet-deep: #4c1d95;
+  --color-violet-core: #7c3aed;
+  --color-lavande: #a78bfa;
+  --color-lavande-soft: #c4b5fd;
+  --color-lavande-mist: #ede9fe;
+  --color-card-border: var(--card-border);
+  --color-active-soft: var(--active-soft);
+  --color-active-fg: var(--active-fg);
 }
 
 
@@ -81,11 +105,12 @@
   --secondary-foreground: oklch(0.21 0.034 264.665);
   --muted: oklch(0.967 0.003 264.542);
   --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.947 0.007 264.542);
-  --accent-foreground: oklch(0.21 0.034 264.665);
+  /* Étape 2 — éléments actifs & bordures : tons lavande (clair) */
+  --accent: oklch(0.958 0.018 292);
+  --accent-foreground: oklch(0.3 0.09 292);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
+  --border: oklch(0.912 0.022 292);
+  --input: oklch(0.912 0.022 292);
   --ring: oklch(0.511 0.262 276.966);
   /* Charte Emerald pour les succès/finances */
   --chart-1: oklch(0.696 0.17 162.48);
@@ -100,42 +125,66 @@
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.929 0.013 255.508);
   --sidebar-accent-foreground: oklch(0.21 0.034 264.665);
-  --sidebar-border: oklch(0.929 0.013 255.508);
+  --sidebar-border: oklch(0.912 0.022 292);
   --sidebar-ring: oklch(0.511 0.262 276.966);
+
+  /* Étape 2 — jetons des cartes interactives / états actifs (clair) :
+     bordure lavande des cartes, fond d'élément actif, texte actif. */
+  --card-border: oklch(0.895 0.028 292);
+  --active-soft: oklch(0.958 0.018 292);
+  --active-fg: oklch(0.42 0.17 292);
+  --hover-soft: oklch(0.972 0.012 292);
+  --lavande-strong: #7c3aed;
+  color-scheme: light;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  color-scheme: dark;
+
+  /* Étape 2 — mode sombre par défaut : fond violet profond,
+     éléments actifs violets, bordures lavande. */
+  --background: oklch(0.17 0.028 285);
+  --foreground: oklch(0.95 0.015 290);
+  --card: oklch(0.212 0.03 285);
+  --card-foreground: oklch(0.96 0.012 290);
+  --popover: oklch(0.212 0.03 285);
+  --popover-foreground: oklch(0.96 0.012 290);
+  /* Violet principal — boutons & éléments actifs */
+  --primary: oklch(0.62 0.19 288);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.28 0.035 287);
+  --secondary-foreground: oklch(0.95 0.015 290);
+  --muted: oklch(0.265 0.032 287);
+  --muted-foreground: oklch(0.73 0.03 290);
+  --accent: oklch(0.3 0.05 288);
+  --accent-foreground: oklch(0.95 0.02 290);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* Bordures lavande */
+  --border: oklch(0.32 0.04 289);
+  --input: oklch(0.29 0.035 288);
+  --ring: oklch(0.65 0.19 288);
   --chart-1: oklch(0.696 0.17 162.48);
-  --chart-2: oklch(0.511 0.262 276.966);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.511 0.262 276.966);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --chart-2: oklch(0.62 0.19 288);
+  --chart-3: oklch(0.55 0.05 290);
+  --chart-4: oklch(0.45 0.06 290);
+  --chart-5: oklch(0.35 0.05 290);
+  --sidebar: oklch(0.195 0.03 285);
+  --sidebar-foreground: oklch(0.95 0.015 290);
+  --sidebar-primary: oklch(0.62 0.19 288);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.3 0.05 288);
+  --sidebar-accent-foreground: oklch(0.95 0.02 290);
+  --sidebar-border: oklch(0.32 0.04 289);
+  --sidebar-ring: oklch(0.65 0.19 288);
+
+  /* Jetons des cartes interactives / éléments actifs (sombre) :
+     bordure de carte lavande, fond d'élément actif violet profond,
+     texte actif lavande clair. */
+  --card-border: oklch(0.36 0.055 290);
+  --active-soft: oklch(0.3 0.06 288);
+  --active-fg: oklch(0.85 0.09 290);
+  --hover-soft: oklch(0.26 0.045 288);
+  --lavande-strong: #a78bfa;
 }
 
 @layer base {
@@ -289,5 +338,57 @@
 
   .animate-check-pop {
     animation: check-pop 0.4s ease-out forwards;
+  }
+
+  /* ---------------------------------------------------------------------
+     Étape 2 — Design System : cartes interactives & éléments actifs
+     (tons violet / lavande — jetons `--card-border`, `--active-*`,
+     `--hover-soft`, `--lavande-strong` définis dans :root / .dark)
+     --------------------------------------------------------------------- */
+  .ds-card {
+    background-color: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 1rem;
+    transition:
+      border-color 0.25s ease,
+      box-shadow 0.25s ease,
+      transform 0.25s ease;
+  }
+
+  .ds-card:hover {
+    border-color: var(--lavande-strong);
+    box-shadow: 0 18px 40px -20px rgba(124, 58, 237, 0.65);
+    transform: translateY(-4px);
+  }
+
+  .ds-card:focus-visible {
+    outline: 2px solid var(--lavande-strong);
+    outline-offset: 3px;
+  }
+
+  /* Entrée de navigation : état actif violet/lavande (barre latérale) */
+  .ds-nav-item {
+    border-left: 3px solid transparent;
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      color 0.2s ease;
+  }
+
+  .ds-nav-item:hover {
+    background-color: var(--hover-soft);
+    color: var(--active-fg);
+  }
+
+  .ds-nav-item.is-active {
+    background-color: var(--active-soft);
+    border-left-color: var(--lavande-strong);
+    color: var(--active-fg);
+    font-weight: 600;
+  }
+
+  .ds-nav-item:focus-visible {
+    outline: 2px solid var(--lavande-strong);
+    outline-offset: -2px;
   }
 }

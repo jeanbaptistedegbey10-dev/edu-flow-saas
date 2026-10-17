@@ -33,7 +33,7 @@ export type ReEnrollClassOption = {
 
 /**
  * Bouton + modale « Inscrire dans une nouvelle classe » (réinscription) :
- * l'inscription courante de l'élève est clôturée (statut PROMOTED_MANUALLY,
+ * l'inscription courante de l'élève est clôturée (statut COMPLETED,
  * historique conservé) et une nouvelle inscription ACTIVE est créée dans la
  * classe choisie. Les classes archivées ne sont pas proposées.
  */

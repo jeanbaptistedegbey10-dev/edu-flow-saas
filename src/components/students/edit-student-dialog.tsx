@@ -17,6 +17,8 @@ import {
   type StudentDTO,
   type StudentFormState,
 } from "@/actions/students";
+// Conversion Date → valeur `yyyy-mm-dd` pour les `<input type="date">`.
+import { toAttestationDateInputValue } from "@/lib/report-card";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -299,6 +301,20 @@ function EditStudentForm({
             </Select>
             <FieldError message={fieldErrors.status} />
           </div>
+        </div>
+
+        {/* Date de naissance (facultative) — pré-remplit la variable
+            {{birthDate}} des attestations et des certificats. */}
+        <div className="grid gap-2">
+          <Label htmlFor="edit-dateOfBirth">Date de naissance</Label>
+          <Input
+            id="edit-dateOfBirth"
+            name="dateOfBirth"
+            type="date"
+            defaultValue={toAttestationDateInputValue(student.dateOfBirth)}
+            aria-invalid={Boolean(fieldErrors.dateOfBirth)}
+          />
+          <FieldError message={fieldErrors.dateOfBirth} />
         </div>
 
         {/* Classe / cohorte active + réinscription */}

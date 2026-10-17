@@ -17,6 +17,7 @@ import {
   ensureStudentReportToken,
 } from "@/actions/students";
 import { AddStudentDialog } from "@/components/students/add-student-dialog";
+import { GlobalReEnrollDialog } from "@/components/students/global-re-enroll-dialog";
 import { ImportStudentsDialog } from "@/components/students/import-students-dialog";
 import { EditStudentDialog } from "@/components/students/edit-student-dialog";
 import { ToastNotification } from "@/components/ui/toast";
@@ -40,6 +41,7 @@ import {
   type StudentStatusFilter,
 } from "@/lib/student-status";
 import { exportToCsv, type CsvColumn } from "@/lib/export";
+import { getCurrentAcademicYear } from "@/lib/class-status";
 import { cn } from "@/lib/utils";
 
 // Formatage déterministe (locale + fuseau fixes) pour éviter tout écart d'hydratation.
@@ -185,6 +187,11 @@ export function StudentsView({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <GlobalReEnrollDialog
+            students={students}
+            classes={classes}
+            defaultAcademicYear={getCurrentAcademicYear()}
+          />
           <ImportStudentsDialog />
           <AddStudentDialog classes={classes} registrationFee={registrationFee} />
         </div>

@@ -25,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StudentPerformanceChart } from "@/components/students/student-performance-chart";
@@ -34,6 +35,9 @@ import {
   buildInternalAttestationDocument,
   buildReportCardDocument,
   getGradeMention,
+  EMPTY_ATTESTATION_FIELDS,
+  toAttestationDateInputValue,
+  type AttestationFieldValues,
   type InternalAttestationInput,
   type ReportCardInput,
   type ReportCardModuleRow,
@@ -222,6 +226,9 @@ export function StudentAcademicTab({
   studentCode,
   className,
   courseTitle,
+  birthDate,
+  city,
+  startDate,
   organization,
 }: {
   record: StudentAcademicRecordDTO;
@@ -231,6 +238,12 @@ export function StudentAcademicTab({
   className: string | null;
   /** Intitulé du cours porteur. */
   courseTitle: string | null;
+  /** Date de naissance (pré-remplissage `{{birthDate}}` de l'attestation). */
+  birthDate: Date | null;
+  /** Adresse / ville de résidence (variable `{{city}}`). */
+  city: string | null;
+  /** Date d'inscription (pré-remplissage du début du cours). */
+  startDate: Date | null;
   organization: OrganizationProfileDTO;
 }) {
   const hasGrades = record.stats.overallAverage !== null;
@@ -277,6 +290,28 @@ export function StudentAcademicTab({
     ]
   );
 
+  // Champs d'information de l'attestation (naissance, résidence, calendrier
+  // du cursus) : pré-remplis depuis la fiche étudiant puis éditables avant
+  // impression — la base ne connaît ni la fin prévue ni la date d'examen.
+  const birthDateIso = toAttestationDateInputValue(birthDate);
+  const startDateIso = toAttestationDateInputValue(startDate);
+  const [attestationFields, setAttestationFields] =
+    React.useState<AttestationFieldValues>(() => ({
+      ...EMPTY_ATTESTATION_FIELDS,
+      birthDate: birthDateIso,
+      city: city ?? "",
+      startDate: startDateIso,
+    }));
+  // Réinitialisation à chaque changement d'étudiant (navigation entre fiches).
+  React.useEffect(() => {
+    setAttestationFields({
+      ...EMPTY_ATTESTATION_FIELDS,
+      birthDate: birthDateIso,
+      city: city ?? "",
+      startDate: startDateIso,
+    });
+  }, [birthDateIso, city, startDateIso]);
+
   const attestationInput: InternalAttestationInput = React.useMemo(
     () => ({
       studentName,
@@ -285,8 +320,20 @@ export function StudentAcademicTab({
       courseTitle,
       overallAverage: record.stats.overallAverage,
       validationRate: record.stats.validationRate,
+      birthDate: attestationFields.birthDate || null,
+      city: attestationFields.city.trim() || null,
+      startDate: attestationFields.startDate || null,
+      expectedEndDate: attestationFields.expectedEndDate || null,
+      examDate: attestationFields.examDate || null,
     }),
-    [studentName, studentCode, className, courseTitle, record.stats]
+    [
+      studentName,
+      studentCode,
+      className,
+      courseTitle,
+      record.stats,
+      attestationFields,
+    ]
   );
 
   // Appréciation globale éditable avant impression du bulletin.
@@ -308,8 +355,8 @@ export function StudentAcademicTab({
   // « sur-mesure »). État dérivé : brouillon saisi par l'administration
   // (`null` tant qu'il n'a rien modifié), sinon texte par défaut.
   const defaultAttestationMessage = React.useMemo(
-    () => buildDefaultAttestationMessage(attestationInput, organization.name),
-    [attestationInput, organization.name]
+    () => buildDefaultAttestationMessage(),
+    []
   );
   const [attestationMessageDraft, setAttestationMessageDraft] =
     React.useState<string | null>(null);
@@ -519,6 +566,84 @@ export function StudentAcademicTab({
           </DialogHeader>
 
           <div className="grid gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="attestation-birthDate">Date de naissance</Label>
+                <Input
+                  id="attestation-birthDate"
+                  type="date"
+                  value={attestationFields.birthDate}
+                  onChange={(event) =>
+                    setAttestationFields((prev) => ({
+                      ...prev,
+                      birthDate: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="attestation-city">Ville de résidence</Label>
+                <Input
+                  id="attestation-city"
+                  type="text"
+                  placeholder="Ex : Abidjan"
+                  value={attestationFields.city}
+                  onChange={(event) =>
+                    setAttestationFields((prev) => ({
+                      ...prev,
+                      city: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="attestation-startDate">Début du cours</Label>
+                <Input
+                  id="attestation-startDate"
+                  type="date"
+                  value={attestationFields.startDate}
+                  onChange={(event) =>
+                    setAttestationFields((prev) => ({
+                      ...prev,
+                      startDate: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="attestation-expectedEndDate">
+                  Fin prévue du cours
+                </Label>
+                <Input
+                  id="attestation-expectedEndDate"
+                  type="date"
+                  value={attestationFields.expectedEndDate}
+                  onChange={(event) =>
+                    setAttestationFields((prev) => ({
+                      ...prev,
+                      expectedEndDate: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="attestation-examDate">
+                  Date de l’examen officiel
+                </Label>
+                <Input
+                  id="attestation-examDate"
+                  type="date"
+                  value={attestationFields.examDate}
+                  onChange={(event) =>
+                    setAttestationFields((prev) => ({
+                      ...prev,
+                      examDate: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
             <div className="grid gap-2">
               <Label htmlFor="attestation-message">
                 Message de l’attestation (modifiable)
@@ -535,7 +660,17 @@ export function StudentAcademicTab({
               <p className="text-xs text-muted-foreground">
                 Personnalisez le texte par défaut de l’attestation avant
                 impression. Le champ est pré-rempli avec la formulation
-                officielle de l’établissement.
+                officielle de l’établissement pour un cursus en cours ;
+                renseignez la date de fin prévue et la date de l’examen
+                (inconnues de la base). Les variables{" "}
+                <code>{"{{studentName}}"}</code>,{" "}
+                <code>{"{{birthDate}}"}</code>, <code>{"{{city}}"}</code>,{" "}
+                <code>{"{{startDate}}"}</code>,{" "}
+                <code>{"{{expectedEndDate}}"}</code>,{" "}
+                <code>{"{{examDate}}"}</code>,{" "}
+                <code>{"{{courseName}}"}</code> et{" "}
+                <code>{"{{organizationName}}"}</code> sont remplacées à
+                l’impression et affichées en gras.
               </p>
             </div>
 
