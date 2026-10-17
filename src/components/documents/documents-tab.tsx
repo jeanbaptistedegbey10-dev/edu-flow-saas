@@ -162,8 +162,8 @@ export function DocumentsTab({
     initialDocuments.find((document) => document.id === confirmId)?.title ?? "";
 
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3 md:px-5 dark:border-slate-800">
+    <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-5">
         <div>
           <h3 className="flex items-center gap-2 font-semibold">
             <PaperclipIcon className="size-4" />
@@ -333,7 +333,7 @@ export function DocumentsTab({
       )}
 
       {/* Texte explicatif : stockage externe & conservation gratuite (Drive). */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/80 px-4 py-3 md:px-5 dark:border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 md:px-5">
         <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
           <span className="font-medium text-foreground">Stockage externe :</span>{" "}
           EduFlow n&apos;héberge aucun fichier. Chaque pièce jointe est

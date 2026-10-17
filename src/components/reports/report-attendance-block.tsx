@@ -29,7 +29,7 @@ export function ReportAttendanceBlock({
   const rate = metrics.attendanceRate;
   const rateTone =
     rate === null
-      ? "border-slate-200 bg-white text-slate-500"
+      ? "border-border bg-card text-muted-foreground"
       : rate >= 90
         ? "border-emerald-200 bg-emerald-50 text-emerald-800"
         : rate >= 75
@@ -58,7 +58,7 @@ export function ReportAttendanceBlock({
           tone={
             metrics.absentSessions > 0
               ? "border-red-200 bg-red-50 text-red-800"
-              : "border-slate-200 bg-white text-slate-600"
+              : "border-border bg-card text-muted-foreground"
           }
         />
         <MetricCard
@@ -67,7 +67,7 @@ export function ReportAttendanceBlock({
           tone="border-sky-200 bg-sky-50 text-sky-800"
         />
       </div>
-      <p className="mt-1 text-[10px] text-slate-400">
+      <p className="mt-1 text-[10px] text-muted-foreground">
         {caption ?? "Suivi des émargements de la période."}
       </p>
     </section>

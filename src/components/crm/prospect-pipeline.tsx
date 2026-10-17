@@ -111,7 +111,7 @@ export function ProspectPipeline({
                 <span className="text-sm font-semibold">
                   {LEAD_STAGE_LABELS[stage]}
                 </span>
-                <span className="rounded-full bg-white/60 px-2 py-0.5 text-xs font-medium dark:bg-black/20">
+                <span className="rounded-full bg-card/60 px-2 py-0.5 text-xs font-medium">
                   {stageProspects.length}
                 </span>
               </div>
@@ -157,7 +157,7 @@ function ProspectCard({
       draggable
       onDragStart={onDragStart}
       className={cn(
-        "cursor-grab rounded-md border bg-white p-3 shadow-sm transition-all hover:shadow-md dark:bg-slate-900",
+        "cursor-grab rounded-md border bg-card p-3 shadow-sm transition-all hover:shadow-md",
         isDragging && "opacity-50 ring-2 ring-primary"
       )}
     >
@@ -171,7 +171,7 @@ function ProspectCard({
           </p>
         </div>
         {prospect.leadSource && (
-          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
             {LEAD_SOURCE_LABELS[prospect.leadSource as keyof typeof LEAD_SOURCE_LABELS] ?? prospect.leadSource}
           </span>
         )}

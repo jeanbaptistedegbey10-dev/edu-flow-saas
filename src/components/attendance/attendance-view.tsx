@@ -331,7 +331,7 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
       </div>
 
       {/* Barre de sélection : classe + date + session */}
-      <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-6 dark:border-slate-800">
+      <div className="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-6">
         <div className="grid gap-2 lg:col-span-2">
           <Label htmlFor="class-select">Classe / Cohorte</Label>
           <Select
@@ -457,7 +457,7 @@ export function AttendanceView({ classes }: { classes: TeacherClassDTO[] }) {
         <input type="hidden" name="startTime" value={startTime} />
         <input type="hidden" name="endTime" value={endTime} />
 
-        <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm dark:border-slate-800">
+        <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <UsersRoundIcon className="size-4" />

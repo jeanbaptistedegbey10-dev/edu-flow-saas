@@ -34,7 +34,7 @@ export function HumanSupportCard({ context, className }: HumanSupportCardProps) 
   return (
     <div
       className={cn(
-        "rounded-xl border border-white/10 bg-white/5 p-3 shadow-lg shadow-black/20",
+        "rounded-xl border border-white/10 bg-card/5 p-3 shadow-lg shadow-black/20",
         className,
       )}
     >
@@ -47,7 +47,7 @@ export function HumanSupportCard({ context, className }: HumanSupportCardProps) 
           <p className="text-sm font-semibold text-white">
             Parler à un humain
           </p>
-          <p className="truncate text-[11px] text-slate-400">
+          <p className="truncate text-[11px] text-muted-foreground">
             L&apos;équipe EduFlow répond sous 24 h ouvrées.
           </p>
         </div>
@@ -71,17 +71,17 @@ export function HumanSupportCard({ context, className }: HumanSupportCardProps) 
           <a
             key={phone.telHref}
             href={phone.telHref}
-            className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+            className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs text-slate-300 transition-colors hover:bg-card/5 hover:text-white"
           >
             <PhoneIcon className="size-3.5 shrink-0 text-mint-light" />
             <span className="truncate">{phone.display}</span>
-            <span className="shrink-0 text-[11px] text-slate-500">
+            <span className="shrink-0 text-[11px] text-muted-foreground">
               ({phone.country})
             </span>
           </a>
         ))}
-        <p className="flex items-center gap-2 px-1 py-1 text-[11px] text-slate-500">
-          <ClockIcon className="size-3.5 shrink-0 text-slate-500" />
+        <p className="flex items-center gap-2 px-1 py-1 text-[11px] text-muted-foreground">
+          <ClockIcon className="size-3.5 shrink-0 text-muted-foreground" />
           {SUPPORT_CONTACT.hours}
         </p>
       </div>

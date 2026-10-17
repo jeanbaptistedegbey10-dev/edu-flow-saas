@@ -22,7 +22,7 @@ type KpiCardProps = {
  */
 export function KpiCard({ label, value, icon, iconClasses, badge, hint }: KpiCardProps) {
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+    <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md">
       <div className="flex items-start justify-between gap-3 p-5 pb-3">
         <div className="min-w-0">
           <p className="truncate text-xs font-semibold tracking-wide text-muted-foreground uppercase">

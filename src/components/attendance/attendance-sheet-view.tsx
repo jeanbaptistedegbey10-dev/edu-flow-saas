@@ -72,7 +72,7 @@ function getStatusColor(status: AttendanceStatus): string {
     case "ABSENT": return "bg-red-600 text-white border-red-600";
     case "LATE": return "bg-amber-500 text-white border-amber-500";
     case "EXCUSED": return "bg-sky-600 text-white border-sky-600";
-    default: return "bg-slate-200 text-slate-700 border-slate-300";
+    default: return "bg-slate-200 text-foreground border-border";
   }
 }
 
@@ -378,7 +378,7 @@ export function AttendanceSheetView({ classes }: { classes: TeacherClassDTO[] })
                     return (
                       <button key={s} type="button" onClick={() => handleStatusChange(student.studentId, s)}
                         className={cn("flex flex-col items-center gap-0.5 rounded-lg border px-2 py-2 text-[10px] font-medium transition-all",
-                          isActive ? getStatusColor(s) : "border-slate-200 bg-background text-muted-foreground hover:bg-muted dark:border-slate-700"
+                          isActive ? getStatusColor(s) : "border-border bg-background text-muted-foreground hover:bg-muted"
                         )}>
                         {getAttendanceStatusLabel(s)}
                       </button>

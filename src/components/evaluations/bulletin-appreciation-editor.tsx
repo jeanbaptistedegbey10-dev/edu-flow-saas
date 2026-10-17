@@ -115,7 +115,7 @@ export function BulletinAppreciationEditor({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Label className="text-xs font-bold tracking-wider text-slate-600 uppercase">
+          <Label className="text-xs font-bold tracking-wider text-muted-foreground uppercase">
             {label}
           </Label>
           <span
@@ -123,7 +123,7 @@ export function BulletinAppreciationEditor({
               "rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase",
               isCustom
                 ? "bg-indigo-600 text-white"
-                : "bg-slate-200 text-slate-600"
+                : "bg-slate-200 text-muted-foreground"
             )}
           >
             {isCustom ? "Personnalisée" : "Texte automatique"}
@@ -155,7 +155,7 @@ export function BulletinAppreciationEditor({
       </div>
 
       {!editing ? (
-        <p className="mt-2 text-xs leading-relaxed whitespace-pre-wrap text-slate-700">
+        <p className="mt-2 text-xs leading-relaxed whitespace-pre-wrap text-foreground">
           {value}
         </p>
       ) : (

@@ -111,7 +111,7 @@ function StatCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         <span className="[&_svg]:size-3.5">{icon}</span>
         {label}
@@ -139,7 +139,7 @@ function EvaluationSection({
   ).length;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -448,7 +448,7 @@ export function StudentAcademicTab({
       </div>
 
       {/* Courbe de progression */}
-      <section className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+      <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
         <h3 className="text-sm font-semibold">
           Évolution des notes au fil des examens internes
         </h3>
@@ -530,7 +530,7 @@ export function StudentAcademicTab({
                 title="Aperçu du bulletin de notes"
                 srcDoc={bulletinHtml}
                 onLoad={handlePreviewLoad}
-                className="h-[420px] w-full rounded-md border bg-white"
+                className="h-[420px] w-full rounded-md border bg-card"
               />
             </div>
           </div>
@@ -679,7 +679,7 @@ export function StudentAcademicTab({
                 title="Aperçu de l'attestation interne"
                 srcDoc={attestationHtml}
                 onLoad={handlePreviewLoad}
-                className="h-[420px] w-full rounded-md border bg-white"
+                className="h-[420px] w-full rounded-md border bg-card"
               />
             </div>
           </div>

@@ -106,7 +106,7 @@ export function SettingsView({
       ) : null}
 
       {/* Carte de profil */}
-      <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md">
         <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
           <div className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary">
             {getInitials(profile.firstName, profile.lastName)}
@@ -129,7 +129,7 @@ export function SettingsView({
       </div>
 
       {/* Édition du profil */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         <div className="border-b px-4 py-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <CircleUserRoundIcon className="size-4 text-muted-foreground" />
@@ -228,7 +228,7 @@ export function SettingsView({
       </div>
 
       {/* Préférences de notification */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         <div className="border-b px-4 py-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <BellIcon className="size-4 text-muted-foreground" />
@@ -256,7 +256,7 @@ export function SettingsView({
 
             <label
               htmlFor="emailNotifications"
-              className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200/80 p-3 transition-colors hover:bg-muted/40 dark:border-slate-800"
+              className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-muted/40"
             >
               <input
                 id="emailNotifications"

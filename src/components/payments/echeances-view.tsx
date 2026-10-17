@@ -56,7 +56,7 @@ const BUCKET_META: Record<
   awaiting: {
     label: "En attente d'activation",
     badgeClass:
-      "border border-slate-200/60 bg-slate-50 text-slate-600 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400",
+      "border border-border bg-muted text-muted-foreground dark:text-muted-foreground",
   },
   upcoming: {
     label: "À venir",
@@ -189,7 +189,7 @@ function StatCard({
   tone: "neutral" | "sky" | "red" | "emerald";
 }) {
   const toneClass = {
-    neutral: "text-slate-600 dark:text-slate-300",
+    neutral: "text-muted-foreground",
     sky: "text-sky-600 dark:text-sky-400",
     red: "text-red-600 dark:text-red-400",
     emerald: "text-emerald-600 dark:text-emerald-400",

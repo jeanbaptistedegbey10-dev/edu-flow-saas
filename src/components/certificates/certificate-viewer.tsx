@@ -97,7 +97,7 @@ export function CertificateViewer({ certificate, organization }: CertificateView
   return (
     <div className="space-y-4">
       {/* Aperçu fidèle du certificat (document A4 paysage) */}
-      <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold">
@@ -124,7 +124,7 @@ export function CertificateViewer({ certificate, organization }: CertificateView
             title={`Certificat ${certificate.studentName}`}
             srcDoc={html}
             onLoad={handlePreviewLoad}
-            className="w-full min-h-[560px] rounded-md border bg-white"
+            className="w-full min-h-[560px] rounded-md border bg-card"
           />
         </div>
 
@@ -137,7 +137,7 @@ export function CertificateViewer({ certificate, organization }: CertificateView
       </div>
 
       {/* Récapitulatif des informations du certificat */}
-      <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
         <div className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <p className="text-muted-foreground">Étudiant</p>

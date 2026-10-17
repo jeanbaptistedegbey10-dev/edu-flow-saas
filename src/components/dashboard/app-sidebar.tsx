@@ -143,7 +143,7 @@ const mainMenu: MenuItem[] = [
     url: "/dashboard/archives",
     icon: ArchiveIcon,
     exact: true,
-      iconClass: "text-slate-500 dark:text-slate-400",
+      iconClass: "text-muted-foreground",
   },
   MANUAL_MENU_ITEM,
 ]
@@ -237,7 +237,7 @@ const organizationMenu: MenuItem[] = [
     url: "/dashboard/settings",
     icon: Settings,
     exact: true,
-      iconClass: "text-slate-500 dark:text-slate-400",
+      iconClass: "text-muted-foreground",
   },
   {
     title: "Rôles & Permissions",

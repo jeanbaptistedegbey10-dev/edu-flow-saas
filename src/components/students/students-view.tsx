@@ -198,7 +198,7 @@ export function StudentsView({
       </div>
 
       {/* Carte : barre d'outils + tableau */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
           {/* Recherche instantanée */}
           <div className="relative w-full lg:max-w-xs">

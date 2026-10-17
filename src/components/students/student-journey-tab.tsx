@@ -223,7 +223,7 @@ export function StudentJourneyTab({
         return (
           <section
             key={entry.enrollmentId}
-            className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800"
+            className="rounded-xl border border-border bg-card shadow-sm"
           >
             {/* En-tête de la classe du parcours */}
             <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
@@ -368,7 +368,7 @@ export function StudentJourneyTab({
                 title={preview.title}
                 srcDoc={preview.html}
                 onLoad={handlePreviewLoad}
-                className="h-[420px] w-full rounded-md border bg-white"
+                className="h-[420px] w-full rounded-md border bg-card"
               />
             )}
           </div>

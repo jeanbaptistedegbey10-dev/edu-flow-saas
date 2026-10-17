@@ -110,7 +110,7 @@ export function CalendarView({ events }: { events: CalendarTaskDTO[] }) {
 
       {/* Cartes de synthèse */}
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+        <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md">
           <div className="flex items-start justify-between gap-3 p-5 pb-3">
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -131,7 +131,7 @@ export function CalendarView({ events }: { events: CalendarTaskDTO[] }) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+        <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md">
           <div className="flex items-start justify-between gap-3 p-5 pb-3">
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -152,7 +152,7 @@ export function CalendarView({ events }: { events: CalendarTaskDTO[] }) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+        <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md">
           <div className="flex items-start justify-between gap-3 p-5 pb-3">
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -175,7 +175,7 @@ export function CalendarView({ events }: { events: CalendarTaskDTO[] }) {
       </div>
 
       {/* Agenda par jour */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         {days.length > 0 ? (
           <div className="divide-y">
             {days.map(([dayKey, dayEvents]) => {
@@ -218,7 +218,7 @@ export function CalendarView({ events }: { events: CalendarTaskDTO[] }) {
                       return (
                         <li
                           key={event.id}
-                          className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200/80 bg-white px-3 py-2.5 transition-colors hover:bg-muted/40 dark:border-slate-800 dark:bg-card"
+                          className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/40"
                         >
                           {done ? (
                             <CheckCircle2Icon

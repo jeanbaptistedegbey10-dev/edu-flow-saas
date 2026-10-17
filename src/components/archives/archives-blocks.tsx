@@ -4,7 +4,7 @@ import { formatArchiveAmount } from "@/components/archives/archive-format";
 
 export function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
       <p className="mt-1 text-lg font-bold tabular-nums">{value}</p>
     </div>
@@ -13,7 +13,7 @@ export function StatCard({ label, value }: { label: string; value: string }) {
 
 export function EmptyState({ message }: { message: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-muted-foreground dark:border-slate-700 dark:bg-slate-900/40">
+    <div className="rounded-xl border border-dashed border-border bg-muted p-8 text-center text-sm text-muted-foreground">
       {message}
     </div>
   );
@@ -75,7 +75,7 @@ export function SearchResults({
   return (
     <div className="grid gap-4">
       {results.students.map((s) => (
-        <div key={s.studentId} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div key={s.studentId} className="rounded-xl border border-border bg-card p-4 shadow-sm">
           <p className="font-semibold">
             {s.firstName} {s.lastName}{" "}
             <span className="text-sm font-normal text-muted-foreground">({s.studentCode})</span>
@@ -86,7 +86,7 @@ export function SearchResults({
                 key={e.enrollmentId}
                 type="button"
                 onClick={() => onOpen(e.enrollmentId)}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 text-left text-sm transition-colors hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900/60 dark:hover:bg-slate-900"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
               >
                 <span>
                   {e.className} — {e.courseTitle} · {e.academicYear}

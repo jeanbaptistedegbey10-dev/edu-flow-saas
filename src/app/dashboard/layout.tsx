@@ -112,7 +112,7 @@ export default async function DashboardLayout({
         />
         <header
           data-print-hide="true"
-          className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+          className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"
         >
           <SidebarTrigger className="-ml-1" />
           <Separator

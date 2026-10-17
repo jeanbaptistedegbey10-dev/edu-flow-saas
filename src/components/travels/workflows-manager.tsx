@@ -499,7 +499,7 @@ export function WorkflowsManager({ workflows }: { workflows: WorkflowDTO[] }) {
           {workflows.map((workflow) => (
             <article
               key={workflow.id}
-              className="group flex flex-col rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card"
+              className="group flex flex-col rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md"
             >
               <header className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 flex-col gap-1">
@@ -533,7 +533,7 @@ export function WorkflowsManager({ workflows }: { workflows: WorkflowDTO[] }) {
                   <LayersIcon className="size-3" />
                   {workflow.stages.length} étape{workflow.stages.length > 1 ? "s" : ""}
                 </span>
-                <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 font-medium text-slate-700 tabular-nums dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400">
+                <span className="rounded-full border border-border bg-muted px-2 py-0.5 font-medium text-foreground tabular-nums">
                   Base : {amountFormatter.format(workflow.baseCost)} FCFA
                 </span>
                 {workflow.isDefault ? (

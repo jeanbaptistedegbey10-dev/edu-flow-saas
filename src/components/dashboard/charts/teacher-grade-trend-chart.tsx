@@ -87,10 +87,12 @@ export function TeacherGradeTrendChart({
     <div className="h-[300px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 12, right: 24, bottom: 8, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
           <XAxis
             dataKey="evaluationTitle"
-            tick={{ fontSize: 10 }}
+            tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={{ stroke: "var(--border)" }}
             interval={0}
             angle={-18}
             textAnchor="end"
@@ -98,7 +100,9 @@ export function TeacherGradeTrendChart({
           />
           <YAxis
             domain={[0, 100]}
-            tick={{ fontSize: 11 }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={{ stroke: "var(--border)" }}
             width={38}
             tickFormatter={(value) => `${value}`}
           />
@@ -106,7 +110,7 @@ export function TeacherGradeTrendChart({
             contentStyle={TOOLTIP_CONTENT_STYLE}
             formatter={(value) => `${numberFormatter.format(Number(value))} / 100`}
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted-foreground)" }} />
           {students.map((student, index) => (
             <Line
               key={student.studentId}

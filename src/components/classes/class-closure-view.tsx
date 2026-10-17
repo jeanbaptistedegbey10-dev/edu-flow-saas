@@ -352,7 +352,7 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
         <>
           {/* Réglages de la clôture */}
           <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+            <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <UsersRoundIcon className="size-4" />
                 <span className="text-sm">Effectif à clôturer</span>
@@ -367,7 +367,7 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
             </div>
 
             {/* Classe cible + modes */}
-            <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800 lg:col-span-2">
+            <div className="rounded-xl border border-border bg-card p-4 shadow-sm lg:col-span-2">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label htmlFor="closure-target-class">
@@ -477,7 +477,7 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
           </div>
 
           {/* Gestion financière : frais de réinscription OPTIONNELS */}
-          <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex items-start gap-3">
                 <BookOpenCheckIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -509,7 +509,7 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
           </div>
 
           {/* Liste des étudiants : récapitulatif modules + décisions */}
-          <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+          <div className="rounded-xl border border-border bg-card shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
               <div>
                 <h3 className="flex items-center gap-2 font-semibold">
@@ -687,7 +687,7 @@ export function ClassClosureView({ data }: { data: CloseClassDataDTO }) {
 
 
           {/* Appréciation globale + bouton de clôture */}
-          <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <div className="grid gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="closure-global-note">

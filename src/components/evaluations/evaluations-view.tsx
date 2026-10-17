@@ -216,7 +216,7 @@ export function EvaluationsView({
       ) : (
         <>
           {/* Barre de sélection de classe */}
-          <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-800">
+          <div className="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
             <div className="grid gap-2 lg:col-span-3">
               <Label htmlFor="evaluation-class-select">Classe / Cohorte</Label>
               <Select
@@ -247,7 +247,7 @@ export function EvaluationsView({
           </div>
 
           {/* Liste des sessions d'évaluation */}
-          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
             <div className="border-b px-4 py-3">
               <h3 className="text-sm font-semibold">
                 Sessions d’évaluation

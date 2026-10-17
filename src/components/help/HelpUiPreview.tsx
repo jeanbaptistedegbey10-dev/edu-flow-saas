@@ -309,16 +309,16 @@ function PreviewFrame({
 }) {
   return (
     <div className="overflow-hidden rounded-xl border border-white/10 bg-ink-900 shadow-lg shadow-black/30">
-      <div className="flex items-center gap-1.5 border-b border-white/10 bg-white/5 px-3 py-2">
+      <div className="flex items-center gap-1.5 border-b border-white/10 bg-card/5 px-3 py-2">
         <span className="size-2 rounded-full bg-red-400/80" />
         <span className="size-2 rounded-full bg-amber-400/80" />
         <span className="size-2 rounded-full bg-emerald-400/80" />
-        <span className="ml-1 truncate rounded-md bg-ink-800 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+        <span className="ml-1 truncate rounded-md bg-ink-800 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
           {url}
         </span>
       </div>
       {/* « Écran » clair : reproduit le thème lumineux de l'application réelle. */}
-      <div className="bg-slate-100 p-3 text-slate-900">{children}</div>
+      <div className="bg-muted p-3 text-foreground">{children}</div>
     </div>
   );
 }
@@ -361,27 +361,27 @@ function AttendanceMockup() {
   return (
     <div className="space-y-2">
       {/* Barre de sélection : classe + date */}
-      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
-        <span className="truncate text-[11px] font-semibold text-slate-700">
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-sm">
+        <span className="truncate text-[11px] font-semibold text-foreground">
           Anglais A2 — Groupe Matin
         </span>
-        <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
           04 sept. 2026
         </span>
       </div>
 
       {/* Mini-tableau d'appel (statuts cliquables) */}
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-border bg-muted px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
           <span>Étudiant</span>
           <span>Statut</span>
         </div>
         {ATTENDANCE_STUDENTS.map((student) => (
           <div
             key={student.id}
-            className="grid grid-cols-[1fr_auto] items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 last:border-b-0"
+            className="grid grid-cols-[1fr_auto] items-center gap-2 border-b border-border px-2.5 py-1.5 last:border-b-0"
           >
-            <span className="truncate text-xs font-medium text-slate-700">
+            <span className="truncate text-xs font-medium text-foreground">
               {student.name}
             </span>
             <div className="flex items-center gap-1">
@@ -403,7 +403,7 @@ function AttendanceMockup() {
                       "rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-all",
                       isActive
                         ? cn(status.classes, "scale-105 font-bold shadow-sm")
-                        : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50",
+                        : "border-border bg-card text-muted-foreground hover:bg-muted",
                     )}
                   >
                     {status.label}
@@ -417,11 +417,11 @@ function AttendanceMockup() {
 
       {/* Bouton d'action avec halo rouge → émeraude */}
       <div className="flex items-center justify-between gap-2 pt-0.5">
-        <span className="text-[10px] italic text-slate-400">
+        <span className="text-[10px] italic text-muted-foreground">
           Astuce : les statuts sont cliquables ↑
         </span>
         <span className="relative inline-flex animate-pulse rounded-lg bg-gradient-to-r from-red-500 via-amber-400 to-emerald-500 p-[2px] shadow-[0_0_18px_rgba(16,185,129,0.55)]">
-          <span className="inline-flex items-center gap-1 rounded-[calc(0.625rem-2px)] bg-white px-2.5 py-1.5 text-[11px] font-bold text-emerald-600">
+          <span className="inline-flex items-center gap-1 rounded-[calc(0.625rem-2px)] bg-card px-2.5 py-1.5 text-[11px] font-bold text-emerald-600">
             <SaveIcon className="size-3" />
             Marquer présence
           </span>
@@ -446,31 +446,31 @@ function EnrollmentMockup() {
   const [selected, setSelected] = React.useState<string | null>(null);
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div className="rounded-lg border border-border bg-card shadow-sm">
       {/* Barre de titre du mini-dialogue */}
-      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-        <span className="text-xs font-bold text-slate-800">
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <span className="text-xs font-bold text-foreground">
           Ajouter un étudiant
         </span>
-        <XIcon className="size-3.5 text-slate-300" />
+        <XIcon className="size-3.5 text-muted-foreground" />
       </div>
 
       <div className="space-y-2 p-3">
         {/* Identité */}
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <span className="text-[10px] font-semibold text-slate-500">
+            <span className="text-[10px] font-semibold text-muted-foreground">
               Prénom
             </span>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+            <div className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-foreground">
               Awa
             </div>
           </div>
           <div>
-            <span className="text-[10px] font-semibold text-slate-500">
+            <span className="text-[10px] font-semibold text-muted-foreground">
               Nom
             </span>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+            <div className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-foreground">
               Diop
             </div>
           </div>
@@ -478,7 +478,7 @@ function EnrollmentMockup() {
 
         {/* Liste déroulante « Classe / Cohorte » mise en évidence */}
         <div>
-          <span className="text-[10px] font-semibold text-slate-500">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             Classe / Cohorte
           </span>
           <button
@@ -486,29 +486,29 @@ function EnrollmentMockup() {
             aria-expanded={isOpen}
             onClick={() => setIsOpen((value) => !value)}
             className={cn(
-              "mt-0.5 flex w-full items-center justify-between rounded-md border bg-white px-2 py-1.5 text-xs transition-all",
+              "mt-0.5 flex w-full items-center justify-between rounded-md border bg-card px-2 py-1.5 text-xs transition-all",
               isOpen || selected
                 ? "border-indigo-500 shadow-[0_0_14px_rgba(79,70,229,0.4)] ring-2 ring-indigo-300/60"
-                : "border-slate-300 hover:border-slate-400",
+                : "border-border hover:border-input",
             )}
           >
             <span
               className={cn(
-                selected ? "font-semibold text-indigo-700" : "text-slate-400",
+                selected ? "font-semibold text-indigo-700" : "text-muted-foreground",
               )}
             >
               {selected ?? "Ajouter à une classe…"}
             </span>
             <ChevronDownIcon
               className={cn(
-                "size-3 text-slate-400 transition-transform",
+                "size-3 text-muted-foreground transition-transform",
                 isOpen && "rotate-180",
               )}
             />
           </button>
 
           {isOpen ? (
-            <div className="mt-1 space-y-0.5 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
+            <div className="mt-1 space-y-0.5 rounded-md border border-border bg-card p-1 shadow-lg">
               {CLASS_OPTIONS.map((option) => (
                 <button
                   key={option}
@@ -521,7 +521,7 @@ function EnrollmentMockup() {
                     "flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-indigo-50",
                     selected === option
                       ? "bg-indigo-50 font-semibold text-indigo-700"
-                      : "text-slate-600",
+                      : "text-muted-foreground",
                   )}
                 >
                   {option}
@@ -533,7 +533,7 @@ function EnrollmentMockup() {
             </div>
           ) : null}
 
-          <p className="mt-1 text-[10px] text-slate-400">
+          <p className="mt-1 text-[10px] text-muted-foreground">
             Les frais de scolarité se verrouillent sur la classe choisie.
           </p>
         </div>
@@ -553,14 +553,14 @@ function VisaMockup() {
   const percent = Math.round((activeIndex / VISA_STAGES.length) * 100);
 
   return (
-    <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className="space-y-3 rounded-lg border border-border bg-card p-3 shadow-sm">
       {/* En-tête du dossier */}
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-xs font-bold text-slate-800">
+          <p className="truncate text-xs font-bold text-foreground">
             Procédure France — Visa étudiant
           </p>
-          <p className="truncate text-[10px] text-slate-500">
+          <p className="truncate text-[10px] text-muted-foreground">
             Candidat : Moussa Traoré
           </p>
         </div>
@@ -585,7 +585,7 @@ function VisaMockup() {
                 <span
                   className={cn(
                     "mt-3 h-0.5 flex-1 rounded-full",
-                    isDone ? "bg-emerald-400" : "bg-slate-200",
+                    isDone ? "bg-emerald-400" : "bg-muted-foreground/25",
                   )}
                 />
               ) : null}
@@ -603,7 +603,7 @@ function VisaMockup() {
                       "animate-pulse scale-110 border-indigo-500 bg-indigo-600 text-white shadow-[0_0_14px_rgba(79,70,229,0.6)]",
                     !isDone &&
                       !isActive &&
-                      "border-slate-300 bg-white text-slate-400",
+                      "border-border bg-card text-muted-foreground",
                   )}
                 >
                   {isDone ? <CheckIcon className="size-3" /> : index + 1}
@@ -611,7 +611,7 @@ function VisaMockup() {
                 <span
                   className={cn(
                     "text-center text-[9px] font-medium leading-tight",
-                    isActive ? "text-indigo-700" : "text-slate-500",
+                    isActive ? "text-indigo-700" : "text-muted-foreground",
                   )}
                 >
                   {stage}
@@ -628,14 +628,14 @@ function VisaMockup() {
         aria-valuenow={percent}
         aria-valuemin={0}
         aria-valuemax={100}
-        className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200"
+        className="h-1.5 w-full overflow-hidden rounded-full bg-muted-foreground/25"
       >
         <div
           className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-[width] duration-700 ease-out"
           style={{ width: `${percent}%` }}
         />
       </div>
-      <p className="text-[10px] text-slate-500">
+      <p className="text-[10px] text-muted-foreground">
         Étape active :{" "}
         <span className="font-bold text-indigo-700">
           {VISA_STAGES[activeIndex]}
@@ -690,17 +690,17 @@ function PosMockup() {
                 }))
               }
               className={cn(
-                "rounded-lg border bg-white p-2 text-left shadow-sm transition-all hover:-translate-y-px hover:shadow",
+                "rounded-lg border bg-card p-2 text-left shadow-sm transition-all hover:-translate-y-px hover:shadow",
                 quantity > 0
                   ? "border-emerald-300 ring-1 ring-emerald-300/60"
-                  : "border-slate-200",
+                  : "border-border",
               )}
             >
-              <span className="block truncate text-[10px] font-semibold text-slate-700">
+              <span className="block truncate text-[10px] font-semibold text-foreground">
                 {product.name}
               </span>
               <span className="mt-0.5 flex items-center justify-between">
-                <span className="text-[10px] text-slate-400">
+                <span className="text-[10px] text-muted-foreground">
                   {formatPrice(product.price)}
                 </span>
                 <span className="flex items-center gap-0.5 text-[10px] font-bold text-indigo-600">
@@ -714,13 +714,13 @@ function PosMockup() {
       </div>
 
       {/* Panier */}
-      <div className="flex flex-col rounded-lg border border-slate-200 bg-white p-1.5 shadow-sm">
-        <span className="border-b border-slate-100 pb-1 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+      <div className="flex flex-col rounded-lg border border-border bg-card p-1.5 shadow-sm">
+        <span className="border-b border-border pb-1 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
           Panier ({itemCount})
         </span>
         <div className="flex-1 space-y-0.5 py-1">
           {itemCount === 0 ? (
-            <p className="text-[9px] italic text-slate-400">
+            <p className="text-[9px] italic text-muted-foreground">
               Cliquez un article pour l&apos;ajouter.
             </p>
           ) : (
@@ -728,7 +728,7 @@ function PosMockup() {
               (product) => (
                 <p
                   key={product.id}
-                  className="truncate text-[9px] text-slate-600"
+                  className="truncate text-[9px] text-muted-foreground"
                 >
                   {product.name} ×{cart[product.id]}
                 </p>
@@ -736,7 +736,7 @@ function PosMockup() {
             )
           )}
         </div>
-        <span className="border-t border-slate-100 pt-1 text-[10px] font-bold text-slate-700">
+        <span className="border-t border-border pt-1 text-[10px] font-bold text-foreground">
           Total : {formatPrice(total)}
         </span>
         <span className="mt-1 inline-flex animate-pulse items-center justify-center rounded-md bg-emerald-500 px-1 py-1.5 text-center text-[9px] font-bold text-white shadow-[0_0_14px_rgba(16,185,129,0.6)]">
@@ -768,22 +768,22 @@ function GenericScreenMockup({
   return (
     <div className="space-y-2">
       {/* Barre de titre de l'écran */}
-      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
-        <span className="truncate text-[11px] font-semibold text-slate-700">
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-sm">
+        <span className="truncate text-[11px] font-semibold text-foreground">
           {screen}
         </span>
-        <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
           EduFlow
         </span>
       </div>
 
       {/* Étapes du workflow (première étape active) */}
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         {checklist.map((row, index) => (
           <div
             key={row}
             className={cn(
-              "flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 last:border-b-0",
+              "flex items-center gap-2 border-b border-border px-2.5 py-1.5 last:border-b-0",
               index === 0 && "bg-indigo-50/70",
             )}
           >
@@ -806,7 +806,7 @@ function GenericScreenMockup({
                 "truncate text-xs",
                 index === 0
                   ? "font-semibold text-indigo-700"
-                  : "font-medium text-slate-600",
+                  : "font-medium text-muted-foreground",
               )}
             >
               {row}
@@ -856,7 +856,7 @@ export function HelpUiPreview({
           />
         ) : null}
       </PreviewFrame>
-      <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
+      <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <MousePointerClickIcon className="size-3 shrink-0" />
         Aperçu interactif — cliquez sur les éléments pour essayer.
       </p>

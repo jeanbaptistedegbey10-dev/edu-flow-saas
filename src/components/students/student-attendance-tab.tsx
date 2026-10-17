@@ -153,7 +153,7 @@ function AttendanceStatCard({
   valueClasses?: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         <span className="[&_svg]:size-3.5">{icon}</span>
         {label}
@@ -248,7 +248,7 @@ export function StudentAttendanceTab({
       </div>
 
       {/* Historique détaillé des émargements */}
-      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="border-b px-4 py-3">
           <h3 className="text-sm font-semibold">Historique des émargements</h3>
           <p className="text-xs text-muted-foreground">

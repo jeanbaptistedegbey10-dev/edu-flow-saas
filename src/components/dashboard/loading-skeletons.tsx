@@ -54,7 +54,7 @@ export function KpiCardsSkeleton({
       {Array.from({ length: count }).map((_, index) => (
         <div
           key={index}
-          className="rounded-xl border border-slate-200/80 shadow-sm dark:border-slate-800"
+          className="rounded-xl border border-border shadow-sm"
         >
           <div className="flex items-start justify-between gap-3 p-5 pb-3">
             <div className="grid flex-1 gap-2">
@@ -83,7 +83,7 @@ export function SkeletonTable({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800",
+        "overflow-hidden rounded-xl border border-border bg-card shadow-sm",
         className
       )}
     >
@@ -126,7 +126,7 @@ export function SkeletonCardsGrid({
       {Array.from({ length: count }).map((_, index) => (
         <div
           key={index}
-          className="flex flex-col rounded-xl border border-slate-200/80 shadow-sm dark:border-slate-800"
+          className="flex flex-col rounded-xl border border-border shadow-sm"
         >
           <div className="grid gap-3 p-4">
             <div className="flex items-center justify-between">
@@ -158,7 +158,7 @@ export function SkeletonChart({
   return (
     <div
       className={cn(
-        "rounded-xl border border-slate-200/80 bg-card p-5 shadow-sm dark:border-slate-800",
+        "rounded-xl border border-border bg-card p-5 shadow-sm",
         className
       )}
     >
@@ -200,7 +200,7 @@ export function SkeletonList({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800",
+        "overflow-hidden rounded-xl border border-border bg-card shadow-sm",
         className
       )}
     >
@@ -232,7 +232,7 @@ export function SkeletonCalendar({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800",
+        "rounded-xl border border-border bg-card p-4 shadow-sm",
         className
       )}
     >
@@ -289,7 +289,7 @@ export function SkeletonForm({
   return (
     <div
       className={cn(
-        "rounded-xl border border-slate-200/80 bg-card p-6 shadow-sm dark:border-slate-800",
+        "rounded-xl border border-border bg-card p-6 shadow-sm",
         className
       )}
     >

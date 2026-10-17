@@ -129,7 +129,7 @@ export function ArchiveDetailDialog({
                       key={h.enrollmentId}
                       type="button"
                       onClick={() => onOpen(h.enrollmentId)}
-                      className="rounded-lg border px-3 py-2 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-900"
+                      className="rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted"
                     >
                       {h.className} — {h.courseTitle} · {h.academicYear}
                     </button>

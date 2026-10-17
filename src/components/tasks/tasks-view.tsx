@@ -186,7 +186,7 @@ function TaskCard({
   const overdue = isOverdue(task);
 
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+    <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md">
       <div className="flex items-start justify-between gap-2 p-3 pb-2">
         <p className="text-sm font-medium leading-snug">{task.title}</p>
       </div>
@@ -557,7 +557,7 @@ export function TasksView({
       </div>
 
       {/* Carte : barre d'outils + contenu */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         <div className="flex flex-col gap-3 border-b p-4 xl:flex-row xl:items-center xl:justify-between">
           {/* Recherche instantanée */}
           <div className="relative w-full xl:max-w-xs">

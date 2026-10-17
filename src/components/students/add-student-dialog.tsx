@@ -672,7 +672,7 @@ export function AddStudentDialog({
                 )}
               </div>
             ) : registrationFee > 0 ? (
-              <div className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400">
+              <div className="flex items-start gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
                 <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
                 <span>
                   Frais d&apos;inscription (

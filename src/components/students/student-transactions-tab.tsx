@@ -61,7 +61,7 @@ const TRANSACTION_TYPE_BADGES: Record<
   OTHER: {
     label: "Autre",
     className:
-      "bg-slate-50 text-slate-700 dark:bg-slate-500/10 dark:text-slate-400",
+      "bg-muted text-foreground",
   },
 };
 
@@ -122,7 +122,7 @@ export function StudentTransactionsTab({
   };
 
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+    <div className="rounded-xl border border-border bg-card shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
         <div>
           <h3 className="text-sm font-semibold">

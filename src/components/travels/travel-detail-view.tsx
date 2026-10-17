@@ -236,7 +236,7 @@ function StageTimeline({
                     isCurrent &&
                       "border-indigo-500 bg-indigo-500 text-white ring-4 ring-indigo-500/20",
                     isUpcoming &&
-                      "border-slate-300 bg-slate-100 text-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-500"
+                      "border-border bg-muted text-muted-foreground"
                   )}
                 >
                   {isValidated ? (
@@ -249,7 +249,7 @@ function StageTimeline({
                   <span
                     className={cn(
                       "w-0.5 flex-1 rounded-full",
-                      isValidated ? "bg-emerald-400" : "bg-slate-200 dark:bg-slate-700"
+                      isValidated ? "bg-emerald-400" : "bg-muted-foreground/25"
                     )}
                     style={{ minHeight: "24px" }}
                   />
@@ -316,7 +316,7 @@ function StageTimeline({
                       </span>
                     ) : null}
                     {isUpcoming ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400">
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                         À venir
                       </span>
                     ) : null}
@@ -659,7 +659,7 @@ function InstallmentsPanel({
             id="installment-out-of-system"
             checked={isOutOfSystem}
             onChange={(event) => setIsOutOfSystem(event.target.checked)}
-            className="mt-0.5 size-4 rounded border-gray-300 text-primary focus:ring-primary"
+            className="mt-0.5 size-4 rounded border-input text-primary focus:ring-primary"
           />
           <div className="grid gap-1">
             <Label htmlFor="installment-out-of-system" className="font-medium">

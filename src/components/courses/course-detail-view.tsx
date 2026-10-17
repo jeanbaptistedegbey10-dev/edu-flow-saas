@@ -313,7 +313,7 @@ export function CourseDetailView({ detail }: { detail: CourseDetailDTO }) {
       </div>
 
       {/* En-tête du cours */}
-      <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-5 shadow-sm dark:border-slate-800 dark:from-card dark:to-card">
+      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-xs font-medium tracking-wide">
             {course.code}
@@ -362,7 +362,7 @@ export function CourseDetailView({ detail }: { detail: CourseDetailDTO }) {
         <TabsContent value="cahier">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
             <div className="flex flex-col gap-4">
-              <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+              <div className="rounded-xl border border-border bg-card shadow-sm">
                 <div className="border-b p-4">
                   <h3 className="flex items-center gap-2 font-semibold">
                     <BookOpenIcon className="size-4" />
@@ -413,7 +413,7 @@ export function CourseDetailView({ detail }: { detail: CourseDetailDTO }) {
               </div>
 
               {/* Historique des entrées */}
-              <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+              <div className="rounded-xl border border-border bg-card shadow-sm">
             <div className="border-b p-4">
               <h3 className="font-semibold">Historique des séances</h3>
               <p className="mt-0.5 text-sm text-muted-foreground">
@@ -474,7 +474,7 @@ export function CourseDetailView({ detail }: { detail: CourseDetailDTO }) {
         </div>
 
         {/* Liste des étudiants inscrits */}
-        <aside className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+        <aside className="rounded-xl border border-border bg-card shadow-sm">
           <div className="border-b p-4">
             <h3 className="flex items-center gap-2 font-semibold">
               <UsersRoundIcon className="size-4" />

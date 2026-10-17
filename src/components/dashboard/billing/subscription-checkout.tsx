@@ -439,7 +439,7 @@ export function SubscriptionCheckout({
       {cancelled ? (
         <p
           role="status"
-          className="mt-4 flex items-start gap-2 rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800 dark:border-slate-500/30 dark:bg-slate-500/10 dark:text-slate-200"
+          className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground"
         >
           <XCircleIcon className="mt-0.5 size-4 shrink-0" />
           <span>

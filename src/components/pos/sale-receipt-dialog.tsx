@@ -78,7 +78,7 @@ export function SaleReceiptDialog({
               title={`Facturette ${sale.id}`}
               srcDoc={documentHtml}
               onLoad={handlePreviewLoad}
-              className="h-[380px] w-full rounded-md border bg-white"
+              className="h-[380px] w-full rounded-md border bg-card"
             />
           </div>
         ) : null}

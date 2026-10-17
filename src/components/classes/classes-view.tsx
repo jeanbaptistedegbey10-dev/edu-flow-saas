@@ -67,7 +67,7 @@ function ClassCard({
   return (
     <div
       className={cn(
-        "flex flex-col rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card",
+        "flex flex-col rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md",
         isArchived && "opacity-80"
       )}
     >

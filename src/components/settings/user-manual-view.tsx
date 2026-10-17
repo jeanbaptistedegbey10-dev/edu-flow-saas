@@ -108,7 +108,7 @@ export function UserManualView({
       </p>
 
       {/* Aperçu fidèle (le même document que le PDF) */}
-      <div className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -127,7 +127,7 @@ export function UserManualView({
             title="Manuel d'utilisation EduFlow"
             srcDoc={html}
             onLoad={handlePreviewLoad}
-            className="w-full min-h-[900px] rounded-md border bg-white"
+            className="w-full min-h-[900px] rounded-md border bg-card"
           />
         </div>
       </div>

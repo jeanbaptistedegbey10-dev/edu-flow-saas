@@ -188,7 +188,7 @@ export function OrganizationsView({
       label: "En essai",
       value: stats.trial,
       icon: ClockIcon,
-      tone: "text-slate-600 dark:text-slate-400",
+      tone: "text-muted-foreground",
     },
     {
       label: "Expirations ≤ 7 j",

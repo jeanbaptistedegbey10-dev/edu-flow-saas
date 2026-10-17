@@ -60,7 +60,7 @@ function StatCard({
   value: string | number;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{label}</p>
         <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -147,7 +147,7 @@ function StageStepper({
                   "border-indigo-500 bg-indigo-500 text-white ring-4 ring-indigo-500/20",
                 !isValidated &&
                   !isCurrent &&
-                  "border-slate-300 bg-slate-100 text-transparent dark:border-slate-600 dark:bg-slate-800"
+                  "border-border bg-muted text-transparent"
               )}
             >
               {isValidated ? <CheckIcon className="size-2.5" /> : null}
@@ -158,7 +158,7 @@ function StageStepper({
                   "h-0.5 min-w-1.5 flex-1 rounded-full",
                   index < validated - 1 || (isValidated && total === 1)
                     ? "bg-emerald-400"
-                    : "bg-slate-200 dark:bg-slate-700"
+                    : "bg-muted-foreground/25"
                 )}
               />
             ) : null}
@@ -199,7 +199,7 @@ function DeadlineBadge({ deadline }: { deadline: Date }) {
           "border-amber-200/60 bg-amber-50 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400",
         !isOverdue &&
           !isSoon &&
-          "border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400"
+          "border-border bg-muted text-foreground"
       )}
     >
       <AlarmClockIcon className="size-3" />
@@ -241,7 +241,7 @@ function TravelCard({
   };
 
   return (
-    <article className="flex flex-col rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+    <article className="flex flex-col rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
       <header className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <Link

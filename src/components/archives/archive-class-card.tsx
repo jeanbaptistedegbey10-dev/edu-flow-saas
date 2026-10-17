@@ -23,7 +23,7 @@ export function ArchiveClassCard({
 }) {
   const [expanded, setExpanded] = React.useState(false);
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="font-semibold">
@@ -41,7 +41,7 @@ export function ArchiveClassCard({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-900"
+          className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
           aria-expanded={expanded}
         >
           {expanded ? "Masquer" : "Details"} · {klass.studentCount} etudiants

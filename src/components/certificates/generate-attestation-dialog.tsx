@@ -430,7 +430,7 @@ export function GenerateAttestationDialog({
                       title="Aperçu de l'attestation de formation en cours"
                       srcDoc={previewHtml}
                       onLoad={handlePreviewLoad}
-                      className="h-[420px] w-full rounded-md border bg-white"
+                      className="h-[420px] w-full rounded-md border bg-card"
                     />
                   ) : (
                     <div className="flex h-[420px] items-center justify-center text-sm text-muted-foreground">

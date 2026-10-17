@@ -133,7 +133,7 @@ export function ReportCardDialog({
         {data ? (
           <div
             data-print-shell="true"
-            className="rounded-xl border bg-slate-100/70 p-3 print:border-0 print:bg-white print:p-0"
+            className="rounded-xl border bg-muted/40 p-3 print:border-0 print:bg-white print:p-0"
           >
             <PremiumReportSheet
               data={{ ...data, generalAppreciation: appreciation }}

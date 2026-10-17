@@ -112,7 +112,7 @@ function invoiceStatusInfo(status: string): {
       return {
         label: status,
         className:
-          "inline-flex rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400",
+          "inline-flex rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-foreground",
       };
   }
 }

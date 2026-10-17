@@ -44,7 +44,7 @@ const CATEGORY_BADGE_CLASSES: Record<string, string> = {
 };
 
 const DEFAULT_BADGE_CLASSES =
-  "border border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400";
+  "border border-border bg-muted text-foreground";
 
 const BADGE_BASE_CLASSES =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
@@ -114,7 +114,7 @@ export function ExpensesView({
 
       {/* Cartes de synthèse */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+        <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md">
           <div className="flex items-start justify-between gap-3 p-5 pb-3">
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -136,7 +136,7 @@ export function ExpensesView({
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+        <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md">
           <div className="flex items-start justify-between gap-3 p-5 pb-3">
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -161,7 +161,7 @@ export function ExpensesView({
       </div>
 
       {/* Carte : liste des dépenses */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         <div className="flex flex-col gap-3 border-b p-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="relative w-full xl:max-w-xs">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />

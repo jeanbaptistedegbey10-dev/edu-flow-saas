@@ -159,7 +159,7 @@ export function RoleFormDialog({
                       "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
                       checked
                         ? "border-indigo-300 bg-indigo-50/70 dark:border-indigo-500/40 dark:bg-indigo-500/10"
-                        : "border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-800 dark:bg-card dark:hover:bg-slate-900"
+                        : "border-border bg-card hover:bg-muted"
                     )}
                   >
                     <input

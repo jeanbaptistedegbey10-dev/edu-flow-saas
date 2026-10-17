@@ -149,7 +149,7 @@ export function TeacherDashboardOverview({
 
       {/* Section Mes cours + dernières entrées du cahier de texte */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
+        <div className="overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">Mes cours</h3>
@@ -207,7 +207,7 @@ export function TeacherDashboardOverview({
           )}
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
+        <div className="overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">
@@ -253,7 +253,7 @@ export function TeacherDashboardOverview({
       </div>
 
       {/* Courbe d'évolution des notes par élève / classe */}
-      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
+      <section className="overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold">
@@ -276,7 +276,7 @@ export function TeacherDashboardOverview({
       </section>
 
       {/* Feuille de présence récente */}
-      <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md dark:border-slate-800">
+      <section className="overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:border-primary/40 hover:shadow-md">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold">Feuille de présence</h3>

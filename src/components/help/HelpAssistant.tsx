@@ -423,7 +423,7 @@ export function HelpAssistant() {
               onClick={showHumanSupport}
               aria-label="Parler à un agent humain"
               title="Parler à un humain"
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-card/10 hover:text-white"
             >
               <HeadsetIcon className="size-4.5" />
             </button>
@@ -431,7 +431,7 @@ export function HelpAssistant() {
               type="button"
               onClick={() => setOpen(false)}
               aria-label="Fermer l'assistant"
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-card/10 hover:text-white"
             >
               <XIcon className="size-4.5" />
             </button>
@@ -464,14 +464,14 @@ export function HelpAssistant() {
                     <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-mint shadow">
                       <SparklesIcon className="size-3 text-white" />
                     </span>
-                    <div className="rounded-2xl rounded-tl-md border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm leading-relaxed text-slate-200">
+                    <div className="rounded-2xl rounded-tl-md border border-white/10 bg-card/5 px-3.5 py-2.5 text-sm leading-relaxed text-slate-200">
                       {message.text}
                     </div>
                   </div>
 
                   {/* Origine de la réponse (local / cloud) */}
                   {message.source ? (
-                    <p className="ml-8 flex items-center gap-1 text-[10px] text-slate-500">
+                    <p className="ml-8 flex items-center gap-1 text-[10px] text-muted-foreground">
                       {message.source === "cloud" ? (
                         <>
                           <CloudIcon className="size-3 shrink-0 text-sky-400" />
@@ -527,7 +527,7 @@ export function HelpAssistant() {
                         Aller directement à cette section
                         <ArrowRightIcon className="size-4" />
                       </button>
-                      <p className="mt-1 text-center text-[10px] text-slate-500">
+                      <p className="mt-1 text-center text-[10px] text-muted-foreground">
                         Destination : {message.routeName ?? "section"} ({route})
                       </p>
                     </div>
@@ -541,7 +541,7 @@ export function HelpAssistant() {
                           key={topic.id}
                           type="button"
                           onClick={() => void handleSend(topic.question)}
-                          className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left text-xs font-medium text-slate-200 transition-colors hover:border-brand-light/40 hover:bg-brand/20"
+                          className="flex items-center gap-2 rounded-xl border border-white/10 bg-card/5 px-3 py-2 text-left text-xs font-medium text-slate-200 transition-colors hover:border-brand-light/40 hover:bg-brand/20"
                         >
                           <topic.icon className="size-4 shrink-0 text-mint-light" />
                           {topic.question}
@@ -561,7 +561,7 @@ export function HelpAssistant() {
                 </span>
                 <div
                   aria-label="L'assistant rédige sa réponse"
-                  className="flex items-center gap-1 rounded-2xl rounded-tl-md border border-white/10 bg-white/5 px-3.5 py-3"
+                  className="flex items-center gap-1 rounded-2xl rounded-tl-md border border-white/10 bg-card/5 px-3.5 py-3"
                 >
                   {[0, 150, 300].map((delay) => (
                     <span
@@ -581,7 +581,7 @@ export function HelpAssistant() {
               event.preventDefault();
               void handleSend();
             }}
-            className="flex items-center gap-2 border-t border-white/10 bg-white/5 p-3"
+            className="flex items-center gap-2 border-t border-white/10 bg-card/5 p-3"
           >
             <input
               ref={inputRef}
@@ -589,7 +589,7 @@ export function HelpAssistant() {
               onChange={(event) => setInput(event.target.value)}
               placeholder="Posez votre question…"
               aria-label="Votre question"
-              className="h-10 min-w-0 flex-1 rounded-xl border border-white/10 bg-ink-800/80 px-3.5 text-sm text-slate-100 outline-none transition-colors placeholder:text-slate-500 focus:border-brand-light/60 focus:ring-2 focus:ring-brand/30"
+              className="h-10 min-w-0 flex-1 rounded-xl border border-white/10 bg-ink-800/80 px-3.5 text-sm text-slate-100 outline-none transition-colors placeholder:text-muted-foreground focus:border-brand-light/60 focus:ring-2 focus:ring-brand/30"
             />
             <button
               type="submit"

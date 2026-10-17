@@ -99,7 +99,7 @@ export function CashSessionBanner({
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-muted/40 px-4 py-3 text-sm dark:border-slate-800">
+    <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
           <WalletIcon className="size-4 text-muted-foreground" />

@@ -237,7 +237,7 @@ function BreakdownDonut({
   const total = slices.reduce((sum, slice) => sum + slice.value, 0);
 
   return (
-    <section className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+    <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <h3 className="flex items-center gap-2 text-sm font-semibold">
         <PieChartIcon className="size-4 text-muted-foreground" />
         {title}
@@ -454,7 +454,7 @@ export function TreasuryView({ cashFlow }: { cashFlow: CashFlowDTO }) {
 
 {/* Graphique des flux + répartitions */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm lg:col-span-2 dark:border-slate-800">
+        <section className="rounded-xl border border-border bg-card p-4 shadow-sm lg:col-span-2">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <ActivityIcon className="size-4 text-muted-foreground" />
             Flux de trésorerie
@@ -486,7 +486,7 @@ export function TreasuryView({ cashFlow }: { cashFlow: CashFlowDTO }) {
       </div>
 
       {/* Journal unifié de caisse */}
-      <section className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800">
+      <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-2 text-sm font-semibold">

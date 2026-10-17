@@ -145,7 +145,7 @@ function StatCard({
   value: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{label}</p>
         <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -275,7 +275,7 @@ export function PaymentsView({
       />
 
       {/* Carte : barre d'outils + tableau */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
           {/* Recherche instantanée */}
           <div className="relative w-full lg:max-w-xs">

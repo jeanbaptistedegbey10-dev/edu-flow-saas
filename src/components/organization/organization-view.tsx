@@ -529,7 +529,7 @@ function OrganizationEditForm({ organization }: { organization: OrganizationInfo
           </p>
         </div>
         <div className="space-y-2">
-          <label className="flex items-start gap-2.5 rounded-lg border border-slate-200/80 p-3 cursor-pointer transition-colors hover:bg-muted/40 dark:border-slate-800">
+          <label className="flex items-start gap-2.5 rounded-lg border border-border p-3 cursor-pointer transition-colors hover:bg-muted/40">
             <input
               type="radio"
               name="registrationFeePolicy"
@@ -546,7 +546,7 @@ function OrganizationEditForm({ organization }: { organization: OrganizationInfo
               </span>
             </span>
           </label>
-          <label className="flex items-start gap-2.5 rounded-lg border border-slate-200/80 p-3 cursor-pointer transition-colors hover:bg-muted/40 dark:border-slate-800">
+          <label className="flex items-start gap-2.5 rounded-lg border border-border p-3 cursor-pointer transition-colors hover:bg-muted/40">
             <input
               type="radio"
               name="registrationFeePolicy"
@@ -673,7 +673,7 @@ export function OrganizationView({
       </div>
 
       {/* Carte d'identité de l'organisation */}
-      <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md">
         <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
           <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">
             {organization.logoUrl ? (
@@ -749,7 +749,7 @@ export function OrganizationView({
       </div>
 
       {/* Édition des informations */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         <div className="border-b px-4 py-3">
           <h3 className="text-sm font-semibold">Informations générales</h3>
           <p className="text-xs text-muted-foreground">
@@ -762,7 +762,7 @@ export function OrganizationView({
       </div>
 
       {/* Liste des membres */}
-      <div className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold">Membres de l’équipe</h3>
@@ -794,7 +794,7 @@ export function OrganizationView({
                       <span
                         className={cn(
                           BADGE_BASE_CLASSES,
-                          "border border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400"
+                          "border border-border bg-muted text-foreground dark:text-muted-foreground"
                         )}
                       >
                         Inactif

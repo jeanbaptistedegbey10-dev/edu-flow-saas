@@ -71,29 +71,37 @@ export function RevenueBarChart({ data }: RevenueBarChartProps) {
           data={data}
           margin={{ top: 12, right: 8, bottom: 8, left: 0 }}
         >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <CartesianGrid
+            strokeDasharray="3 3"
+            vertical={false}
+            stroke="var(--border)"
+          />
           <XAxis
             dataKey="label"
-            tick={{ fontSize: 11 }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={{ stroke: "var(--border)" }}
             interval={0}
             angle={-14}
             textAnchor="end"
             height={52}
           />
           <YAxis
-            tick={{ fontSize: 11 }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={{ stroke: "var(--border)" }}
             width={56}
             tickFormatter={(value) => compactAmount(Number(value))}
           />
           <Tooltip
-            cursor={{ fill: "rgba(148, 163, 184, 0.08)" }}
+            cursor={{ fill: "var(--muted)", opacity: 0.35 }}
             contentStyle={TOOLTIP_CONTENT_STYLE}
             formatter={(value) => fullAmount(Number(value))}
           />
           <Legend
             iconType="circle"
             iconSize={9}
-            wrapperStyle={{ fontSize: 12 }}
+            wrapperStyle={{ fontSize: 12, color: "var(--muted-foreground)" }}
           />
           <Bar
             dataKey="scolarite"

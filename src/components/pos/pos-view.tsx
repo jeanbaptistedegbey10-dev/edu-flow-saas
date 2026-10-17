@@ -173,7 +173,7 @@ const CATEGORY_BADGE_STYLES = [
 ];
 
 const UNCATEGORIZED_BADGE =
-  "border-slate-200/60 bg-slate-50 text-slate-700 dark:border-slate-500/20 dark:bg-slate-500/10 dark:text-slate-400";
+  "border-border bg-muted text-foreground dark:text-muted-foreground";
 
 function categoryBadgeStyle(index: number): string {
   return CATEGORY_BADGE_STYLES[index % CATEGORY_BADGE_STYLES.length];
@@ -196,7 +196,7 @@ function StatCard({
   value: string | number;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800 dark:from-card dark:to-card">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{label}</p>
         <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -303,7 +303,7 @@ function SalesHistoryPanel({
   return (
     <section
       aria-label="Historique des ventes"
-      className="rounded-xl border border-slate-200/80 bg-card text-card-foreground shadow-sm transition-all duration-200 dark:border-slate-800"
+      className="rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
         <div>
@@ -929,7 +929,7 @@ export function PosView({
                     key={product.id}
                     type="button"
                     onClick={() => addToCart(product)}
-                    className="group flex flex-col items-start gap-2 rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary dark:border-slate-800 dark:from-card dark:to-card"
+                    className="group flex flex-col items-start gap-2 rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary"
                     aria-label={`Ajouter ${product.name} au panier`}
                   >
                     <div className="flex w-full items-start justify-between gap-2">
@@ -1190,7 +1190,7 @@ export function PosView({
               id="pos-out-of-system"
               checked={isOutOfSystem}
               onChange={(event) => setIsOutOfSystem(event.target.checked)}
-              className="mt-0.5 size-4 rounded border-gray-300 text-primary focus:ring-primary"
+              className="mt-0.5 size-4 rounded border-input text-primary focus:ring-primary"
             />
             <div className="grid flex-1 gap-1">
               <Label htmlFor="pos-out-of-system" className="font-medium">

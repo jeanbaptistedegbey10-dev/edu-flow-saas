@@ -225,7 +225,7 @@ export default async function StudentDetailPage({
       </div>
 
       {/* En-tête : identité de l'étudiant */}
-      <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-5 shadow-sm dark:border-slate-800 dark:from-card dark:to-card">
+      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -303,7 +303,7 @@ export default async function StudentDetailPage({
         {/* Onglet 1 : récapitulatif financier (contenu historique) */}
         <TabsContent value="overview" className="mt-2 flex flex-col gap-4">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start">
-            <section className="rounded-xl border border-slate-200/80 bg-card p-5 shadow-sm dark:border-slate-800">
+            <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
               <h3 className="flex items-center gap-2 font-semibold">
                 <WalletIcon className="size-4" />
                 Récapitulatif financier
@@ -388,7 +388,7 @@ export default async function StudentDetailPage({
             </section>
 
             {/* Historique des règlements */}
-            <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+            <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
               <div className="border-b px-4 py-3">
                 <h3 className="text-sm font-semibold">Historique des règlements</h3>
                 <p className="text-xs text-muted-foreground">

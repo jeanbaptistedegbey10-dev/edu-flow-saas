@@ -76,7 +76,7 @@ export function PaymentReceiptDialog({
               title={`Reçu de paiement ${payment.reference ?? payment.id}`}
               srcDoc={documentHtml}
               onLoad={handlePreviewLoad}
-              className="h-[420px] w-full rounded-md border bg-white"
+              className="h-[420px] w-full rounded-md border bg-card"
             />
           </div>
         ) : null}

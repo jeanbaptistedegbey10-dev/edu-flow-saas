@@ -61,10 +61,16 @@ export function AttendanceLineChart({ data }: AttendanceLineChartProps) {
           data={data}
           margin={{ top: 12, right: 24, bottom: 8, left: 0 }}
         >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <CartesianGrid
+            strokeDasharray="3 3"
+            vertical={false}
+            stroke="var(--border)"
+          />
           <XAxis
             dataKey="label"
-            tick={{ fontSize: 11 }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={{ stroke: "var(--border)" }}
             interval={0}
             angle={-14}
             textAnchor="end"
@@ -72,7 +78,9 @@ export function AttendanceLineChart({ data }: AttendanceLineChartProps) {
           />
           <YAxis
             domain={[0, 100]}
-            tick={{ fontSize: 11 }}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            axisLine={{ stroke: "var(--border)" }}
+            tickLine={{ stroke: "var(--border)" }}
             width={38}
             tickFormatter={(value) => `${value}%`}
           />

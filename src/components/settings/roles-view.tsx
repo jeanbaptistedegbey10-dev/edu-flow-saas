@@ -234,7 +234,7 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
         ].map(({ label, value, icon: Icon }) => (
           <div
             key={label}
-            className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm dark:border-slate-800"
+            className="rounded-xl border border-border bg-card p-4 shadow-sm"
           >
             <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <Icon className="size-4 text-indigo-500" />
@@ -249,7 +249,7 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
 
       {/* Matrice des rôles existants */}
       {roles.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center dark:border-slate-700">
+        <div className="rounded-xl border border-dashed border-border p-8 text-center">
           <ShieldCheckIcon className="mx-auto size-8 text-muted-foreground" />
           <p className="mt-2 text-sm text-muted-foreground">
             Aucun rôle personnalisé pour le moment. Créez-en un (ex :
@@ -261,7 +261,7 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
           {roles.map((role) => (
             <div
               key={role.id}
-              className="rounded-xl border border-slate-200/80 bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md dark:border-slate-800"
+              className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -343,7 +343,7 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
                 )}
               </div>
 
-              <p className="mt-3 border-t pt-2 text-xs text-muted-foreground dark:border-slate-800">
+              <p className="mt-3 border-t pt-2 text-xs text-muted-foreground">
                 {role.userCount} utilisateur{role.userCount > 1 ? "s" : ""}{" "}
                 avec ce rôle
               </p>
@@ -373,7 +373,7 @@ export function RolesView({ overview }: { overview: RolesOverview }) {
       ) : null}
 
       {/* Attribution des rôles personnalisés aux membres de l'équipe */}
-      <div className="rounded-xl border border-slate-200/80 bg-card shadow-sm dark:border-slate-800">
+      <div className="rounded-xl border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div>
             <h3 className="flex items-center gap-2 text-sm font-semibold">

@@ -156,7 +156,7 @@ function AddDocumentForm({
       </div>
       {/* Arborescence Drive générée automatiquement (si apprenant rattaché). */}
       {trimmedOwnerName ? (
-        <div className="grid gap-1.5 rounded-md border border-dashed border-slate-300 bg-muted/40 p-3 dark:border-slate-700">
+        <div className="grid gap-1.5 rounded-md border border-dashed border-border bg-muted/40 p-3">
           <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <FolderTreeIcon className="size-3.5" />
             Arborescence Google Drive générée automatiquement
@@ -190,7 +190,7 @@ function AddDocumentForm({
         </div>
       ) : null}
 
-      <fieldset className="grid gap-2 rounded-md border border-slate-200/80 p-3 dark:border-slate-800">
+      <fieldset className="grid gap-2 rounded-md border border-border p-3">
         <legend className="px-1 text-xs font-medium text-muted-foreground">
           Source du fichier (stockage externe — jamais sur le serveur web)
         </legend>
